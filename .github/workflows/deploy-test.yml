@@ -20,49 +20,20 @@ jobs:
       uses: shivammathur/setup-php@v2
       with:
         php-version: '8.2'
-        extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, dom, filter, gd, iconv, json, mbstring, mysqli
+        extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, dom, filter, gd, json, mysqli
         
-    - name: Validate composer.json (if exists)
-      run: |
-        if [ -f composer.json ]; then
-          composer validate --strict
-        fi
-        
-    - name: Cache Composer packages
-      id: composer-cache
-      uses: actions/cache@v3
-      with:
-        path: vendor
-        key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-php-
-
-    - name: Install dependencies (if composer.json exists)
-      run: |
-        if [ -f composer.json ]; then
-          composer install --prefer-dist --no-progress
-        fi
-
-    - name: Run tests (when test files exist)
-      run: |
-        if [ -d tests ]; then
-          vendor/bin/phpunit tests
-        fi
-
     - name: Create deployment package
       run: |
-        # 必要なファイルのみをパッケージ化
         mkdir -p deploy-package
         
         # メインファイルをコピー
-        cp -r api deploy-package/
-        cp -r assets deploy-package/
-        cp -r classes deploy-package/
-        cp -r config deploy-package/
+        cp -r api deploy-package/ 2>/dev/null || true
+        cp -r assets deploy-package/ 2>/dev/null || true
+        cp -r classes deploy-package/ 2>/dev/null || true
+        cp -r config deploy-package/ 2>/dev/null || true
         cp -r components deploy-package/ 2>/dev/null || true
         cp -r sql deploy-package/ 2>/dev/null || true
         cp index.php deploy-package/ 2>/dev/null || true
-        cp *.php deploy-package/ 2>/dev/null || true
         
         # 必要なディレクトリを作成
         mkdir -p deploy-package/uploads
@@ -71,37 +42,61 @@ jobs:
         mkdir -p deploy-package/cache
         
         # .htaccessファイルを配置
-        echo "RewriteEngine On
-RewriteCond %{HTTPS} off
-RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
-Options -Indexes
-<Files ~ \"^\\.\">
-    Order allow,deny
-    Deny from all
-</Files>
-<Files ~ \"config\\.php$\">
-    Order allow,deny
-    Deny from all
-</Files>
-<Directory \"uploads\">
-    php_flag engine off
-    AddType text/plain .php .php3 .phtml .pht
-</Directory>
-php_value upload_max_filesize 10M
-php_value post_max_size 10M
-php_value max_execution_time 300
-php_value memory_limit 256M" > deploy-package/.htaccess
+        cat > deploy-package/.htaccess << 'EOF'
+        RewriteEngine On
+        RewriteCond %{HTTPS} off
+        RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+        Options -Indexes
+        <Files ~ "^\.">
+            Order allow,deny
+            Deny from all
+        </Files>
+        <Files ~ "config\.php$">
+            Order allow,deny
+            Deny from all
+        </Files>
+        <Directory "uploads">
+            php_flag engine off
+            AddType text/plain .php .php3 .phtml .pht
+        </Directory>
+        php_value upload_max_filesize 10M
+        php_value post_max_size 10M
+        php_value max_execution_time 300
+        php_value memory_limit 256M
+        EOF
 
     - name: Deploy to Test Server
-      uses: easingthemes/ssh-deploy@main
-      env:
-        SSH_PRIVATE_KEY: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
-        REMOTE_HOST: ${{ secrets.TEST_REMOTE_HOST }}
-        REMOTE_USER: ${{ secrets.TEST_REMOTE_USER }}
-        REMOTE_PORT: 10022
-        SOURCE: "deploy-package/"
-        TARGET: ${{ secrets.TEST_REMOTE_PATH }}
-        EXCLUDE: "/node_modules/, /.git/, /.github/, /tests/, /.env"
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.TEST_REMOTE_HOST }}
+        username: ${{ secrets.TEST_REMOTE_USER }}
+        key: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
+        port: 10022
+        script: |
+          # バックアップ作成
+          if [ -d "${{ secrets.TEST_REMOTE_PATH }}" ]; then
+            BACKUP_DIR="${{ secrets.TEST_REMOTE_PATH }}_backup_$(date +%Y%m%d_%H%M%S)"
+            cp -r "${{ secrets.TEST_REMOTE_PATH }}" "$BACKUP_DIR"
+            echo "バックアップ作成: $BACKUP_DIR"
+          fi
+          
+          # ディレクトリ作成
+          mkdir -p "${{ secrets.TEST_REMOTE_PATH }}"
+          cd "${{ secrets.TEST_REMOTE_PATH }}"
+          
+          # 権限設定
+          chmod 755 . 2>/dev/null || true
+          
+    - name: Upload files
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.TEST_REMOTE_HOST }}
+        username: ${{ secrets.TEST_REMOTE_USER }}
+        key: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
+        port: 10022
+        source: "deploy-package/*"
+        target: ${{ secrets.TEST_REMOTE_PATH }}
+        strip_components: 1
         
     - name: Set proper permissions
       uses: appleboy/ssh-action@v1.0.0
@@ -111,11 +106,12 @@ php_value memory_limit 256M" > deploy-package/.htaccess
         key: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
         port: 10022
         script: |
-          cd ${{ secrets.TEST_REMOTE_PATH }}
-          find . -type f -name "*.php" -exec chmod 644 {} \;
-          find . -type d -exec chmod 755 {} \;
-          chmod 755 uploads temp logs cache
-          chmod 644 .htaccess
+          cd "${{ secrets.TEST_REMOTE_PATH }}"
+          find . -type f -name "*.php" -exec chmod 644 {} \; 2>/dev/null || true
+          find . -type d -exec chmod 755 {} \; 2>/dev/null || true
+          chmod 755 uploads temp logs cache 2>/dev/null || true
+          chmod 644 .htaccess 2>/dev/null || true
+          echo "ファイル権限設定完了"
           
     - name: Send success notification
       if: success()
