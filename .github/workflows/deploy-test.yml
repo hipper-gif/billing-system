@@ -1,10 +1,13 @@
 name: Deploy to Test Environment
+
 on:
   push:
     branches:
+      - main
       - develop
   pull_request:
     branches:
+      - main
       - develop
 
 jobs:
