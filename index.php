@@ -1,6 +1,7 @@
 <?php
 // Smiley配食事業 請求書・集金管理システム
 // 環境判定とデバッグ情報表示
+
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
