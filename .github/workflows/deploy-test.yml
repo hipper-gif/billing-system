@@ -1,4 +1,4 @@
-name: Deploy to Test Environment
+name: Deploy to Test Environment (FTP)
 
 on:
   push:
@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - develop
+  workflow_dispatch:  # 手動実行も可能
 
 jobs:
   deploy-test:
@@ -26,25 +27,13 @@ jobs:
         
     - name: Create deployment package
       run: |
-        mkdir -p deploy-package
-        
-        # メインファイルをコピー
-        cp -r api deploy-package/ 2>/dev/null || true
-        cp -r assets deploy-package/ 2>/dev/null || true
-        cp -r classes deploy-package/ 2>/dev/null || true
-        cp -r config deploy-package/ 2>/dev/null || true
-        cp -r components deploy-package/ 2>/dev/null || true
-        cp -r sql deploy-package/ 2>/dev/null || true
-        cp index.php deploy-package/ 2>/dev/null || true
+        echo "📦 デプロイパッケージを作成中..."
         
         # 必要なディレクトリを作成
-        mkdir -p deploy-package/uploads
-        mkdir -p deploy-package/temp
-        mkdir -p deploy-package/logs
-        mkdir -p deploy-package/cache
+        mkdir -p uploads temp logs cache
         
-        # .htaccessファイルを配置
-        cat > deploy-package/.htaccess << 'EOF'
+        # .htaccessファイルを作成
+        cat > .htaccess << 'EOF'
         RewriteEngine On
         RewriteCond %{HTTPS} off
         RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
@@ -66,63 +55,40 @@ jobs:
         php_value max_execution_time 300
         php_value memory_limit 256M
         EOF
-
-    - name: Deploy to Test Server
-      uses: appleboy/ssh-action@v1.0.0
-      with:
-        host: ${{ secrets.TEST_REMOTE_HOST }}
-        username: ${{ secrets.TEST_REMOTE_USER }}
-        key: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
-        port: 10022
-        script: |
-          # バックアップ作成
-          if [ -d "${{ secrets.TEST_REMOTE_PATH }}" ]; then
-            BACKUP_DIR="${{ secrets.TEST_REMOTE_PATH }}_backup_$(date +%Y%m%d_%H%M%S)"
-            cp -r "${{ secrets.TEST_REMOTE_PATH }}" "$BACKUP_DIR"
-            echo "バックアップ作成: $BACKUP_DIR"
-          fi
-          
-          # ディレクトリ作成
-          mkdir -p "${{ secrets.TEST_REMOTE_PATH }}"
-          cd "${{ secrets.TEST_REMOTE_PATH }}"
-          
-          # 権限設定
-          chmod 755 . 2>/dev/null || true
-          
-    - name: Upload files
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.TEST_REMOTE_HOST }}
-        username: ${{ secrets.TEST_REMOTE_USER }}
-        key: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
-        port: 10022
-        source: "deploy-package/*"
-        target: ${{ secrets.TEST_REMOTE_PATH }}
-        strip_components: 1
         
-    - name: Set proper permissions
-      uses: appleboy/ssh-action@v1.0.0
+        echo "✅ デプロイパッケージ作成完了"
+        
+    - name: Deploy to Test Server via FTP
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.5
       with:
-        host: ${{ secrets.TEST_REMOTE_HOST }}
-        username: ${{ secrets.TEST_REMOTE_USER }}
-        key: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
-        port: 10022
-        script: |
-          cd "${{ secrets.TEST_REMOTE_PATH }}"
-          find . -type f -name "*.php" -exec chmod 644 {} \; 2>/dev/null || true
-          find . -type d -exec chmod 755 {} \; 2>/dev/null || true
-          chmod 755 uploads temp logs cache 2>/dev/null || true
-          chmod 644 .htaccess 2>/dev/null || true
-          echo "ファイル権限設定完了"
-          
+        server: ${{ secrets.FTP_SERVER }}
+        username: ${{ secrets.FTP_USERNAME }}
+        password: ${{ secrets.FTP_PASSWORD }}
+        server-dir: ${{ secrets.FTP_SERVER_DIR }}
+        exclude: |
+          **/.git*
+          **/.git*/**
+          **/node_modules/**
+          **/.github/**
+          **/tests/**
+          **/.env
+          **/README.md
+          **/deploy-package/**
+        
+    - name: Verify deployment
+      run: |
+        echo "🌐 テスト環境URL: https://twinklemark.xsrv.jp/Smiley/meal-delivery/billing-system/"
+        echo "✅ FTPデプロイ完了"
+        
     - name: Send success notification
       if: success()
       run: |
-        echo "✅ テスト環境へのデプロイが完了しました"
-        echo "🌐 URL: https://twinklemark.xsrv.jp/Smiley/meal-delivery/billing-system/"
+        echo "🎉 テスト環境へのFTPデプロイが成功しました！"
+        echo "📍 確認URL: https://twinklemark.xsrv.jp/Smiley/meal-delivery/billing-system/"
+        echo "📝 次のステップ: データベース接続確認"
         
     - name: Send failure notification  
       if: failure()
       run: |
-        echo "❌ テスト環境へのデプロイが失敗しました"
-        echo "ログを確認してください"
+        echo "❌ テスト環境へのFTPデプロイが失敗しました"
+        echo "🔍 ログを確認してFTP設定を見直してください"
