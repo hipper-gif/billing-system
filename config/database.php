@@ -10,7 +10,7 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 
 if (strpos($host, 'twinklemark.xsrv.jp') !== false) {
     // テスト環境（エックスサーバー）
-    define('DB_HOST', 'mysql1.xserver.jp'); // 実際のMySQLホストに変更
+    define('DB_HOST', 'localhost'); // 実際のMySQLホストに変更
     define('DB_NAME', 'twinklemark_billing');
     define('DB_USER', 'twinklemark_bill'); // 4文字制限: bill
     define('DB_PASS', 'YOUR_ACTUAL_PASSWORD'); // 実際のパスワードに変更
@@ -20,7 +20,7 @@ if (strpos($host, 'twinklemark.xsrv.jp') !== false) {
     
 } elseif (strpos($host, 'tw1nkle.com') !== false) {
     // 本番環境（エックスサーバー）
-    define('DB_HOST', 'mysql1.xserver.jp'); // 実際のMySQLホストに変更
+    define('DB_HOST', 'localhost'); // 実際のMySQLホストに変更
     define('DB_NAME', 'tw1nkle_billing');
     define('DB_USER', 'tw1nkle_bill'); // 4文字制限: bill
     define('DB_PASS', 'YOUR_PROD_PASSWORD'); // 実際のパスワードに変更
