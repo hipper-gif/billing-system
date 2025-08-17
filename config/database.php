@@ -13,7 +13,7 @@ if (strpos($host, 'twinklemark.xsrv.jp') !== false) {
     define('DB_HOST', 'localhost'); // 実際のMySQLホストに変更
     define('DB_NAME', 'twinklemark_billing');
     define('DB_USER', 'twinklemark_bill'); // 4文字制限: bill
-    define('DB_PASS', 'YOUR_ACTUAL_PASSWORD'); // 実際のパスワードに変更
+    define('DB_PASS', 'Smiley2525'); // 実際のパスワードに変更
     define('ENVIRONMENT', 'test');
     define('BASE_URL', 'https://twinklemark.xsrv.jp/Smiley/meal-delivery/billing-system/');
     define('DEBUG_MODE', true);
@@ -23,7 +23,7 @@ if (strpos($host, 'twinklemark.xsrv.jp') !== false) {
     define('DB_HOST', 'localhost'); // 実際のMySQLホストに変更
     define('DB_NAME', 'tw1nkle_billing');
     define('DB_USER', 'tw1nkle_bill'); // 4文字制限: bill
-    define('DB_PASS', 'YOUR_PROD_PASSWORD'); // 実際のパスワードに変更
+    define('DB_PASS', 'Smiley2525'); // 実際のパスワードに変更
     define('ENVIRONMENT', 'production');
     define('BASE_URL', 'https://tw1nkle.com/Smiley/meal-delivery/billing-system/');
     define('DEBUG_MODE', false);
