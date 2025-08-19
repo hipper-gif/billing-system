@@ -500,6 +500,9 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                 this.resultArea = document.getElementById('resultArea');
                 this.resultContent = document.getElementById('resultContent');
                 
+                // API URL設定（デフォルトはテスト用）
+                this.apiUrl = '../api/simple_test.php';
+                
                 this.initializeEventListeners();
             }
             
@@ -613,7 +616,7 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                 try {
                     console.log('Fetchリクエスト送信...');
                     
-                    const response = await fetch('../api/simple_test.php', {
+                    const response = await fetch(this.apiUrl, {
                         method: 'POST',
                         body: formData
                     });
@@ -677,14 +680,63 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                 this.progressContainer.style.display = 'none';
                 this.resultArea.style.display = 'block';
                 
+                console.log('結果表示:', result);
+                
+                // simple_test.phpとimport.phpの両方に対応
                 if (result.success) {
-                    this.resultContent.innerHTML = this.generateSuccessResult(result);
+                    if (result.stats) {
+                        // 本格的なインポート結果の場合
+                        this.resultContent.innerHTML = this.generateSuccessResult(result);
+                    } else {
+                        // テスト結果の場合
+                        this.resultContent.innerHTML = this.generateTestResult(result);
+                    }
                 } else {
                     this.resultContent.innerHTML = this.generateErrorResult(result);
                 }
                 
                 // 結果エリアにスクロール
                 this.resultArea.scrollIntoView({ behavior: 'smooth' });
+            }
+            
+            generateTestResult(result) {
+                return `
+                    <div class="alert alert-info">
+                        <h4 class="alert-heading">🧪 テスト完了</h4>
+                        <p>${result.message}</p>
+                        <hr>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>リクエスト情報:</h6>
+                                <ul>
+                                    <li>メソッド: ${result.method}</li>
+                                    <li>ファイル数: ${result.files_count}</li>
+                                    <li>POSTデータ数: ${result.post_count}</li>
+                                    <li>タイムスタンプ: ${result.timestamp}</li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>ファイル情報:</h6>
+                                ${result.data && result.data.file_info ? `
+                                    <ul>
+                                        <li>ファイル名: ${result.data.file_info.name}</li>
+                                        <li>サイズ: ${result.data.file_info.size_kb}KB</li>
+                                        <li>タイプ: ${result.data.file_info.type}</li>
+                                    </ul>
+                                ` : '<p>ファイル詳細情報なし</p>'}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="text-center mt-4">
+                        <button class="btn btn-success btn-lg me-3" onclick="switchToRealImport()">
+                            🚀 本格的なインポートに切り替え
+                        </button>
+                        <button class="btn btn-secondary" onclick="location.reload()">
+                            🔄 もう一度テスト
+                        </button>
+                    </div>
+                `;
             }
             
             generateSuccessResult(result) {
@@ -798,6 +850,19 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
             link.href = URL.createObjectURL(blob);
             link.download = 'smiley_csv_template.csv';
             link.click();
+        }
+        
+        
+        // 本格的なインポートに切り替える関数
+        function switchToRealImport() {
+            if (confirm('本格的なCSVインポート処理に切り替えますか？\n\n注意: この操作でデータベースにデータが実際に保存されます。')) {
+                // APIのURLを本格版に変更
+                const uploader = new SmileyCSVUploader();
+                uploader.apiUrl = '../api/import.php';
+                
+                alert('設定を変更しました。再度ファイルをアップロードしてください。');
+                location.reload();
+            }
         }
         
         // 初期化
