@@ -1,4 +1,26 @@
-<?php
+// テンプレートダウンロード機能
+        function downloadTemplate() {
+            const fields = <?= json_encode(array_keys($csvTemplate['fields'])) ?>;
+            const csvContent = fields.join(',') + '\n';
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'smiley_csv_template.csv';
+            link.click();
+        }
+        
+        // テスト用CSVダウンロード機能
+        function downloadTestCSV() {
+            const csvContent = `delivery_date,user_code,user_name,company_code,company_name,department_code,department_name,product_code,product_name,category_code,category_name,quantity,unit_price,total_amount,supplier_code,supplier_name,corporation_code,corporation_name,employee_type_code,employee_type_name,delivery_time,cooperation_code,notes
+2024-03-01,U001,田中太郎,C001,テスト株式会社,D001,営業部,P001,幕の内弁当,CAT001,弁当,1,500,500,S001,テスト給食,CORP001,株式会社Smiley,EMP001,正社員,12:00,COOP001,テスト`;
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'smiley_test_data.csv';
+            link.click();
+        }<?php
 /**
  * Smiley配食事業 CSVインポート画面
  * PC操作不慣れな方向けの直感的なUI
@@ -342,8 +364,11 @@ $csvTemplate = [
                         </div>
                         
                         <div class="mt-3">
-                            <button class="btn btn-outline-info btn-sm w-100" onclick="downloadTemplate()">
+                            <button class="btn btn-outline-info btn-sm w-100 mb-2" onclick="downloadTemplate()">
                                 💾 テンプレートダウンロード
+                            </button>
+                            <button class="btn btn-outline-success btn-sm w-100" onclick="downloadTestCSV()">
+                                🧪 テスト用CSVダウンロード
                             </button>
                         </div>
                     </div>
@@ -542,27 +567,47 @@ $csvTemplate = [
                 // プログレス更新開始
                 this.updateProgress(10, 'ファイルをアップロード中...');
                 
-                const response = await fetch('../api/test_upload.php', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                this.updateProgress(30, 'CSVファイルを解析中...');
-                
-                if (!response.ok) {
-                    throw new Error(`サーバーエラー: ${response.status}`);
+                try {
+                    const response = await fetch('../api/test_upload.php', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    this.updateProgress(30, 'サーバー応答を解析中...');
+                    
+                    console.log('Response status:', response.status);
+                    console.log('Response headers:', response.headers);
+                    
+                    // レスポンステキストを先に取得
+                    const responseText = await response.text();
+                    console.log('Response text:', responseText);
+                    
+                    if (!response.ok) {
+                        throw new Error(`サーバーエラー: ${response.status} - ${responseText}`);
+                    }
+                    
+                    this.updateProgress(50, 'データを処理中...');
+                    
+                    // JSONパース試行
+                    let result;
+                    try {
+                        result = JSON.parse(responseText);
+                    } catch (jsonError) {
+                        console.error('JSON parse error:', jsonError);
+                        throw new Error(`JSON解析エラー: ${jsonError.message}\nサーバー応答: ${responseText.substring(0, 500)}`);
+                    }
+                    
+                    this.updateProgress(100, '完了');
+                    
+                    // 結果表示
+                    setTimeout(() => {
+                        this.showResult(result);
+                    }, 500);
+                    
+                } catch (fetchError) {
+                    console.error('Fetch error:', fetchError);
+                    throw fetchError;
                 }
-                
-                this.updateProgress(50, 'データベースに保存中...');
-                
-                const result = await response.json();
-                
-                this.updateProgress(100, '完了');
-                
-                // 結果表示
-                setTimeout(() => {
-                    this.showResult(result);
-                }, 500);
             }
             
             updateProgress(percent, message) {
