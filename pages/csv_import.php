@@ -1,781 +1,877 @@
 <?php
 /**
- * Smiley配食事業専用CSVインポートクラス
- * 23フィールドCSVファイルの完全対応
- * 法人名「株式会社Smiley」の自動チェック
+ * Smiley配食事業 CSVインポート画面
+ * PC操作不慣れな方向けの直感的なUI
  */
 
 require_once __DIR__ . '/../config/database.php';
 
-class SmileyCSVImporter {
-    private $pdo;
-    private $batchId;
-    private $stats;
-    private $errors;
-    private $fieldMapping = []; // フィールドマッピング保存用
-    private $companyCache = [];
-    private $departmentCache = [];
-    private $userCache = [];
-    private $supplierCache = [];
-    private $productCache = [];
-    
-    // 実際のSmiley配食システムCSVフィールドマッピング
-    private $actualFieldMapping = [
-        'corporation_code' => '法人CD',
-        'corporation_name' => '法人名', 
-        'company_code' => '事業所CD',
-        'company_name' => '事業所名',
-        'supplier_code' => '給食業者CD',
-        'supplier_name' => '給食業者名',
-        'category_code' => '給食区分CD',
-        'category_name' => '給食区分名',
-        'delivery_date' => '配達日',
-        'department_code' => '部門CD',
-        'department_name' => '部門名',
-        'user_code' => '社員CD',
-        'user_name' => '社員名',
-        'employee_type_code' => '雇用形態CD',
-        'employee_type_name' => '雇用形態名',
-        'product_code' => '給食ﾒﾆｭｰCD',
-        'product_name' => '給食ﾒﾆｭｰ名',
-        'quantity' => '数量',
-        'unit_price' => '単価',
-        'total_amount' => '金額',
-        'notes' => '備考',
-        'delivery_time' => '受取時間',
-        'cooperation_code' => '連携CD'
+// セッション開始
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// 最近のインポート履歴取得
+function getRecentImports($pdo, $limit = 5) {
+    try {
+        $stmt = $pdo->prepare("
+            SELECT 
+                batch_id, file_name, total_rows, success_rows, error_rows,
+                new_companies, new_users, import_date, status
+            FROM import_logs 
+            ORDER BY import_date DESC 
+            LIMIT ?
+        ");
+        $stmt->execute([$limit]);
+        return $stmt->fetchAll();
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+// データベース接続
+$recentImports = [];
+try {
+    $db = Database::getInstance();
+    $pdo = $db->getConnection();
+    $recentImports = getRecentImports($pdo);
+} catch (Exception $e) {
+    $error_message = "データベース接続エラー: " . $e->getMessage();
+}
+
+// CSVテンプレート情報
+$csvTemplate = [
+    'fields' => [
+        'delivery_date' => '配達日（例: 2024-03-01）',
+        'user_code' => '利用者コード（例: U001）',
+        'user_name' => '利用者名（例: 田中太郎）',
+        'company_code' => '配達先企業コード（例: C001）',
+        'company_name' => '配達先企業名（例: ◯◯株式会社）',
+        'department_code' => '配達先部署コード（例: D001）',
+        'department_name' => '配達先部署名（例: 営業部）',
+        'product_code' => '商品コード（例: P001）',
+        'product_name' => '商品名（例: 幕の内弁当）',
+        'category_code' => '商品カテゴリコード（例: CAT001）',
+        'category_name' => '商品カテゴリ名（例: 弁当）',
+        'quantity' => '数量（例: 1）',
+        'unit_price' => '単価（例: 500）',
+        'total_amount' => '合計金額（例: 500）',
+        'supplier_code' => '給食業者コード（例: S001）',
+        'supplier_name' => '給食業者名（例: ◯◯給食）',
+        'corporation_code' => '法人コード（例: CORP001）',
+        'corporation_name' => '法人名（株式会社Smiley）',
+        'employee_type_code' => '従業員区分コード（例: EMP001）',
+        'employee_type_name' => '従業員区分名（例: 正社員）',
+        'delivery_time' => '配達時間（例: 12:00）',
+        'cooperation_code' => '協力会社コード（例: COOP001）',
+        'notes' => '備考（例: 特別指示）'
+    ]
+];
+
+// エラーハンドリング強化
+if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fields'])) {
+    $csvTemplate = [
+        'fields' => [
+            'delivery_date' => '配達日',
+            'user_code' => '利用者コード', 
+            'user_name' => '利用者名',
+            'company_code' => '配達先企業コード',
+            'company_name' => '配達先企業名',
+            'department_code' => '配達先部署コード',
+            'department_name' => '配達先部署名',
+            'product_code' => '商品コード',
+            'product_name' => '商品名',
+            'category_code' => '商品カテゴリコード',
+            'category_name' => '商品カテゴリ名',
+            'quantity' => '数量',
+            'unit_price' => '単価',
+            'total_amount' => '合計金額',
+            'supplier_code' => '給食業者コード',
+            'supplier_name' => '給食業者名',
+            'corporation_code' => '法人コード',
+            'corporation_name' => '法人名',
+            'employee_type_code' => '従業員区分コード',
+            'employee_type_name' => '従業員区分名',
+            'delivery_time' => '配達時間',
+            'cooperation_code' => '協力会社コード',
+            'notes' => '備考'
+        ]
     ];
+}
+?>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 CSVデータ取り込み - Smiley配食システム</title>
     
-    public function __construct() {
-        try {
-            $db = Database::getInstance();
-            $this->pdo = $db->getConnection();
-            $this->batchId = 'SMILEY_' . date('YmdHis') . '_' . uniqid();
-            $this->initializeStats();
-        } catch (Exception $e) {
-            throw new Exception('データベース接続エラー: ' . $e->getMessage());
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- カスタムCSS -->
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+            background-color: #f8f9fa;
+            font-size: 16px;
         }
-    }
-    
-    /**
-     * 統計情報初期化
-     */
-    private function initializeStats() {
-        $this->stats = [
-            'total_rows' => 0,
-            'processed_rows' => 0,
-            'success_rows' => 0,
-            'error_rows' => 0,
-            'new_companies' => 0,
-            'new_departments' => 0,
-            'new_users' => 0,
-            'new_suppliers' => 0,
-            'new_products' => 0,
-            'duplicate_orders' => 0,
-            'start_time' => microtime(true)
-        ];
-        $this->errors = [];
-    }
-    
-    /**
-     * CSVファイルインポート実行
-     */
-    public function importCSV($filePath, $options = []) {
-        try {
-            // ファイル存在チェック
-            if (!file_exists($filePath)) {
-                throw new Exception('CSVファイルが見つかりません: ' . $filePath);
+        
+        .upload-area {
+            border: 3px dashed #007bff;
+            border-radius: 15px;
+            padding: 60px 20px;
+            text-align: center;
+            background: linear-gradient(135deg, #f8f9ff 0%, #e3f2fd 100%);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            margin-bottom: 30px;
+        }
+        
+        .upload-area:hover {
+            border-color: #0056b3;
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            transform: translateY(-2px);
+        }
+        
+        .upload-area.dragover {
+            border-color: #28a745;
+            background: linear-gradient(135deg, #f0fff4 0%, #c8f7c5 100%);
+        }
+        
+        .upload-icon {
+            font-size: 4rem;
+            color: #007bff;
+            margin-bottom: 20px;
+            display: block;
+        }
+        
+        .upload-text {
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .upload-subtext {
+            color: #6c757d;
+            font-size: 1rem;
+        }
+        
+        .file-input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            overflow: hidden;
+        }
+        
+        .progress-container {
+            display: none;
+            margin-top: 20px;
+        }
+        
+        .step-card {
+            border-radius: 15px;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+        }
+        
+        .step-number {
+            background: #007bff;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+        }
+        
+        .template-table {
+            font-size: 0.9rem;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+        
+        .status-success { background: #d4edda; color: #155724; }
+        .status-partial { background: #fff3cd; color: #856404; }
+        .status-error { background: #f8d7da; color: #721c24; }
+        
+        .btn-large {
+            min-height: 60px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border-radius: 10px;
+        }
+        
+        @media (max-width: 768px) {
+            .upload-area {
+                padding: 40px 15px;
             }
             
-            // ファイルサイズチェック
-            $fileSize = filesize($filePath);
-            if ($fileSize > (defined('UPLOAD_MAX_SIZE') ? UPLOAD_MAX_SIZE : 10 * 1024 * 1024)) {
-                throw new Exception('ファイルサイズが大きすぎます: ' . round($fileSize / 1024 / 1024, 2) . 'MB');
+            .upload-icon {
+                font-size: 3rem;
             }
             
-            // CSVファイル読み込み
-            $csvData = $this->readCSV($filePath, $options);
-            
-            // ヘッダー検証
-            $this->validateHeaders($csvData['headers']);
-            
-            // インポート実行
-            $this->processCSVData($csvData['data']);
-            
-            // インポートログ記録
-            $this->logImportResult();
-            
-            return $this->getImportSummary();
-            
-        } catch (Exception $e) {
-            $this->logError('インポート失敗', $e->getMessage());
-            throw $e;
-        }
-    }
-    
-    /**
-     * CSVファイル読み込み
-     */
-    private function readCSV($filePath, $options = []) {
-        $encoding = $options['encoding'] ?? 'UTF-8';
-        $delimiter = $options['delimiter'] ?? ',';
-        $hasHeader = $options['has_header'] ?? true;
-        
-        // ファイル内容読み込み
-        $content = file_get_contents($filePath);
-        
-        // 文字コード変換（必要に応じて）
-        if ($encoding !== 'UTF-8') {
-            $content = mb_convert_encoding($content, 'UTF-8', $encoding);
-        }
-        
-        // CSV解析
-        $lines = str_getcsv($content, "\n");
-        $data = [];
-        $headers = [];
-        
-        foreach ($lines as $index => $line) {
-            if (empty(trim($line))) continue;
-            
-            $row = str_getcsv($line, $delimiter);
-            
-            if ($index === 0 && $hasHeader) {
-                $headers = array_map('trim', $row);
-                continue;
-            }
-            
-            $data[] = $row;
-        }
-        
-        $this->stats['total_rows'] = count($data);
-        
-        return [
-            'headers' => $headers,
-            'data' => $data
-        ];
-    }
-    
-    /**
-     * ヘッダー検証（実際のSmiley配食システム形式対応）
-     */
-    private function validateHeaders($headers) {
-        // 実際のヘッダー数チェック（23フィールド期待）
-        if (count($headers) !== 23) {
-            throw new Exception('CSVフィールド数が正しくありません。期待値: 23、実際: ' . count($headers) . 
-                              '\nヘッダー: ' . implode(', ', $headers));
-        }
-        
-        // ヘッダーの正規化とマッピング作成
-        $this->fieldMapping = [];
-        
-        foreach ($headers as $index => $header) {
-            $cleanHeader = trim($header);
-            
-            // 実際のフィールドマッピングと照合
-            $mappedField = array_search($cleanHeader, $this->actualFieldMapping);
-            if ($mappedField !== false) {
-                $this->fieldMapping[$mappedField] = $index;
+            .upload-text {
+                font-size: 1.1rem;
             }
         }
-        
-        // 必須フィールドチェック
-        $requiredFields = ['corporation_name', 'company_name', 'delivery_date', 'user_code', 'user_name', 'product_code'];
-        $missingFields = [];
-        
-        foreach ($requiredFields as $required) {
-            if (!isset($this->fieldMapping[$required])) {
-                $missingFields[] = $required . ' (期待ヘッダー: ' . $this->actualFieldMapping[$required] . ')';
-            }
-        }
-        
-        if (!empty($missingFields)) {
-            throw new Exception('必須フィールドが見つかりません: ' . implode(', ', $missingFields) . 
-                              '\n実際のヘッダー: ' . implode(', ', $headers));
-        }
-        
-        // 法人名「Smiley」チェック用にヘッダー位置を記録
-        if (isset($this->fieldMapping['corporation_name'])) {
-            error_log("Corporation name field found at index: " . $this->fieldMapping['corporation_name']);
-        }
-        
-        return true;
-    }
-    
-    /**
-     * CSVデータ処理
-     */
-    private function processCSVData($data) {
-        $this->pdo->beginTransaction();
-        
-        try {
-            foreach ($data as $rowIndex => $row) {
-                $this->stats['processed_rows']++;
+    </style>
+</head>
+<body>
+    <div class="container-fluid px-4 py-3">
+        <!-- ヘッダー -->
+        <header class="mb-4">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1 class="text-primary fw-bold">📊 CSVデータ取り込み</h1>
+                    <p class="text-muted">Smiley配食事業の注文データをシステムに取り込みます</p>
+                </div>
+                <div class="col-md-4 text-md-end">
+                    <a href="../index.php" class="btn btn-outline-secondary">
+                        ← メイン画面に戻る
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <?php if (isset($error_message)): ?>
+        <!-- エラー表示 -->
+        <div class="alert alert-danger" role="alert">
+            <h4 class="alert-heading">⚠️ システムエラー</h4>
+            <p><?= htmlspecialchars($error_message) ?></p>
+        </div>
+        <?php endif; ?>
+
+        <div class="row">
+            <!-- メインコンテンツ -->
+            <div class="col-lg-8">
+                <!-- アップロードエリア -->
+                <div class="card step-card">
+                    <div class="card-header bg-primary text-white">
+                        <div class="d-flex align-items-center">
+                            <div class="step-number bg-white text-primary">1</div>
+                            <h5 class="mb-0">CSVファイルをアップロード</h5>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="upload-area" id="uploadArea">
+                            <div class="upload-icon">📁</div>
+                            <div class="upload-text">ここにCSVファイルをドラッグ&ドロップ</div>
+                            <div class="upload-subtext">または クリックしてファイルを選択</div>
+                            <input type="file" id="csvFile" class="file-input" accept=".csv" />
+                        </div>
+                        
+                        <!-- ファイル情報表示 -->
+                        <div id="fileInfo" style="display: none;">
+                            <div class="alert alert-info">
+                                <h6>選択されたファイル:</h6>
+                                <div id="fileName"></div>
+                                <div id="fileSize"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- 処理オプション -->
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <label class="form-label">文字コード</label>
+                                <select class="form-select" id="encoding">
+                                    <option value="UTF-8">UTF-8</option>
+                                    <option value="Shift_JIS">Shift_JIS (Excel標準)</option>
+                                    <option value="EUC-JP">EUC-JP</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">区切り文字</label>
+                                <select class="form-select" id="delimiter">
+                                    <option value=",">カンマ (,)</option>
+                                    <option value="\t">タブ</option>
+                                    <option value=";">セミコロン (;)</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- アップロードボタン -->
+                        <div class="text-center mt-4">
+                            <button id="uploadBtn" class="btn btn-primary btn-large px-5" disabled>
+                                🚀 インポート開始
+                            </button>
+                        </div>
+                        
+                        <!-- プログレスバー -->
+                        <div class="progress-container">
+                            <div class="progress mb-3" style="height: 25px;">
+                                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div id="progressText" class="text-center text-muted"></div>
+                        </div>
+                    </div>
+                </div>
                 
-                try {
-                    // データ正規化
-                    $normalizedData = $this->normalizeRowData($row, $rowIndex + 1);
-                    
-                    // Smiley法人チェック
-                    $this->validateSmileyData($normalizedData);
-                    
-                    // 関連マスターデータ処理
-                    $this->processRelatedData($normalizedData);
-                    
-                    // 注文データ挿入
-                    $this->insertOrderData($normalizedData);
-                    
-                    $this->stats['success_rows']++;
-                    
-                } catch (Exception $e) {
-                    $this->stats['error_rows']++;
-                    $this->logError("行 " . ($rowIndex + 1), $e->getMessage(), $row);
-                    
-                    // エラーが多すぎる場合は中断
-                    if ($this->stats['error_rows'] > 100) {
-                        throw new Exception('エラーが多すぎます。処理を中断します。');
-                    }
+                <!-- 結果表示エリア -->
+                <div id="resultArea" style="display: none;">
+                    <div class="card step-card">
+                        <div class="card-header">
+                            <h5 class="mb-0">📈 インポート結果</h5>
+                        </div>
+                        <div class="card-body" id="resultContent">
+                            <!-- 結果がここに表示されます -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- サイドバー -->
+            <div class="col-lg-4">
+                <!-- CSVテンプレート情報 -->
+                <div class="card step-card">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">📋 CSVフォーマット</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">
+                            <strong>23フィールド</strong>のCSVファイルが必要です。<br>
+                            必ずヘッダー行を含めてください。
+                        </p>
+                        
+                        <div class="accordion" id="templateAccordion">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button collapsed" type="button" 
+                                            data-bs-toggle="collapse" data-bs-target="#templateFields">
+                                        📝 必要フィールド一覧
+                                    </button>
+                                </h2>
+                                <div id="templateFields" class="accordion-collapse collapse" 
+                                     data-bs-parent="#templateAccordion">
+                                    <div class="accordion-body">
+                                        <div class="template-table">
+                                            <?php foreach ($csvTemplate['fields'] as $field => $description): ?>
+                                            <div class="row mb-2">
+                                                <div class="col-12">
+                                                    <small class="text-primary fw-bold"><?= htmlspecialchars($field) ?></small><br>
+                                                    <small class="text-muted"><?= htmlspecialchars($description) ?></small>
+                                                </div>
+                                            </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <p class="text-muted small">23フィールドのCSVファイルをアップロードしてください</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 重要な注意事項 -->
+                <div class="card step-card">
+                    <div class="card-header bg-warning text-dark">
+                        <h5 class="mb-0">⚠️ 重要な注意事項</h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            <li class="mb-2">
+                                <span class="text-danger fw-bold">🏢 法人名確認</span><br>
+                                <small>「株式会社Smiley」以外のデータはエラーになります</small>
+                            </li>
+                            <li class="mb-2">
+                                <span class="text-warning fw-bold">📅 日付フォーマット</span><br>
+                                <small>YYYY-MM-DD形式（例: 2024-03-01）を推奨</small>
+                            </li>
+                            <li class="mb-2">
+                                <span class="text-info fw-bold">🔄 重複チェック</span><br>
+                                <small>同じ利用者・日付・商品の組み合わせは自動スキップ</small>
+                            </li>
+                            <li class="mb-0">
+                                <span class="text-success fw-bold">💾 バックアップ</span><br>
+                                <small>元ファイルは必ず保管してください</small>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- 最近のインポート履歴 -->
+                <?php if (!empty($recentImports)): ?>
+                <div class="card step-card">
+                    <div class="card-header">
+                        <h5 class="mb-0">🕒 最近のインポート履歴</h5>
+                    </div>
+                    <div class="card-body">
+                        <?php foreach ($recentImports as $import): ?>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div>
+                                <small class="fw-bold"><?= date('m/d H:i', strtotime($import['import_date'])) ?></small><br>
+                                <small class="text-muted">
+                                    <?= $import['success_rows'] ?>件成功
+                                    <?php if ($import['error_rows'] > 0): ?>
+                                    / <?= $import['error_rows'] ?>件エラー
+                                    <?php endif; ?>
+                                </small>
+                            </div>
+                            <div>
+                                <?php
+                                $statusClass = 'status-success';
+                                $statusText = '成功';
+                                if ($import['status'] === 'partial_success') {
+                                    $statusClass = 'status-partial';
+                                    $statusText = '一部成功';
+                                } elseif ($import['error_rows'] > 0) {
+                                    $statusClass = 'status-error';
+                                    $statusText = 'エラー';
+                                }
+                                ?>
+                                <span class="status-badge <?= $statusClass ?>"><?= $statusText ?></span>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                        
+                        <div class="text-center mt-3">
+                            <a href="import_history.php" class="btn btn-outline-secondary btn-sm">
+                                📊 詳細履歴を見る
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- CSVインポート専用JavaScript -->
+    <script>
+        class SmileyCSVUploader {
+            constructor() {
+                this.uploadArea = document.getElementById('uploadArea');
+                this.fileInput = document.getElementById('csvFile');
+                this.uploadBtn = document.getElementById('uploadBtn');
+                this.progressContainer = document.querySelector('.progress-container');
+                this.progressBar = document.getElementById('progressBar');
+                this.progressText = document.getElementById('progressText');
+                this.resultArea = document.getElementById('resultArea');
+                this.resultContent = document.getElementById('resultContent');
+                
+                // API URL設定（本格版に戻す）
+                this.apiUrl = '../api/import.php';
+                
+                this.initializeEventListeners();
+            }
+            
+            initializeEventListeners() {
+                // ドラッグ&ドロップ
+                this.uploadArea.addEventListener('click', () => this.fileInput.click());
+                this.uploadArea.addEventListener('dragover', this.handleDragOver.bind(this));
+                this.uploadArea.addEventListener('dragleave', this.handleDragLeave.bind(this));
+                this.uploadArea.addEventListener('drop', this.handleDrop.bind(this));
+                
+                // ファイル選択
+                this.fileInput.addEventListener('change', this.handleFileSelect.bind(this));
+                
+                // アップロードボタン
+                this.uploadBtn.addEventListener('click', this.startUpload.bind(this));
+            }
+            
+            handleDragOver(e) {
+                e.preventDefault();
+                this.uploadArea.classList.add('dragover');
+            }
+            
+            handleDragLeave(e) {
+                e.preventDefault();
+                this.uploadArea.classList.remove('dragover');
+            }
+            
+            handleDrop(e) {
+                e.preventDefault();
+                this.uploadArea.classList.remove('dragover');
+                
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    this.handleFile(files[0]);
                 }
             }
             
-            $this->pdo->commit();
+            handleFileSelect(e) {
+                if (e.target.files.length > 0) {
+                    this.handleFile(e.target.files[0]);
+                }
+            }
             
-        } catch (Exception $e) {
-            $this->pdo->rollback();
-            throw $e;
-        }
-    }
-    
-    /**
-     * 行データ正規化（実際のSmiley配食システム形式対応）
-     */
-    private function normalizeRowData($row, $rowNumber) {
-        if (count($row) !== 23) {
-            throw new Exception("フィールド数が正しくありません（期待値: 23、実際: " . count($row) . "）");
-        }
-        
-        // フィールドマッピングを使用してデータを正規化
-        $data = [];
-        
-        foreach ($this->actualFieldMapping as $internalKey => $csvHeader) {
-            if (isset($this->fieldMapping[$internalKey])) {
-                $index = $this->fieldMapping[$internalKey];
-                $data[$internalKey] = isset($row[$index]) ? trim($row[$index]) : '';
-            } else {
-                $data[$internalKey] = '';
+            handleFile(file) {
+                // ファイル形式チェック
+                if (!file.name.toLowerCase().endsWith('.csv')) {
+                    alert('CSVファイルを選択してください。');
+                    return;
+                }
+                
+                // ファイルサイズチェック (10MB制限)
+                if (file.size > 10 * 1024 * 1024) {
+                    alert('ファイルサイズが大きすぎます（10MB以下にしてください）。');
+                    return;
+                }
+                
+                // ファイル情報表示
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('fileSize').textContent = 
+                    `ファイルサイズ: ${(file.size / 1024).toFixed(1)} KB`;
+                document.getElementById('fileInfo').style.display = 'block';
+                
+                // アップロードボタン有効化
+                this.uploadBtn.disabled = false;
+                this.selectedFile = file;
+                
+                // アップロードエリアの表示変更
+                this.uploadArea.querySelector('.upload-text').textContent = '✅ ファイルが選択されました';
+                this.uploadArea.querySelector('.upload-subtext').textContent = 
+                    '別のファイルを選択する場合はクリックしてください';
+            }
+            
+            async startUpload() {
+                if (!this.selectedFile) {
+                    alert('ファイルを選択してください。');
+                    return;
+                }
+                
+                // UI状態変更
+                this.uploadBtn.disabled = true;
+                this.uploadBtn.innerHTML = '⏳ 処理中...';
+                this.progressContainer.style.display = 'block';
+                this.resultArea.style.display = 'none';
+                
+                try {
+                    await this.uploadFile();
+                } catch (error) {
+                    this.showError('アップロードに失敗しました: ' + error.message);
+                } finally {
+                    this.uploadBtn.disabled = false;
+                    this.uploadBtn.innerHTML = '🚀 インポート開始';
+                }
+            }
+            
+            async uploadFile() {
+                const formData = new FormData();
+                formData.append('csv_file', this.selectedFile);
+                formData.append('encoding', document.getElementById('encoding').value);
+                formData.append('delimiter', document.getElementById('delimiter').value);
+                
+                // プログレス更新開始
+                this.updateProgress(10, 'ファイルをアップロード中...');
+                
+                console.log('=== アップロード開始 ===');
+                console.log('選択ファイル:', this.selectedFile);
+                console.log('FormData内容確認...');
+                for (let pair of formData.entries()) {
+                    console.log(pair[0], pair[1]);
+                }
+                
+                try {
+                    console.log('Fetchリクエスト送信...');
+                    
+                    const response = await fetch(this.apiUrl, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    console.log('レスポンス受信:', response);
+                    console.log('Status:', response.status);
+                    console.log('StatusText:', response.statusText);
+                    console.log('Headers:', [...response.headers.entries()]);
+                    
+                    this.updateProgress(30, 'サーバー応答を解析中...');
+                    
+                    // レスポンステキストを取得
+                    const responseText = await response.text();
+                    console.log('レスポンステキスト長:', responseText.length);
+                    console.log('レスポンステキスト:', responseText);
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTPエラー: ${response.status} ${response.statusText}\nレスポンス: ${responseText}`);
+                    }
+                    
+                    if (!responseText) {
+                        throw new Error('サーバーから空のレスポンスが返されました');
+                    }
+                    
+                    this.updateProgress(50, 'データを処理中...');
+                    
+                    // JSONパース試行
+                    let result;
+                    try {
+                        result = JSON.parse(responseText);
+                        console.log('JSON解析成功:', result);
+                    } catch (jsonError) {
+                        console.error('JSON解析エラー:', jsonError);
+                        console.error('解析対象テキスト:', responseText);
+                        throw new Error(`JSON解析エラー: ${jsonError.message}\nレスポンス内容: "${responseText}"`);
+                    }
+                    
+                    this.updateProgress(100, '完了');
+                    
+                    // 結果表示
+                    setTimeout(() => {
+                        this.showResult(result);
+                    }, 500);
+                    
+                } catch (fetchError) {
+                    console.error('=== アップロードエラー ===');
+                    console.error('エラータイプ:', fetchError.constructor.name);
+                    console.error('エラーメッセージ:', fetchError.message);
+                    console.error('エラーオブジェクト:', fetchError);
+                    throw fetchError;
+                }
+            }
+            
+            updateProgress(percent, message) {
+                this.progressBar.style.width = `${percent}%`;
+                this.progressBar.textContent = `${percent}%`;
+                this.progressText.textContent = message;
+            }
+            
+            showResult(result) {
+                this.progressContainer.style.display = 'none';
+                this.resultArea.style.display = 'block';
+                
+                console.log('結果表示:', result);
+                console.log('result.stats存在チェック:', !!result.stats);
+                console.log('result.data存在チェック:', !!result.data);
+                
+                // simple_test.phpとimport.phpの両方に対応
+                if (result.success) {
+                    if (result.stats && result.stats.success_rows !== undefined) {
+                        // 本格的なインポート結果の場合（statsオブジェクトがある）
+                        console.log('本格的なインポート結果として処理');
+                        this.resultContent.innerHTML = this.generateSuccessResult(result);
+                    } else {
+                        // テスト結果の場合
+                        console.log('テスト結果として処理');
+                        this.resultContent.innerHTML = this.generateTestResult(result);
+                    }
+                } else {
+                    console.log('エラー結果として処理');
+                    this.resultContent.innerHTML = this.generateErrorResult(result);
+                }
+                
+                // 結果エリアにスクロール
+                this.resultArea.scrollIntoView({ behavior: 'smooth' });
+            }
+            
+            generateTestResult(result) {
+                console.log('generateTestResult呼び出し:', result);
+                
+                return `
+                    <div class="alert alert-info">
+                        <h4 class="alert-heading">🧪 テスト完了</h4>
+                        <p>${result.message || 'テスト処理が完了しました'}</p>
+                        <hr>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>リクエスト情報:</h6>
+                                <ul>
+                                    <li>メソッド: ${result.method || 'N/A'}</li>
+                                    <li>ファイル数: ${result.files_count || 0}</li>
+                                    <li>POSTデータ数: ${result.post_count || 0}</li>
+                                    <li>タイムスタンプ: ${result.timestamp || 'N/A'}</li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>ファイル情報:</h6>
+                                ${result.data && result.data.file_info ? `
+                                    <ul>
+                                        <li>ファイル名: ${result.data.file_info.name}</li>
+                                        <li>サイズ: ${result.data.file_info.size_kb}KB</li>
+                                        <li>タイプ: ${result.data.file_info.type}</li>
+                                    </ul>
+                                ` : `
+                                    <p>ファイルアップロード確認済み</p>
+                                    <small class="text-muted">詳細情報はAPIで処理されていません</small>
+                                `}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="text-center mt-4">
+                        <button class="btn btn-success btn-lg me-3" onclick="switchToRealImport()">
+                            🚀 本格的なインポートに切り替え
+                        </button>
+                        <button class="btn btn-secondary" onclick="location.reload()">
+                            🔄 もう一度テスト
+                        </button>
+                    </div>
+                `;
+            }
+            
+            generateSuccessResult(result) {
+                const stats = result.stats;
+                return `
+                    <div class="alert alert-success">
+                        <h4 class="alert-heading">✅ インポート完了</h4>
+                        <p class="mb-0">CSVファイルの取り込みが正常に完了しました。</p>
+                    </div>
+                    
+                    <div class="row text-center mb-4">
+                        <div class="col-md-3">
+                            <div class="card border-primary">
+                                <div class="card-body">
+                                    <h3 class="text-primary">${stats.success_rows}</h3>
+                                    <small>成功件数</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card border-info">
+                                <div class="card-body">
+                                    <h3 class="text-info">${stats.new_companies}</h3>
+                                    <small>新規企業</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card border-success">
+                                <div class="card-body">
+                                    <h3 class="text-success">${stats.new_users}</h3>
+                                    <small>新規利用者</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card border-warning">
+                                <div class="card-body">
+                                    <h3 class="text-warning">${stats.duplicate_orders}</h3>
+                                    <small>重複スキップ</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="text-center">
+                        <a href="../index.php" class="btn btn-primary btn-lg me-3">
+                            📊 ダッシュボードで確認
+                        </a>
+                        <a href="invoice_generate.php" class="btn btn-success btn-lg">
+                            📄 請求書作成に進む
+                        </a>
+                    </div>
+                `;
+            }
+            
+            generateErrorResult(result) {
+                let errorList = '';
+                if (result.errors && result.errors.length > 0) {
+                    errorList = '<h6>エラー詳細:</h6><ul>';
+                    result.errors.slice(0, 10).forEach(error => {
+                        errorList += `<li><strong>${error.context}:</strong> ${error.message}</li>`;
+                    });
+                    if (result.errors.length > 10) {
+                        errorList += `<li>他 ${result.errors.length - 10} 件のエラー</li>`;
+                    }
+                    errorList += '</ul>';
+                }
+                
+                return `
+                    <div class="alert alert-danger">
+                        <h4 class="alert-heading">❌ インポートエラー</h4>
+                        <p>${result.message || 'CSVファイルの処理中にエラーが発生しました。'}</p>
+                        ${errorList}
+                    </div>
+                    
+                    <div class="text-center">
+                        <button class="btn btn-warning" onclick="location.reload()">
+                            🔄 もう一度試す
+                        </button>
+                    </div>
+                `;
+            }
+            
+            showError(message) {
+                this.progressContainer.style.display = 'none';
+                this.resultArea.style.display = 'block';
+                
+                this.resultContent.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h4 class="alert-heading">❌ エラー</h4>
+                        <p>${message}</p>
+                    </div>
+                    
+                    <div class="text-center">
+                        <button class="btn btn-warning" onclick="location.reload()">
+                            🔄 もう一度試す
+                        </button>
+                    </div>
+                `;
             }
         }
         
-        // データクリーニング
-        foreach ($data as $key => $value) {
-            $data[$key] = trim($value);
+        // テンプレートダウンロード機能
+        function downloadTemplate() {
+            const fields = <?= json_encode(array_keys($csvTemplate['fields'])) ?>;
+            const csvContent = fields.join(',') + '\n';
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'smiley_csv_template.csv';
+            link.click();
         }
         
-        // 必須フィールドチェック
-        if (empty($data['delivery_date'])) {
-            throw new Exception('配達日が未入力です');
-        }
+        // グローバル変数でアップローダーインスタンスを管理
+        let uploaderInstance = null;
         
-        if (empty($data['user_code'])) {
-            throw new Exception('社員CDが未入力です');
-        }
-        
-        if (empty($data['company_name'])) {
-            throw new Exception('事業所名が未入力です');
-        }
-        
-        if (empty($data['product_code'])) {
-            throw new Exception('給食メニューCDが未入力です');
-        }
-        
-        // 日付形式チェック・変換
-        $data['delivery_date'] = $this->validateAndFormatDate($data['delivery_date']);
-        
-        // 数値フィールド変換
-        $data['quantity'] = max(1, intval($data['quantity']));
-        $data['unit_price'] = floatval(str_replace(',', '', $data['unit_price']));
-        $data['total_amount'] = floatval(str_replace(',', '', $data['total_amount']));
-        
-        // 金額妥当性チェック
-        $expectedTotal = $data['quantity'] * $data['unit_price'];
-        if (abs($data['total_amount'] - $expectedTotal) > 0.01) {
-            $data['total_amount'] = $expectedTotal;
-        }
-        
-        // 時間フィールド処理
-        if (!empty($data['delivery_time'])) {
-            $data['delivery_time'] = $this->normalizeTime($data['delivery_time']);
-        }
-        
-        return $data;
-    }
-    
-    /**
-     * Smiley配食事業データ検証
-     */
-    private function validateSmileyData($data) {
-        // 法人名チェック
-        if (empty($data['corporation_name']) || 
-            !preg_match('/株式会社\s*smiley/iu', $data['corporation_name'])) {
-            throw new Exception('法人名が「株式会社Smiley」ではありません: ' . $data['corporation_name']);
-        }
-        
-        // 配達先企業名の妥当性チェック
-        if (strlen($data['company_name']) < 2) {
-            throw new Exception('配達先企業名が短すぎます: ' . $data['company_name']);
-        }
-        
-        // 商品コード形式チェック（Smiley固有のルールがあれば追加）
-        if (strlen($data['product_code']) < 3) {
-            throw new Exception('商品コードが短すぎます: ' . $data['product_code']);
-        }
-    }
-    
-    /**
-     * 関連マスターデータ処理
-     */
-    private function processRelatedData($data) {
-        // 配達先企業処理
-        $companyId = $this->getOrCreateCompany($data);
-        
-        // 部署処理
-        $departmentId = $this->getOrCreateDepartment($companyId, $data);
-        
-        // 利用者処理
-        $userId = $this->getOrCreateUser($companyId, $departmentId, $data);
-        
-        // 給食業者処理
-        $supplierId = $this->getOrCreateSupplier($data);
-        
-        // 商品処理
-        $productId = $this->getOrCreateProduct($supplierId, $data);
-        
-        // IDを保存
-        $data['company_id'] = $companyId;
-        $data['department_id'] = $departmentId;
-        $data['user_id'] = $userId;
-        $data['supplier_id'] = $supplierId;
-        $data['product_id'] = $productId;
-        
-        return $data;
-    }
-    
-    /**
-     * 配達先企業取得・作成
-     */
-    private function getOrCreateCompany($data) {
-        $cacheKey = $data['company_code'] . '|' . $data['company_name'];
-        
-        if (isset($this->companyCache[$cacheKey])) {
-            return $this->companyCache[$cacheKey];
-        }
-        
-        // 既存チェック
-        $stmt = $this->pdo->prepare("
-            SELECT id FROM companies 
-            WHERE company_code = ? OR company_name = ?
-        ");
-        $stmt->execute([$data['company_code'], $data['company_name']]);
-        $existing = $stmt->fetch();
-        
-        if ($existing) {
-            $this->companyCache[$cacheKey] = $existing['id'];
-            return $existing['id'];
-        }
-        
-        // 新規作成
-        $stmt = $this->pdo->prepare("
-            INSERT INTO companies (
-                company_code, company_name, is_active, created_at
-            ) VALUES (?, ?, 1, NOW())
-        ");
-        $stmt->execute([
-            $data['company_code'],
-            $data['company_name']
-        ]);
-        
-        $companyId = $this->pdo->lastInsertId();
-        $this->companyCache[$cacheKey] = $companyId;
-        $this->stats['new_companies']++;
-        
-        return $companyId;
-    }
-    
-    /**
-     * 部署取得・作成
-     */
-    private function getOrCreateDepartment($companyId, $data) {
-        if (empty($data['department_name'])) {
-            return null;
-        }
-        
-        $cacheKey = $companyId . '|' . $data['department_code'] . '|' . $data['department_name'];
-        
-        if (isset($this->departmentCache[$cacheKey])) {
-            return $this->departmentCache[$cacheKey];
-        }
-        
-        // 既存チェック
-        $stmt = $this->pdo->prepare("
-            SELECT id FROM departments 
-            WHERE company_id = ? AND (department_code = ? OR department_name = ?)
-        ");
-        $stmt->execute([$companyId, $data['department_code'], $data['department_name']]);
-        $existing = $stmt->fetch();
-        
-        if ($existing) {
-            $this->departmentCache[$cacheKey] = $existing['id'];
-            return $existing['id'];
-        }
-        
-        // 新規作成
-        $stmt = $this->pdo->prepare("
-            INSERT INTO departments (
-                company_id, department_code, department_name, is_active, created_at
-            ) VALUES (?, ?, ?, 1, NOW())
-        ");
-        $stmt->execute([
-            $companyId,
-            $data['department_code'],
-            $data['department_name']
-        ]);
-        
-        $departmentId = $this->pdo->lastInsertId();
-        $this->departmentCache[$cacheKey] = $departmentId;
-        $this->stats['new_departments']++;
-        
-        return $departmentId;
-    }
-    
-    /**
-     * 利用者取得・作成
-     */
-    private function getOrCreateUser($companyId, $departmentId, $data) {
-        $cacheKey = $data['user_code'];
-        
-        if (isset($this->userCache[$cacheKey])) {
-            return $this->userCache[$cacheKey];
-        }
-        
-        // 既存チェック
-        $stmt = $this->pdo->prepare("SELECT id FROM users WHERE user_code = ?");
-        $stmt->execute([$data['user_code']]);
-        $existing = $stmt->fetch();
-        
-        if ($existing) {
-            $this->userCache[$cacheKey] = $existing['id'];
-            return $existing['id'];
-        }
-        
-        // 新規作成
-        $stmt = $this->pdo->prepare("
-            INSERT INTO users (
-                user_code, user_name, company_id, department_id, company_name, 
-                department, employee_type_code, employee_type_name, is_active, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())
-        ");
-        $stmt->execute([
-            $data['user_code'],
-            $data['user_name'],
-            $companyId,
-            $departmentId,
-            $data['company_name'],
-            $data['department_name'],
-            $data['employee_type_code'],
-            $data['employee_type_name']
-        ]);
-        
-        $userId = $this->pdo->lastInsertId();
-        $this->userCache[$cacheKey] = $userId;
-        $this->stats['new_users']++;
-        
-        return $userId;
-    }
-    
-    /**
-     * 給食業者取得・作成
-     */
-    private function getOrCreateSupplier($data) {
-        if (empty($data['supplier_name'])) {
-            return null;
-        }
-        
-        $cacheKey = $data['supplier_code'] . '|' . $data['supplier_name'];
-        
-        if (isset($this->supplierCache[$cacheKey])) {
-            return $this->supplierCache[$cacheKey];
-        }
-        
-        // 既存チェック
-        $stmt = $this->pdo->prepare("
-            SELECT id FROM suppliers 
-            WHERE supplier_code = ? OR supplier_name = ?
-        ");
-        $stmt->execute([$data['supplier_code'], $data['supplier_name']]);
-        $existing = $stmt->fetch();
-        
-        if ($existing) {
-            $this->supplierCache[$cacheKey] = $existing['id'];
-            return $existing['id'];
-        }
-        
-        // 新規作成
-        $stmt = $this->pdo->prepare("
-            INSERT INTO suppliers (
-                supplier_code, supplier_name, is_active, created_at
-            ) VALUES (?, ?, 1, NOW())
-        ");
-        $stmt->execute([
-            $data['supplier_code'],
-            $data['supplier_name']
-        ]);
-        
-        $supplierId = $this->pdo->lastInsertId();
-        $this->supplierCache[$cacheKey] = $supplierId;
-        $this->stats['new_suppliers']++;
-        
-        return $supplierId;
-    }
-    
-    /**
-     * 商品取得・作成
-     */
-    private function getOrCreateProduct($supplierId, $data) {
-        $cacheKey = $data['product_code'];
-        
-        if (isset($this->productCache[$cacheKey])) {
-            return $this->productCache[$cacheKey];
-        }
-        
-        // 既存チェック
-        $stmt = $this->pdo->prepare("SELECT id FROM products WHERE product_code = ?");
-        $stmt->execute([$data['product_code']]);
-        $existing = $stmt->fetch();
-        
-        if ($existing) {
-            $this->productCache[$cacheKey] = $existing['id'];
-            return $existing['id'];
-        }
-        
-        // 新規作成
-        $stmt = $this->pdo->prepare("
-            INSERT INTO products (
-                product_code, product_name, category_code, category_name, 
-                supplier_id, unit_price, is_active, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 1, NOW())
-        ");
-        $stmt->execute([
-            $data['product_code'],
-            $data['product_name'],
-            $data['category_code'],
-            $data['category_name'],
-            $supplierId,
-            $data['unit_price']
-        ]);
-        
-        $productId = $this->pdo->lastInsertId();
-        $this->productCache[$cacheKey] = $productId;
-        $this->stats['new_products']++;
-        
-        return $productId;
-    }
-    
-    /**
-     * 注文データ挿入
-     */
-    private function insertOrderData($data) {
-        // 重複チェック
-        $stmt = $this->pdo->prepare("
-            SELECT id FROM orders 
-            WHERE user_code = ? AND delivery_date = ? AND product_code = ? AND cooperation_code = ?
-        ");
-        $stmt->execute([
-            $data['user_code'],
-            $data['delivery_date'],
-            $data['product_code'],
-            $data['cooperation_code']
-        ]);
-        
-        if ($stmt->fetch()) {
-            $this->stats['duplicate_orders']++;
-            throw new Exception('重複注文: ' . $data['user_code'] . ' / ' . $data['delivery_date'] . ' / ' . $data['product_code']);
-        }
-        
-        // 注文データ挿入
-        $stmt = $this->pdo->prepare("
-            INSERT INTO orders (
-                order_date, delivery_date, user_id, user_code, user_name,
-                company_id, company_code, company_name, department_id,
-                product_id, product_code, product_name, category_code, category_name,
-                supplier_id, quantity, unit_price, total_amount,
-                supplier_code, supplier_name, corporation_code, corporation_name,
-                employee_type_code, employee_type_name, department_code, department_name,
-                import_batch_id, notes, delivery_time, cooperation_code, created_at
-            ) VALUES (
-                NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
-            )
-        ");
-        
-        $stmt->execute([
-            $data['delivery_date'],
-            $data['user_id'],
-            $data['user_code'],
-            $data['user_name'],
-            $data['company_id'],
-            $data['company_code'],
-            $data['company_name'],
-            $data['department_id'],
-            $data['product_id'],
-            $data['product_code'],
-            $data['product_name'],
-            $data['category_code'],
-            $data['category_name'],
-            $data['supplier_id'],
-            $data['quantity'],
-            $data['unit_price'],
-            $data['total_amount'],
-            $data['supplier_code'],
-            $data['supplier_name'],
-            $data['corporation_code'],
-            $data['corporation_name'],
-            $data['employee_type_code'],
-            $data['employee_type_name'],
-            $data['department_code'],
-            $data['department_name'],
-            $this->batchId,
-            $data['notes'],
-            $data['delivery_time'],
-            $data['cooperation_code']
-        ]);
-    }
-    
-    /**
-     * 日付検証・フォーマット
-     */
-    private function validateAndFormatDate($dateStr) {
-        $formats = ['Y-m-d', 'Y/m/d', 'm/d/Y', 'd/m/Y', 'Ymd'];
-        
-        foreach ($formats as $format) {
-            $date = DateTime::createFromFormat($format, $dateStr);
-            if ($date !== false) {
-                return $date->format('Y-m-d');
+        // 本格的なインポートに切り替える関数
+        function switchToRealImport() {
+            if (confirm('本格的なCSVインポート処理に切り替えますか？\n\n注意: この操作でデータベースにデータが実際に保存されます。')) {
+                // グローバルインスタンスのAPIを変更
+                if (uploaderInstance) {
+                    uploaderInstance.apiUrl = '../api/import.php';
+                    
+                    // 画面表示を更新
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = 'alert alert-success alert-dismissible fade show';
+                    alertDiv.innerHTML = `
+                        <strong>✅ 本格モードに切り替えました</strong><br>
+                        次回のアップロードからデータベースに実際にデータが保存されます。
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    `;
+                    
+                    // ヘッダーの下に表示
+                    const header = document.querySelector('header');
+                    header.insertAdjacentElement('afterend', alertDiv);
+                    
+                    // ボタンテキストを変更
+                    const switchBtn = document.querySelector('[onclick="switchToRealImport()"]');
+                    if (switchBtn) {
+                        switchBtn.innerHTML = '✅ 本格モード有効';
+                        switchBtn.className = 'btn btn-success btn-lg me-3';
+                        switchBtn.disabled = true;
+                    }
+                    
+                    console.log('API切り替え完了:', uploaderInstance.apiUrl);
+                } else {
+                    alert('エラー: アップローダーが初期化されていません。ページをリロードしてください。');
+                }
             }
         }
         
-        throw new Exception('日付形式が正しくありません: ' . $dateStr);
-    }
-    
-    /**
-     * 時間正規化
-     */
-    private function normalizeTime($timeStr) {
-        if (preg_match('/(\d{1,2}):(\d{2})/', $timeStr, $matches)) {
-            return sprintf('%02d:%02d:00', $matches[1], $matches[2]);
-        }
-        return null;
-    }
-    
-    /**
-     * エラーログ記録
-     */
-    private function logError($context, $message, $data = null) {
-        $this->errors[] = [
-            'context' => $context,
-            'message' => $message,
-            'data' => $data,
-            'timestamp' => date('Y-m-d H:i:s')
-        ];
-        
-        if (defined('DEBUG_MODE') && DEBUG_MODE) {
-            error_log("CSV Import Error [{$context}]: {$message}");
-        }
-    }
-    
-    /**
-     * インポート結果ログ記録
-     */
-    private function logImportResult() {
-        try {
-            $stmt = $this->pdo->prepare("
-                INSERT INTO import_logs (
-                    batch_id, file_name, total_rows, success_rows, error_rows,
-                    new_companies, new_departments, new_users, new_suppliers, new_products,
-                    duplicate_orders, import_date, status, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
-            ");
-            
-            $status = $this->stats['error_rows'] > 0 ? 'partial_success' : 'success';
-            $notes = json_encode([
-                'errors' => count($this->errors),
-                'execution_time' => round(microtime(true) - $this->stats['start_time'], 2)
-            ], JSON_UNESCAPED_UNICODE);
-            
-            $stmt->execute([
-                $this->batchId,
-                'csv_import_' . date('YmdHis'),
-                $this->stats['total_rows'],
-                $this->stats['success_rows'],
-                $this->stats['error_rows'],
-                $this->stats['new_companies'],
-                $this->stats['new_departments'],
-                $this->stats['new_users'],
-                $this->stats['new_suppliers'],
-                $this->stats['new_products'],
-                $this->stats['duplicate_orders'],
-                $status,
-                $notes
-            ]);
-            
-        } catch (Exception $e) {
-            error_log("インポートログ記録エラー: " . $e->getMessage());
-        }
-    }
-    
-    /**
-     * インポート結果サマリー取得
-     */
-    public function getImportSummary() {
-        $executionTime = round(microtime(true) - $this->stats['start_time'], 2);
-        
-        return [
-            'success' => $this->stats['error_rows'] === 0,
-            'batch_id' => $this->batchId,
-            'stats' => $this->stats,
-            'execution_time' => $executionTime,
-            'errors' => $this->errors,
-            'summary_message' => $this->generateSummaryMessage()
-        ];
-    }
-    
-    /**
-     * サマリーメッセージ生成
-     */
-    private function generateSummaryMessage() {
-        $message = "CSVインポート完了:\n";
-        $message .= "• 処理件数: {$this->stats['processed_rows']}件\n";
-        $message .= "• 成功: {$this->stats['success_rows']}件\n";
-        $message .= "• エラー: {$this->stats['error_rows']}件\n";
-        $message .= "• 新規企業: {$this->stats['new_companies']}社\n";
-        $message .= "• 新規利用者: {$this->stats['new_users']}名\n";
-        
-        if ($this->stats['duplicate_orders'] > 0) {
-            $message .= "• 重複スキップ: {$this->stats['duplicate_orders']}件\n";
-        }
-        
-        return $message;
-    }
-    
-    /**
-     * エラーリスト取得
-     */
-    public function getErrors() {
-        return $this->errors;
-    }
-    
-    /**
-     * 統計情報取得
-     */
-    public function getStats() {
-        return $this->stats;
-    }
-}
-?>
+        // 初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            uploaderInstance = new SmileyCSVUploader();
+        });
+    </script>
+</body>
+</html>
