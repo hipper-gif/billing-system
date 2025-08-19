@@ -603,23 +603,39 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                 // プログレス更新開始
                 this.updateProgress(10, 'ファイルをアップロード中...');
                 
+                console.log('=== アップロード開始 ===');
+                console.log('選択ファイル:', this.selectedFile);
+                console.log('FormData内容確認...');
+                for (let pair of formData.entries()) {
+                    console.log(pair[0], pair[1]);
+                }
+                
                 try {
-                    const response = await fetch('../api/test_upload.php', {
+                    console.log('Fetchリクエスト送信...');
+                    
+                    const response = await fetch('../api/simple_test.php', {
                         method: 'POST',
                         body: formData
                     });
                     
+                    console.log('レスポンス受信:', response);
+                    console.log('Status:', response.status);
+                    console.log('StatusText:', response.statusText);
+                    console.log('Headers:', [...response.headers.entries()]);
+                    
                     this.updateProgress(30, 'サーバー応答を解析中...');
                     
-                    console.log('Response status:', response.status);
-                    console.log('Response headers:', response.headers);
-                    
-                    // レスポンステキストを先に取得
+                    // レスポンステキストを取得
                     const responseText = await response.text();
-                    console.log('Response text:', responseText);
+                    console.log('レスポンステキスト長:', responseText.length);
+                    console.log('レスポンステキスト:', responseText);
                     
                     if (!response.ok) {
-                        throw new Error(`サーバーエラー: ${response.status} - ${responseText}`);
+                        throw new Error(`HTTPエラー: ${response.status} ${response.statusText}\nレスポンス: ${responseText}`);
+                    }
+                    
+                    if (!responseText) {
+                        throw new Error('サーバーから空のレスポンスが返されました');
                     }
                     
                     this.updateProgress(50, 'データを処理中...');
@@ -628,9 +644,11 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                     let result;
                     try {
                         result = JSON.parse(responseText);
+                        console.log('JSON解析成功:', result);
                     } catch (jsonError) {
-                        console.error('JSON parse error:', jsonError);
-                        throw new Error(`JSON解析エラー: ${jsonError.message}\nサーバー応答: ${responseText.substring(0, 500)}`);
+                        console.error('JSON解析エラー:', jsonError);
+                        console.error('解析対象テキスト:', responseText);
+                        throw new Error(`JSON解析エラー: ${jsonError.message}\nレスポンス内容: "${responseText}"`);
                     }
                     
                     this.updateProgress(100, '完了');
@@ -641,7 +659,10 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                     }, 500);
                     
                 } catch (fetchError) {
-                    console.error('Fetch error:', fetchError);
+                    console.error('=== アップロードエラー ===');
+                    console.error('エラータイプ:', fetchError.constructor.name);
+                    console.error('エラーメッセージ:', fetchError.message);
+                    console.error('エラーオブジェクト:', fetchError);
                     throw fetchError;
                 }
             }
