@@ -403,9 +403,7 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                         </div>
                         
                         <div class="mt-3">
-                            <button class="btn btn-outline-info btn-sm w-100" onclick="downloadTemplate()">
-                                💾 テンプレートダウンロード
-                            </button>
+                            <p class="text-muted small">23フィールドのCSVファイルをアップロードしてください</p>
                         </div>
                     </div>
                 </div>
@@ -862,22 +860,47 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
             link.click();
         }
         
+        // グローバル変数でアップローダーインスタンスを管理
+        let uploaderInstance = null;
         
         // 本格的なインポートに切り替える関数
         function switchToRealImport() {
             if (confirm('本格的なCSVインポート処理に切り替えますか？\n\n注意: この操作でデータベースにデータが実際に保存されます。')) {
-                // APIのURLを本格版に変更
-                const uploader = new SmileyCSVUploader();
-                uploader.apiUrl = '../api/import.php';
-                
-                alert('設定を変更しました。再度ファイルをアップロードしてください。');
-                location.reload();
+                // グローバルインスタンスのAPIを変更
+                if (uploaderInstance) {
+                    uploaderInstance.apiUrl = '../api/import.php';
+                    
+                    // 画面表示を更新
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = 'alert alert-success alert-dismissible fade show';
+                    alertDiv.innerHTML = `
+                        <strong>✅ 本格モードに切り替えました</strong><br>
+                        次回のアップロードからデータベースに実際にデータが保存されます。
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    `;
+                    
+                    // ヘッダーの下に表示
+                    const header = document.querySelector('header');
+                    header.insertAdjacentElement('afterend', alertDiv);
+                    
+                    // ボタンテキストを変更
+                    const switchBtn = document.querySelector('[onclick="switchToRealImport()"]');
+                    if (switchBtn) {
+                        switchBtn.innerHTML = '✅ 本格モード有効';
+                        switchBtn.className = 'btn btn-success btn-lg me-3';
+                        switchBtn.disabled = true;
+                    }
+                    
+                    console.log('API切り替え完了:', uploaderInstance.apiUrl);
+                } else {
+                    alert('エラー: アップローダーが初期化されていません。ページをリロードしてください。');
+                }
             }
         }
         
         // 初期化
         document.addEventListener('DOMContentLoaded', function() {
-            new SmileyCSVUploader();
+            uploaderInstance = new SmileyCSVUploader();
         });
     </script>
 </body>
