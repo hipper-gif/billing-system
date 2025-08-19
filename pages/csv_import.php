@@ -498,8 +498,8 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                 this.resultArea = document.getElementById('resultArea');
                 this.resultContent = document.getElementById('resultContent');
                 
-                // API URL設定（デフォルトはテスト用）
-                this.apiUrl = '../api/simple_test.php';
+                // API URL設定（本格版に戻す）
+                this.apiUrl = '../api/import.php';
                 
                 this.initializeEventListeners();
             }
