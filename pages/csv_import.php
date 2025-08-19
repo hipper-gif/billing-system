@@ -1,877 +1,219 @@
 <?php
 /**
- * Smiley配食事業 CSVインポート画面
- * PC操作不慣れな方向けの直感的なUI
+ * 修正版 CSVインポートAPI
+ * api/import.php
  */
 
-require_once __DIR__ . '/../config/database.php';
+// エラー表示設定
+error_reporting(E_ALL);
+ini_set('display_errors', 0); // 本番では0、開発時は1
+ini_set('log_errors', 1);
 
-// セッション開始
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+// ヘッダー設定
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+
+// OPTIONS リクエスト対応
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
 }
 
-// 最近のインポート履歴取得
-function getRecentImports($pdo, $limit = 5) {
-    try {
-        $stmt = $pdo->prepare("
-            SELECT 
-                batch_id, file_name, total_rows, success_rows, error_rows,
-                new_companies, new_users, import_date, status
-            FROM import_logs 
-            ORDER BY import_date DESC 
-            LIMIT ?
-        ");
-        $stmt->execute([$limit]);
-        return $stmt->fetchAll();
-    } catch (Exception $e) {
-        return [];
+// エラーハンドリング関数
+function sendError($message, $code = 400, $details = []) {
+    http_response_code($code);
+    echo json_encode([
+        'success' => false,
+        'error' => $message,
+        'details' => $details,
+        'timestamp' => date('Y-m-d H:i:s')
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// 成功レスポンス関数
+function sendSuccess($data, $message = 'Success') {
+    echo json_encode([
+        'success' => true,
+        'message' => $message,
+        'data' => $data,
+        'timestamp' => date('Y-m-d H:i:s')
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+try {
+    // 必要ファイルの読み込み（重複チェック付き）
+    if (!class_exists('Database')) {
+        require_once '../config/database.php';
+        require_once '../classes/Database.php';
+    }
+    
+    if (!class_exists('SmileyCSVImporter')) {
+        require_once '../classes/SmileyCSVImporter.php';
+    }
+    
+    if (!class_exists('SecurityHelper')) {
+        require_once '../classes/SecurityHelper.php';
+    }
+    
+    // メソッド別処理
+    switch ($_SERVER['REQUEST_METHOD']) {
+        case 'GET':
+            handleGetRequest();
+            break;
+            
+        case 'POST':
+            handlePostRequest();
+            break;
+            
+        default:
+            sendError('対応していないメソッドです', 405);
+    }
+    
+} catch (Exception $e) {
+    sendError('システムエラーが発生しました', 500, [
+        'error_message' => $e->getMessage(),
+        'file' => $e->getFile(),
+        'line' => $e->getLine()
+    ]);
+}
+
+/**
+ * GET リクエスト処理
+ */
+function handleGetRequest() {
+    $action = $_GET['action'] ?? 'status';
+    
+    switch ($action) {
+        case 'status':
+            // システム状態確認
+            try {
+                $db = new Database();
+                
+                // テーブル存在確認
+                $tables = ['companies', 'departments', 'users', 'suppliers', 'products', 'orders'];
+                $tableStatus = [];
+                
+                foreach ($tables as $table) {
+                    $stmt = $db->query("SHOW TABLES LIKE '{$table}'");
+                    $tableStatus[$table] = $stmt->rowCount() > 0;
+                }
+                
+                sendSuccess([
+                    'database_connection' => true,
+                    'tables' => $tableStatus,
+                    'timestamp' => date('Y-m-d H:i:s')
+                ], 'システム正常稼働中');
+                
+            } catch (Exception $e) {
+                sendError('データベース接続エラー', 500, ['error' => $e->getMessage()]);
+            }
+            break;
+            
+        case 'test':
+            // テスト応答
+            sendSuccess([
+                'message' => 'CSVインポートAPI正常稼働中',
+                'version' => '1.0.0',
+                'methods' => ['GET', 'POST'],
+                'endpoints' => [
+                    'GET ?action=status' => 'システム状態確認',
+                    'GET ?action=test' => 'テスト応答',
+                    'POST' => 'CSVファイルインポート'
+                ]
+            ]);
+            break;
+            
+        default:
+            sendError('不明なアクションです', 400);
     }
 }
 
-// データベース接続
-$recentImports = [];
-try {
-    $db = Database::getInstance();
-    $pdo = $db->getConnection();
-    $recentImports = getRecentImports($pdo);
-} catch (Exception $e) {
-    $error_message = "データベース接続エラー: " . $e->getMessage();
-}
-
-// CSVテンプレート情報
-$csvTemplate = [
-    'fields' => [
-        'delivery_date' => '配達日（例: 2024-03-01）',
-        'user_code' => '利用者コード（例: U001）',
-        'user_name' => '利用者名（例: 田中太郎）',
-        'company_code' => '配達先企業コード（例: C001）',
-        'company_name' => '配達先企業名（例: ◯◯株式会社）',
-        'department_code' => '配達先部署コード（例: D001）',
-        'department_name' => '配達先部署名（例: 営業部）',
-        'product_code' => '商品コード（例: P001）',
-        'product_name' => '商品名（例: 幕の内弁当）',
-        'category_code' => '商品カテゴリコード（例: CAT001）',
-        'category_name' => '商品カテゴリ名（例: 弁当）',
-        'quantity' => '数量（例: 1）',
-        'unit_price' => '単価（例: 500）',
-        'total_amount' => '合計金額（例: 500）',
-        'supplier_code' => '給食業者コード（例: S001）',
-        'supplier_name' => '給食業者名（例: ◯◯給食）',
-        'corporation_code' => '法人コード（例: CORP001）',
-        'corporation_name' => '法人名（株式会社Smiley）',
-        'employee_type_code' => '従業員区分コード（例: EMP001）',
-        'employee_type_name' => '従業員区分名（例: 正社員）',
-        'delivery_time' => '配達時間（例: 12:00）',
-        'cooperation_code' => '協力会社コード（例: COOP001）',
-        'notes' => '備考（例: 特別指示）'
-    ]
-];
-
-// エラーハンドリング強化
-if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fields'])) {
-    $csvTemplate = [
-        'fields' => [
-            'delivery_date' => '配達日',
-            'user_code' => '利用者コード', 
-            'user_name' => '利用者名',
-            'company_code' => '配達先企業コード',
-            'company_name' => '配達先企業名',
-            'department_code' => '配達先部署コード',
-            'department_name' => '配達先部署名',
-            'product_code' => '商品コード',
-            'product_name' => '商品名',
-            'category_code' => '商品カテゴリコード',
-            'category_name' => '商品カテゴリ名',
-            'quantity' => '数量',
-            'unit_price' => '単価',
-            'total_amount' => '合計金額',
-            'supplier_code' => '給食業者コード',
-            'supplier_name' => '給食業者名',
-            'corporation_code' => '法人コード',
-            'corporation_name' => '法人名',
-            'employee_type_code' => '従業員区分コード',
-            'employee_type_name' => '従業員区分名',
-            'delivery_time' => '配達時間',
-            'cooperation_code' => '協力会社コード',
-            'notes' => '備考'
-        ]
-    ];
+/**
+ * POST リクエスト処理（CSVインポート）
+ */
+function handlePostRequest() {
+    try {
+        // セッション開始
+        SecurityHelper::secureSessionStart();
+        
+        // CSRF トークン検証（開発時はスキップ）
+        if (isset($_POST['csrf_token'])) {
+            if (!SecurityHelper::validateCSRFToken($_POST['csrf_token'])) {
+                sendError('不正なリクエストです（CSRF）', 403);
+            }
+        }
+        
+        // ファイルアップロード検証
+        if (!isset($_FILES['csv_file'])) {
+            sendError('CSVファイルがアップロードされていません', 400);
+        }
+        
+        $file = $_FILES['csv_file'];
+        $fileValidation = SecurityHelper::validateFileUpload($file);
+        
+        if (!$fileValidation['valid']) {
+            sendError('ファイル検証エラー', 400, ['errors' => $fileValidation['errors']]);
+        }
+        
+        // データベース接続
+        $db = new Database();
+        
+        // CSVインポーター初期化
+        $importer = new SmileyCSVImporter($db);
+        
+        // インポートオプション設定
+        $importOptions = [
+            'encoding' => $_POST['encoding'] ?? 'auto',
+            'overwrite' => isset($_POST['overwrite']) ? (bool)$_POST['overwrite'] : false,
+            'validate_smiley' => true,
+            'dry_run' => isset($_POST['dry_run']) ? (bool)$_POST['dry_run'] : false
+        ];
+        
+        // CSVインポート実行
+        $startTime = microtime(true);
+        $result = $importer->importFile($file['tmp_name'], $importOptions);
+        $processingTime = round(microtime(true) - $startTime, 2);
+        
+        // セキュリティログ記録
+        SecurityHelper::logSecurityEvent('csv_import', [
+            'filename' => $file['name'],
+            'filesize' => $file['size'],
+            'records_processed' => $result['stats']['total'] ?? 0,
+            'success_records' => $result['stats']['success'] ?? 0,
+            'processing_time' => $processingTime
+        ]);
+        
+        // 成功レスポンス
+        sendSuccess([
+            'batch_id' => $result['batch_id'] ?? null,
+            'stats' => [
+                'total_records' => $result['stats']['total'] ?? 0,
+                'success_records' => $result['stats']['success'] ?? 0,
+                'error_records' => count($result['errors'] ?? []),
+                'duplicate_records' => $result['stats']['duplicate'] ?? 0,
+                'processing_time' => $processingTime . '秒'
+            ],
+            'errors' => array_slice($result['errors'] ?? [], 0, 10), // 最初の10件のみ
+            'has_more_errors' => count($result['errors'] ?? []) > 10
+        ], 'CSVインポートが完了しました');
+        
+    } catch (Exception $e) {
+        // エラーログ記録
+        SecurityHelper::logSecurityEvent('csv_import_error', [
+            'error_message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine()
+        ]);
+        
+        sendError('CSVインポート処理でエラーが発生しました', 500, [
+            'error_message' => $e->getMessage(),
+            'error_file' => basename($e->getFile()),
+            'error_line' => $e->getLine()
+        ]);
+    }
 }
 ?>
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📊 CSVデータ取り込み - Smiley配食システム</title>
-    
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    
-    <!-- カスタムCSS -->
-    <style>
-        body {
-            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
-            background-color: #f8f9fa;
-            font-size: 16px;
-        }
-        
-        .upload-area {
-            border: 3px dashed #007bff;
-            border-radius: 15px;
-            padding: 60px 20px;
-            text-align: center;
-            background: linear-gradient(135deg, #f8f9ff 0%, #e3f2fd 100%);
-            transition: all 0.3s ease;
-            cursor: pointer;
-            margin-bottom: 30px;
-        }
-        
-        .upload-area:hover {
-            border-color: #0056b3;
-            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
-            transform: translateY(-2px);
-        }
-        
-        .upload-area.dragover {
-            border-color: #28a745;
-            background: linear-gradient(135deg, #f0fff4 0%, #c8f7c5 100%);
-        }
-        
-        .upload-icon {
-            font-size: 4rem;
-            color: #007bff;
-            margin-bottom: 20px;
-            display: block;
-        }
-        
-        .upload-text {
-            font-size: 1.3rem;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-        
-        .upload-subtext {
-            color: #6c757d;
-            font-size: 1rem;
-        }
-        
-        .file-input {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            opacity: 0;
-            overflow: hidden;
-        }
-        
-        .progress-container {
-            display: none;
-            margin-top: 20px;
-        }
-        
-        .step-card {
-            border-radius: 15px;
-            border: none;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            margin-bottom: 20px;
-        }
-        
-        .step-number {
-            background: #007bff;
-            color: white;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            margin-right: 15px;
-        }
-        
-        .template-table {
-            font-size: 0.9rem;
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        
-        .status-badge {
-            padding: 5px 10px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            font-weight: bold;
-        }
-        
-        .status-success { background: #d4edda; color: #155724; }
-        .status-partial { background: #fff3cd; color: #856404; }
-        .status-error { background: #f8d7da; color: #721c24; }
-        
-        .btn-large {
-            min-height: 60px;
-            font-size: 1.2rem;
-            font-weight: bold;
-            border-radius: 10px;
-        }
-        
-        @media (max-width: 768px) {
-            .upload-area {
-                padding: 40px 15px;
-            }
-            
-            .upload-icon {
-                font-size: 3rem;
-            }
-            
-            .upload-text {
-                font-size: 1.1rem;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="container-fluid px-4 py-3">
-        <!-- ヘッダー -->
-        <header class="mb-4">
-            <div class="row align-items-center">
-                <div class="col-md-8">
-                    <h1 class="text-primary fw-bold">📊 CSVデータ取り込み</h1>
-                    <p class="text-muted">Smiley配食事業の注文データをシステムに取り込みます</p>
-                </div>
-                <div class="col-md-4 text-md-end">
-                    <a href="../index.php" class="btn btn-outline-secondary">
-                        ← メイン画面に戻る
-                    </a>
-                </div>
-            </div>
-        </header>
-
-        <?php if (isset($error_message)): ?>
-        <!-- エラー表示 -->
-        <div class="alert alert-danger" role="alert">
-            <h4 class="alert-heading">⚠️ システムエラー</h4>
-            <p><?= htmlspecialchars($error_message) ?></p>
-        </div>
-        <?php endif; ?>
-
-        <div class="row">
-            <!-- メインコンテンツ -->
-            <div class="col-lg-8">
-                <!-- アップロードエリア -->
-                <div class="card step-card">
-                    <div class="card-header bg-primary text-white">
-                        <div class="d-flex align-items-center">
-                            <div class="step-number bg-white text-primary">1</div>
-                            <h5 class="mb-0">CSVファイルをアップロード</h5>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <div class="upload-area" id="uploadArea">
-                            <div class="upload-icon">📁</div>
-                            <div class="upload-text">ここにCSVファイルをドラッグ&ドロップ</div>
-                            <div class="upload-subtext">または クリックしてファイルを選択</div>
-                            <input type="file" id="csvFile" class="file-input" accept=".csv" />
-                        </div>
-                        
-                        <!-- ファイル情報表示 -->
-                        <div id="fileInfo" style="display: none;">
-                            <div class="alert alert-info">
-                                <h6>選択されたファイル:</h6>
-                                <div id="fileName"></div>
-                                <div id="fileSize"></div>
-                            </div>
-                        </div>
-                        
-                        <!-- 処理オプション -->
-                        <div class="row mt-3">
-                            <div class="col-md-6">
-                                <label class="form-label">文字コード</label>
-                                <select class="form-select" id="encoding">
-                                    <option value="UTF-8">UTF-8</option>
-                                    <option value="Shift_JIS">Shift_JIS (Excel標準)</option>
-                                    <option value="EUC-JP">EUC-JP</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">区切り文字</label>
-                                <select class="form-select" id="delimiter">
-                                    <option value=",">カンマ (,)</option>
-                                    <option value="\t">タブ</option>
-                                    <option value=";">セミコロン (;)</option>
-                                </select>
-                            </div>
-                        </div>
-                        
-                        <!-- アップロードボタン -->
-                        <div class="text-center mt-4">
-                            <button id="uploadBtn" class="btn btn-primary btn-large px-5" disabled>
-                                🚀 インポート開始
-                            </button>
-                        </div>
-                        
-                        <!-- プログレスバー -->
-                        <div class="progress-container">
-                            <div class="progress mb-3" style="height: 25px;">
-                                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
-                                     role="progressbar" style="width: 0%"></div>
-                            </div>
-                            <div id="progressText" class="text-center text-muted"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 結果表示エリア -->
-                <div id="resultArea" style="display: none;">
-                    <div class="card step-card">
-                        <div class="card-header">
-                            <h5 class="mb-0">📈 インポート結果</h5>
-                        </div>
-                        <div class="card-body" id="resultContent">
-                            <!-- 結果がここに表示されます -->
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- サイドバー -->
-            <div class="col-lg-4">
-                <!-- CSVテンプレート情報 -->
-                <div class="card step-card">
-                    <div class="card-header bg-info text-white">
-                        <h5 class="mb-0">📋 CSVフォーマット</h5>
-                    </div>
-                    <div class="card-body">
-                        <p class="card-text">
-                            <strong>23フィールド</strong>のCSVファイルが必要です。<br>
-                            必ずヘッダー行を含めてください。
-                        </p>
-                        
-                        <div class="accordion" id="templateAccordion">
-                            <div class="accordion-item">
-                                <h2 class="accordion-header">
-                                    <button class="accordion-button collapsed" type="button" 
-                                            data-bs-toggle="collapse" data-bs-target="#templateFields">
-                                        📝 必要フィールド一覧
-                                    </button>
-                                </h2>
-                                <div id="templateFields" class="accordion-collapse collapse" 
-                                     data-bs-parent="#templateAccordion">
-                                    <div class="accordion-body">
-                                        <div class="template-table">
-                                            <?php foreach ($csvTemplate['fields'] as $field => $description): ?>
-                                            <div class="row mb-2">
-                                                <div class="col-12">
-                                                    <small class="text-primary fw-bold"><?= htmlspecialchars($field) ?></small><br>
-                                                    <small class="text-muted"><?= htmlspecialchars($description) ?></small>
-                                                </div>
-                                            </div>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="mt-3">
-                            <p class="text-muted small">23フィールドのCSVファイルをアップロードしてください</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 重要な注意事項 -->
-                <div class="card step-card">
-                    <div class="card-header bg-warning text-dark">
-                        <h5 class="mb-0">⚠️ 重要な注意事項</h5>
-                    </div>
-                    <div class="card-body">
-                        <ul class="list-unstyled mb-0">
-                            <li class="mb-2">
-                                <span class="text-danger fw-bold">🏢 法人名確認</span><br>
-                                <small>「株式会社Smiley」以外のデータはエラーになります</small>
-                            </li>
-                            <li class="mb-2">
-                                <span class="text-warning fw-bold">📅 日付フォーマット</span><br>
-                                <small>YYYY-MM-DD形式（例: 2024-03-01）を推奨</small>
-                            </li>
-                            <li class="mb-2">
-                                <span class="text-info fw-bold">🔄 重複チェック</span><br>
-                                <small>同じ利用者・日付・商品の組み合わせは自動スキップ</small>
-                            </li>
-                            <li class="mb-0">
-                                <span class="text-success fw-bold">💾 バックアップ</span><br>
-                                <small>元ファイルは必ず保管してください</small>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-                
-                <!-- 最近のインポート履歴 -->
-                <?php if (!empty($recentImports)): ?>
-                <div class="card step-card">
-                    <div class="card-header">
-                        <h5 class="mb-0">🕒 最近のインポート履歴</h5>
-                    </div>
-                    <div class="card-body">
-                        <?php foreach ($recentImports as $import): ?>
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <div>
-                                <small class="fw-bold"><?= date('m/d H:i', strtotime($import['import_date'])) ?></small><br>
-                                <small class="text-muted">
-                                    <?= $import['success_rows'] ?>件成功
-                                    <?php if ($import['error_rows'] > 0): ?>
-                                    / <?= $import['error_rows'] ?>件エラー
-                                    <?php endif; ?>
-                                </small>
-                            </div>
-                            <div>
-                                <?php
-                                $statusClass = 'status-success';
-                                $statusText = '成功';
-                                if ($import['status'] === 'partial_success') {
-                                    $statusClass = 'status-partial';
-                                    $statusText = '一部成功';
-                                } elseif ($import['error_rows'] > 0) {
-                                    $statusClass = 'status-error';
-                                    $statusText = 'エラー';
-                                }
-                                ?>
-                                <span class="status-badge <?= $statusClass ?>"><?= $statusText ?></span>
-                            </div>
-                        </div>
-                        <?php endforeach; ?>
-                        
-                        <div class="text-center mt-3">
-                            <a href="import_history.php" class="btn btn-outline-secondary btn-sm">
-                                📊 詳細履歴を見る
-                            </a>
-                        </div>
-                    </div>
-                </div>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    
-    <!-- CSVインポート専用JavaScript -->
-    <script>
-        class SmileyCSVUploader {
-            constructor() {
-                this.uploadArea = document.getElementById('uploadArea');
-                this.fileInput = document.getElementById('csvFile');
-                this.uploadBtn = document.getElementById('uploadBtn');
-                this.progressContainer = document.querySelector('.progress-container');
-                this.progressBar = document.getElementById('progressBar');
-                this.progressText = document.getElementById('progressText');
-                this.resultArea = document.getElementById('resultArea');
-                this.resultContent = document.getElementById('resultContent');
-                
-                // API URL設定（エラーチェック用）
-                this.apiUrl = '../api/error_check.php';
-                
-                this.initializeEventListeners();
-            }
-            
-            initializeEventListeners() {
-                // ドラッグ&ドロップ
-                this.uploadArea.addEventListener('click', () => this.fileInput.click());
-                this.uploadArea.addEventListener('dragover', this.handleDragOver.bind(this));
-                this.uploadArea.addEventListener('dragleave', this.handleDragLeave.bind(this));
-                this.uploadArea.addEventListener('drop', this.handleDrop.bind(this));
-                
-                // ファイル選択
-                this.fileInput.addEventListener('change', this.handleFileSelect.bind(this));
-                
-                // アップロードボタン
-                this.uploadBtn.addEventListener('click', this.startUpload.bind(this));
-            }
-            
-            handleDragOver(e) {
-                e.preventDefault();
-                this.uploadArea.classList.add('dragover');
-            }
-            
-            handleDragLeave(e) {
-                e.preventDefault();
-                this.uploadArea.classList.remove('dragover');
-            }
-            
-            handleDrop(e) {
-                e.preventDefault();
-                this.uploadArea.classList.remove('dragover');
-                
-                const files = e.dataTransfer.files;
-                if (files.length > 0) {
-                    this.handleFile(files[0]);
-                }
-            }
-            
-            handleFileSelect(e) {
-                if (e.target.files.length > 0) {
-                    this.handleFile(e.target.files[0]);
-                }
-            }
-            
-            handleFile(file) {
-                // ファイル形式チェック
-                if (!file.name.toLowerCase().endsWith('.csv')) {
-                    alert('CSVファイルを選択してください。');
-                    return;
-                }
-                
-                // ファイルサイズチェック (10MB制限)
-                if (file.size > 10 * 1024 * 1024) {
-                    alert('ファイルサイズが大きすぎます（10MB以下にしてください）。');
-                    return;
-                }
-                
-                // ファイル情報表示
-                document.getElementById('fileName').textContent = file.name;
-                document.getElementById('fileSize').textContent = 
-                    `ファイルサイズ: ${(file.size / 1024).toFixed(1)} KB`;
-                document.getElementById('fileInfo').style.display = 'block';
-                
-                // アップロードボタン有効化
-                this.uploadBtn.disabled = false;
-                this.selectedFile = file;
-                
-                // アップロードエリアの表示変更
-                this.uploadArea.querySelector('.upload-text').textContent = '✅ ファイルが選択されました';
-                this.uploadArea.querySelector('.upload-subtext').textContent = 
-                    '別のファイルを選択する場合はクリックしてください';
-            }
-            
-            async startUpload() {
-                if (!this.selectedFile) {
-                    alert('ファイルを選択してください。');
-                    return;
-                }
-                
-                // UI状態変更
-                this.uploadBtn.disabled = true;
-                this.uploadBtn.innerHTML = '⏳ 処理中...';
-                this.progressContainer.style.display = 'block';
-                this.resultArea.style.display = 'none';
-                
-                try {
-                    await this.uploadFile();
-                } catch (error) {
-                    this.showError('アップロードに失敗しました: ' + error.message);
-                } finally {
-                    this.uploadBtn.disabled = false;
-                    this.uploadBtn.innerHTML = '🚀 インポート開始';
-                }
-            }
-            
-            async uploadFile() {
-                const formData = new FormData();
-                formData.append('csv_file', this.selectedFile);
-                formData.append('encoding', document.getElementById('encoding').value);
-                formData.append('delimiter', document.getElementById('delimiter').value);
-                
-                // プログレス更新開始
-                this.updateProgress(10, 'ファイルをアップロード中...');
-                
-                console.log('=== アップロード開始 ===');
-                console.log('選択ファイル:', this.selectedFile);
-                console.log('FormData内容確認...');
-                for (let pair of formData.entries()) {
-                    console.log(pair[0], pair[1]);
-                }
-                
-                try {
-                    console.log('Fetchリクエスト送信...');
-                    
-                    const response = await fetch(this.apiUrl, {
-                        method: 'POST',
-                        body: formData
-                    });
-                    
-                    console.log('レスポンス受信:', response);
-                    console.log('Status:', response.status);
-                    console.log('StatusText:', response.statusText);
-                    console.log('Headers:', [...response.headers.entries()]);
-                    
-                    this.updateProgress(30, 'サーバー応答を解析中...');
-                    
-                    // レスポンステキストを取得
-                    const responseText = await response.text();
-                    console.log('レスポンステキスト長:', responseText.length);
-                    console.log('レスポンステキスト:', responseText);
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTPエラー: ${response.status} ${response.statusText}\nレスポンス: ${responseText}`);
-                    }
-                    
-                    if (!responseText) {
-                        throw new Error('サーバーから空のレスポンスが返されました');
-                    }
-                    
-                    this.updateProgress(50, 'データを処理中...');
-                    
-                    // JSONパース試行
-                    let result;
-                    try {
-                        result = JSON.parse(responseText);
-                        console.log('JSON解析成功:', result);
-                    } catch (jsonError) {
-                        console.error('JSON解析エラー:', jsonError);
-                        console.error('解析対象テキスト:', responseText);
-                        throw new Error(`JSON解析エラー: ${jsonError.message}\nレスポンス内容: "${responseText}"`);
-                    }
-                    
-                    this.updateProgress(100, '完了');
-                    
-                    // 結果表示
-                    setTimeout(() => {
-                        this.showResult(result);
-                    }, 500);
-                    
-                } catch (fetchError) {
-                    console.error('=== アップロードエラー ===');
-                    console.error('エラータイプ:', fetchError.constructor.name);
-                    console.error('エラーメッセージ:', fetchError.message);
-                    console.error('エラーオブジェクト:', fetchError);
-                    throw fetchError;
-                }
-            }
-            
-            updateProgress(percent, message) {
-                this.progressBar.style.width = `${percent}%`;
-                this.progressBar.textContent = `${percent}%`;
-                this.progressText.textContent = message;
-            }
-            
-            showResult(result) {
-                this.progressContainer.style.display = 'none';
-                this.resultArea.style.display = 'block';
-                
-                console.log('結果表示:', result);
-                console.log('result.stats存在チェック:', !!result.stats);
-                console.log('result.data存在チェック:', !!result.data);
-                
-                // simple_test.phpとimport.phpの両方に対応
-                if (result.success) {
-                    if (result.stats && result.stats.success_rows !== undefined) {
-                        // 本格的なインポート結果の場合（statsオブジェクトがある）
-                        console.log('本格的なインポート結果として処理');
-                        this.resultContent.innerHTML = this.generateSuccessResult(result);
-                    } else {
-                        // テスト結果の場合
-                        console.log('テスト結果として処理');
-                        this.resultContent.innerHTML = this.generateTestResult(result);
-                    }
-                } else {
-                    console.log('エラー結果として処理');
-                    this.resultContent.innerHTML = this.generateErrorResult(result);
-                }
-                
-                // 結果エリアにスクロール
-                this.resultArea.scrollIntoView({ behavior: 'smooth' });
-            }
-            
-            generateTestResult(result) {
-                console.log('generateTestResult呼び出し:', result);
-                
-                return `
-                    <div class="alert alert-info">
-                        <h4 class="alert-heading">🧪 テスト完了</h4>
-                        <p>${result.message || 'テスト処理が完了しました'}</p>
-                        <hr>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <h6>リクエスト情報:</h6>
-                                <ul>
-                                    <li>メソッド: ${result.method || 'N/A'}</li>
-                                    <li>ファイル数: ${result.files_count || 0}</li>
-                                    <li>POSTデータ数: ${result.post_count || 0}</li>
-                                    <li>タイムスタンプ: ${result.timestamp || 'N/A'}</li>
-                                </ul>
-                            </div>
-                            <div class="col-md-6">
-                                <h6>ファイル情報:</h6>
-                                ${result.data && result.data.file_info ? `
-                                    <ul>
-                                        <li>ファイル名: ${result.data.file_info.name}</li>
-                                        <li>サイズ: ${result.data.file_info.size_kb}KB</li>
-                                        <li>タイプ: ${result.data.file_info.type}</li>
-                                    </ul>
-                                ` : `
-                                    <p>ファイルアップロード確認済み</p>
-                                    <small class="text-muted">詳細情報はAPIで処理されていません</small>
-                                `}
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="text-center mt-4">
-                        <button class="btn btn-success btn-lg me-3" onclick="switchToRealImport()">
-                            🚀 本格的なインポートに切り替え
-                        </button>
-                        <button class="btn btn-secondary" onclick="location.reload()">
-                            🔄 もう一度テスト
-                        </button>
-                    </div>
-                `;
-            }
-            
-            generateSuccessResult(result) {
-                const stats = result.stats;
-                return `
-                    <div class="alert alert-success">
-                        <h4 class="alert-heading">✅ インポート完了</h4>
-                        <p class="mb-0">CSVファイルの取り込みが正常に完了しました。</p>
-                    </div>
-                    
-                    <div class="row text-center mb-4">
-                        <div class="col-md-3">
-                            <div class="card border-primary">
-                                <div class="card-body">
-                                    <h3 class="text-primary">${stats.success_rows}</h3>
-                                    <small>成功件数</small>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card border-info">
-                                <div class="card-body">
-                                    <h3 class="text-info">${stats.new_companies}</h3>
-                                    <small>新規企業</small>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card border-success">
-                                <div class="card-body">
-                                    <h3 class="text-success">${stats.new_users}</h3>
-                                    <small>新規利用者</small>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card border-warning">
-                                <div class="card-body">
-                                    <h3 class="text-warning">${stats.duplicate_orders}</h3>
-                                    <small>重複スキップ</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="text-center">
-                        <a href="../index.php" class="btn btn-primary btn-lg me-3">
-                            📊 ダッシュボードで確認
-                        </a>
-                        <a href="invoice_generate.php" class="btn btn-success btn-lg">
-                            📄 請求書作成に進む
-                        </a>
-                    </div>
-                `;
-            }
-            
-            generateErrorResult(result) {
-                let errorList = '';
-                if (result.errors && result.errors.length > 0) {
-                    errorList = '<h6>エラー詳細:</h6><ul>';
-                    result.errors.slice(0, 10).forEach(error => {
-                        errorList += `<li><strong>${error.context}:</strong> ${error.message}</li>`;
-                    });
-                    if (result.errors.length > 10) {
-                        errorList += `<li>他 ${result.errors.length - 10} 件のエラー</li>`;
-                    }
-                    errorList += '</ul>';
-                }
-                
-                return `
-                    <div class="alert alert-danger">
-                        <h4 class="alert-heading">❌ インポートエラー</h4>
-                        <p>${result.message || 'CSVファイルの処理中にエラーが発生しました。'}</p>
-                        ${errorList}
-                    </div>
-                    
-                    <div class="text-center">
-                        <button class="btn btn-warning" onclick="location.reload()">
-                            🔄 もう一度試す
-                        </button>
-                    </div>
-                `;
-            }
-            
-            showError(message) {
-                this.progressContainer.style.display = 'none';
-                this.resultArea.style.display = 'block';
-                
-                this.resultContent.innerHTML = `
-                    <div class="alert alert-danger">
-                        <h4 class="alert-heading">❌ エラー</h4>
-                        <p>${message}</p>
-                    </div>
-                    
-                    <div class="text-center">
-                        <button class="btn btn-warning" onclick="location.reload()">
-                            🔄 もう一度試す
-                        </button>
-                    </div>
-                `;
-            }
-        }
-        
-        // テンプレートダウンロード機能
-        function downloadTemplate() {
-            const fields = <?= json_encode(array_keys($csvTemplate['fields'])) ?>;
-            const csvContent = fields.join(',') + '\n';
-            
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = 'smiley_csv_template.csv';
-            link.click();
-        }
-        
-        // グローバル変数でアップローダーインスタンスを管理
-        let uploaderInstance = null;
-        
-        // 本格的なインポートに切り替える関数
-        function switchToRealImport() {
-            if (confirm('本格的なCSVインポート処理に切り替えますか？\n\n注意: この操作でデータベースにデータが実際に保存されます。')) {
-                // グローバルインスタンスのAPIを変更
-                if (uploaderInstance) {
-                    uploaderInstance.apiUrl = '../api/import.php';
-                    
-                    // 画面表示を更新
-                    const alertDiv = document.createElement('div');
-                    alertDiv.className = 'alert alert-success alert-dismissible fade show';
-                    alertDiv.innerHTML = `
-                        <strong>✅ 本格モードに切り替えました</strong><br>
-                        次回のアップロードからデータベースに実際にデータが保存されます。
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    `;
-                    
-                    // ヘッダーの下に表示
-                    const header = document.querySelector('header');
-                    header.insertAdjacentElement('afterend', alertDiv);
-                    
-                    // ボタンテキストを変更
-                    const switchBtn = document.querySelector('[onclick="switchToRealImport()"]');
-                    if (switchBtn) {
-                        switchBtn.innerHTML = '✅ 本格モード有効';
-                        switchBtn.className = 'btn btn-success btn-lg me-3';
-                        switchBtn.disabled = true;
-                    }
-                    
-                    console.log('API切り替え完了:', uploaderInstance.apiUrl);
-                } else {
-                    alert('エラー: アップローダーが初期化されていません。ページをリロードしてください。');
-                }
-            }
-        }
-        
-        // 初期化
-        document.addEventListener('DOMContentLoaded', function() {
-            uploaderInstance = new SmileyCSVUploader();
-        });
-    </script>
-</body>
-</html>
