@@ -1,33 +1,4 @@
-// テンプレートダウンロード機能
-        function downloadTemplate() {
-            // Smiley配食事業の23フィールド定義
-            const fields = [
-                'delivery_date', 'user_code', 'user_name', 'company_code', 'company_name',
-                'department_code', 'department_name', 'product_code', 'product_name',
-                'category_code', 'category_name', 'quantity', 'unit_price', 'total_amount',
-                'supplier_code', 'supplier_name', 'corporation_code', 'corporation_name',
-                'employee_type_code', 'employee_type_name', 'delivery_time', 'cooperation_code', 'notes'
-            ];
-            
-            const csvContent = fields.join(',') + '\n';
-            
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = 'smiley_csv_template.csv';
-            link.click();
-        }
-        
-        // テスト用CSVダウンロード機能
-        function downloadTestCSV() {
-            const csvContent = `delivery_date,user_code,user_name,company_code,company_name,department_code,department_name,product_code,product_name,category_code,category_name,quantity,unit_price,total_amount,supplier_code,supplier_name,corporation_code,corporation_name,employee_type_code,employee_type_name,delivery_time,cooperation_code,notes
-2024-03-01,U001,田中太郎,C001,テスト株式会社,D001,営業部,P001,幕の内弁当,CAT001,弁当,1,500,500,S001,テスト給食,CORP001,株式会社Smiley,EMP001,正社員,12:00,COOP001,テスト`;
-            
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = 'smiley_test_data.csv';
-            link.click();
+
         }<?php
 /**
  * Smiley配食事業 CSVインポート画面
