@@ -364,11 +364,8 @@ $csvTemplate = [
                         </div>
                         
                         <div class="mt-3">
-                            <button class="btn btn-outline-info btn-sm w-100 mb-2" onclick="downloadTemplate()">
+                            <button class="btn btn-outline-info btn-sm w-100" onclick="downloadTemplate()">
                                 💾 テンプレートダウンロード
-                            </button>
-                            <button class="btn btn-outline-success btn-sm w-100" onclick="downloadTestCSV()">
-                                🧪 テスト用CSVダウンロード
                             </button>
                         </div>
                     </div>
