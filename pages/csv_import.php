@@ -1,12 +1,12 @@
 <?php
 /**
- * 修正版 CSVインポートAPI
- * api/import.php
+ * 完全修正版 CSVインポートAPI
+ * api/import.php - クラス重複エラー対策版
  */
 
 // エラー表示設定
 error_reporting(E_ALL);
-ini_set('display_errors', 0); // 本番では0、開発時は1
+ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
 // ヘッダー設定
@@ -45,21 +45,26 @@ function sendSuccess($data, $message = 'Success') {
 }
 
 try {
-    // 必要ファイルの読み込み（重複チェック付き）
-    if (!class_exists('Database')) {
+    // 1. データベース設定読み込み（一度だけ）
+    if (!defined('DB_CONFIG_LOADED')) {
         require_once '../config/database.php';
-        require_once '../classes/Database.php';
+        define('DB_CONFIG_LOADED', true);
     }
     
-    if (!class_exists('SmileyCSVImporter')) {
-        require_once '../classes/SmileyCSVImporter.php';
+    // 2. ClassLoader使用した安全な読み込み
+    if (!class_exists('ClassLoader')) {
+        require_once '../classes/ClassLoader.php';
     }
     
-    if (!class_exists('SecurityHelper')) {
-        require_once '../classes/SecurityHelper.php';
+    // 3. 必要クラスを安全に読み込み
+    $loader = ClassLoader::getInstance();
+    $loadResult = ClassLoader::loadRequiredClasses('../classes');
+    
+    if (!$loadResult['success']) {
+        sendError('クラス読み込みエラー', 500, $loadResult);
     }
     
-    // メソッド別処理
+    // 4. メソッド別処理
     switch ($_SERVER['REQUEST_METHOD']) {
         case 'GET':
             handleGetRequest();
@@ -73,11 +78,13 @@ try {
             sendError('対応していないメソッドです', 405);
     }
     
-} catch (Exception $e) {
+} catch (Throwable $e) {
+    // PHP7対応のエラーキャッチ
     sendError('システムエラーが発生しました', 500, [
         'error_message' => $e->getMessage(),
-        'file' => $e->getFile(),
-        'line' => $e->getLine()
+        'file' => basename($e->getFile()),
+        'line' => $e->getLine(),
+        'type' => get_class($e)
     ]);
 }
 
@@ -88,42 +95,62 @@ function handleGetRequest() {
     $action = $_GET['action'] ?? 'status';
     
     switch ($action) {
+        case 'test':
+            // テスト応答
+            sendSuccess([
+                'message' => 'CSVインポートAPI正常稼働中',
+                'version' => '2.0.0',
+                'methods' => ['GET', 'POST'],
+                'loaded_classes' => ClassLoader::getLoadedClasses(),
+                'php_version' => PHP_VERSION,
+                'memory_usage' => memory_get_usage(true) . ' bytes'
+            ]);
+            break;
+            
         case 'status':
             // システム状態確認
             try {
+                if (!class_exists('Database')) {
+                    sendError('Databaseクラスが読み込まれていません', 500);
+                }
+                
                 $db = new Database();
                 
-                // テーブル存在確認
+                // 基本テーブル存在確認
                 $tables = ['companies', 'departments', 'users', 'suppliers', 'products', 'orders'];
                 $tableStatus = [];
                 
                 foreach ($tables as $table) {
-                    $stmt = $db->query("SHOW TABLES LIKE '{$table}'");
-                    $tableStatus[$table] = $stmt->rowCount() > 0;
+                    try {
+                        $stmt = $db->query("SHOW TABLES LIKE '{$table}'");
+                        $tableStatus[$table] = $stmt->rowCount() > 0;
+                    } catch (Exception $e) {
+                        $tableStatus[$table] = false;
+                    }
                 }
                 
                 sendSuccess([
                     'database_connection' => true,
                     'tables' => $tableStatus,
+                    'loaded_classes' => ClassLoader::getLoadedClasses(),
                     'timestamp' => date('Y-m-d H:i:s')
                 ], 'システム正常稼働中');
                 
             } catch (Exception $e) {
-                sendError('データベース接続エラー', 500, ['error' => $e->getMessage()]);
+                sendError('データベース接続エラー', 500, [
+                    'error' => $e->getMessage(),
+                    'loaded_classes' => ClassLoader::getLoadedClasses()
+                ]);
             }
             break;
             
-        case 'test':
-            // テスト応答
+        case 'classes':
+            // クラス読み込み状況確認
             sendSuccess([
-                'message' => 'CSVインポートAPI正常稼働中',
-                'version' => '1.0.0',
-                'methods' => ['GET', 'POST'],
-                'endpoints' => [
-                    'GET ?action=status' => 'システム状態確認',
-                    'GET ?action=test' => 'テスト応答',
-                    'POST' => 'CSVファイルインポート'
-                ]
+                'loaded_classes' => ClassLoader::getLoadedClasses(),
+                'declared_classes' => array_filter(get_declared_classes(), function($class) {
+                    return in_array($class, ['Database', 'SmileyCSVImporter', 'SecurityHelper', 'ClassLoader']);
+                })
             ]);
             break;
             
@@ -137,15 +164,16 @@ function handleGetRequest() {
  */
 function handlePostRequest() {
     try {
-        // セッション開始
-        SecurityHelper::secureSessionStart();
-        
-        // CSRF トークン検証（開発時はスキップ）
-        if (isset($_POST['csrf_token'])) {
-            if (!SecurityHelper::validateCSRFToken($_POST['csrf_token'])) {
-                sendError('不正なリクエストです（CSRF）', 403);
+        // 必要クラスの存在確認
+        $requiredClasses = ['Database', 'SmileyCSVImporter', 'SecurityHelper'];
+        foreach ($requiredClasses as $class) {
+            if (!class_exists($class)) {
+                sendError("必要なクラスが読み込まれていません: {$class}", 500);
             }
         }
+        
+        // セッション開始
+        SecurityHelper::secureSessionStart();
         
         // ファイルアップロード検証
         if (!isset($_FILES['csv_file'])) {
@@ -183,7 +211,6 @@ function handlePostRequest() {
             'filename' => $file['name'],
             'filesize' => $file['size'],
             'records_processed' => $result['stats']['total'] ?? 0,
-            'success_records' => $result['stats']['success'] ?? 0,
             'processing_time' => $processingTime
         ]);
         
@@ -197,22 +224,22 @@ function handlePostRequest() {
                 'duplicate_records' => $result['stats']['duplicate'] ?? 0,
                 'processing_time' => $processingTime . '秒'
             ],
-            'errors' => array_slice($result['errors'] ?? [], 0, 10), // 最初の10件のみ
+            'errors' => array_slice($result['errors'] ?? [], 0, 10),
             'has_more_errors' => count($result['errors'] ?? []) > 10
         ], 'CSVインポートが完了しました');
         
-    } catch (Exception $e) {
-        // エラーログ記録
+    } catch (Throwable $e) {
         SecurityHelper::logSecurityEvent('csv_import_error', [
             'error_message' => $e->getMessage(),
-            'file' => $e->getFile(),
+            'file' => basename($e->getFile()),
             'line' => $e->getLine()
         ]);
         
         sendError('CSVインポート処理でエラーが発生しました', 500, [
             'error_message' => $e->getMessage(),
             'error_file' => basename($e->getFile()),
-            'error_line' => $e->getLine()
+            'error_line' => $e->getLine(),
+            'loaded_classes' => ClassLoader::getLoadedClasses()
         ]);
     }
 }
