@@ -681,17 +681,22 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                 this.resultArea.style.display = 'block';
                 
                 console.log('結果表示:', result);
+                console.log('result.stats存在チェック:', !!result.stats);
+                console.log('result.data存在チェック:', !!result.data);
                 
                 // simple_test.phpとimport.phpの両方に対応
                 if (result.success) {
-                    if (result.stats) {
-                        // 本格的なインポート結果の場合
+                    if (result.stats && result.stats.success_rows !== undefined) {
+                        // 本格的なインポート結果の場合（statsオブジェクトがある）
+                        console.log('本格的なインポート結果として処理');
                         this.resultContent.innerHTML = this.generateSuccessResult(result);
                     } else {
                         // テスト結果の場合
+                        console.log('テスト結果として処理');
                         this.resultContent.innerHTML = this.generateTestResult(result);
                     }
                 } else {
+                    console.log('エラー結果として処理');
                     this.resultContent.innerHTML = this.generateErrorResult(result);
                 }
                 
@@ -700,19 +705,21 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
             }
             
             generateTestResult(result) {
+                console.log('generateTestResult呼び出し:', result);
+                
                 return `
                     <div class="alert alert-info">
                         <h4 class="alert-heading">🧪 テスト完了</h4>
-                        <p>${result.message}</p>
+                        <p>${result.message || 'テスト処理が完了しました'}</p>
                         <hr>
                         <div class="row">
                             <div class="col-md-6">
                                 <h6>リクエスト情報:</h6>
                                 <ul>
-                                    <li>メソッド: ${result.method}</li>
-                                    <li>ファイル数: ${result.files_count}</li>
-                                    <li>POSTデータ数: ${result.post_count}</li>
-                                    <li>タイムスタンプ: ${result.timestamp}</li>
+                                    <li>メソッド: ${result.method || 'N/A'}</li>
+                                    <li>ファイル数: ${result.files_count || 0}</li>
+                                    <li>POSTデータ数: ${result.post_count || 0}</li>
+                                    <li>タイムスタンプ: ${result.timestamp || 'N/A'}</li>
                                 </ul>
                             </div>
                             <div class="col-md-6">
@@ -723,7 +730,10 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                                         <li>サイズ: ${result.data.file_info.size_kb}KB</li>
                                         <li>タイプ: ${result.data.file_info.type}</li>
                                     </ul>
-                                ` : '<p>ファイル詳細情報なし</p>'}
+                                ` : `
+                                    <p>ファイルアップロード確認済み</p>
+                                    <small class="text-muted">詳細情報はAPIで処理されていません</small>
+                                `}
                             </div>
                         </div>
                     </div>
