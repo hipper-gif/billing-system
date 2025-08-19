@@ -542,7 +542,7 @@ $csvTemplate = [
                 // プログレス更新開始
                 this.updateProgress(10, 'ファイルをアップロード中...');
                 
-                const response = await fetch('../api/import.php', {
+                const response = await fetch('../api/test_upload.php', {
                     method: 'POST',
                     body: formData
                 });
