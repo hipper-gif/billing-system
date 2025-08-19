@@ -12,6 +12,7 @@ class SmileyCSVImporter {
     private $batchId;
     private $stats;
     private $errors;
+    private $fieldMapping = []; // フィールドマッピング保存用
     private $companyCache = [];
     private $departmentCache = [];
     private $userCache = [];
@@ -158,32 +159,71 @@ class SmileyCSVImporter {
      * ヘッダー検証
      */
     private function validateHeaders($headers) {
-        // フィールド数チェック
-        if (count($headers) !== count($this->expectedFields)) {
-            throw new Exception('CSVフィールド数が正しくありません。期待値: ' . count($this->expectedFields) . '、実際: ' . count($headers));
+        // フィールド数チェック（最低限必要なフィールド数）
+        if (count($headers) < 10) {
+            throw new Exception('CSVフィールド数が少なすぎます。最低10フィールド必要です。実際: ' . count($headers));
         }
         
-        // フィールド名の正規化と検証
+        // ヘッダーの正規化
         $normalizedHeaders = array_map(function($header) {
-            return trim(str_replace(['　', ' '], '', $header));
+            // 全角・半角スペース、特殊文字を除去して正規化
+            $normalized = trim($header);
+            $normalized = str_replace(['　', ' ', '\t', '\r', '\n'], '', $normalized);
+            $normalized = mb_strtolower($normalized, 'UTF-8');
+            return $normalized;
         }, $headers);
         
-        $expectedNormalized = array_map(function($field) {
-            return str_replace('_', '', $field);
-        }, $this->expectedFields);
+        // 必須フィールドの柔軟なマッピング
+        $requiredFieldPatterns = [
+            'delivery_date' => ['配達日', 'はいたつび', 'はいたつひ', 'delivery', 'date'],
+            'user_code' => ['利用者コード', 'りようしゃこーど', 'usercode', 'user', 'code'],
+            'user_name' => ['利用者名', 'りようしゃめい', 'username', 'name'],
+            'company_name' => ['配達先企業名', 'はいたつさききぎょうめい', 'company', 'きぎょう', '企業'],
+            'product_code' => ['商品コード', 'しょうひんこーど', 'productcode', 'product'],
+            'corporation_name' => ['法人名', 'ほうじんめい', 'corporation', 'corp']
+        ];
         
-        // 必須フィールドチェック
-        $missingFields = [];
-        foreach (['delivery_date', 'user_code', 'company_name', 'product_code', 'corporation_name'] as $required) {
-            $normalizedRequired = str_replace('_', '', $required);
-            if (!in_array($normalizedRequired, $normalizedHeaders)) {
-                $missingFields[] = $required;
+        $foundFields = [];
+        
+        foreach ($requiredFieldPatterns as $fieldKey => $patterns) {
+            $found = false;
+            
+            foreach ($normalizedHeaders as $index => $header) {
+                foreach ($patterns as $pattern) {
+                    $normalizedPattern = mb_strtolower($pattern, 'UTF-8');
+                    if (strpos($header, $normalizedPattern) !== false) {
+                        $foundFields[$fieldKey] = $index;
+                        $found = true;
+                        break 2;
+                    }
+                }
+            }
+            
+            if (!$found) {
+                // デバッグ情報をログに記録
+                error_log("Missing field: {$fieldKey}. Available headers: " . implode(', ', $headers));
             }
         }
         
-        if (!empty($missingFields)) {
-            throw new Exception('必須フィールドが不足しています: ' . implode(', ', $missingFields));
+        // 必須フィールドのうち、最低限必要なものをチェック
+        $criticalFields = ['company_name', 'user_name'];
+        $missingCritical = [];
+        
+        foreach ($criticalFields as $critical) {
+            if (!isset($foundFields[$critical])) {
+                $missingCritical[] = $critical;
+            }
         }
+        
+        if (!empty($missingCritical)) {
+            throw new Exception('重要フィールドが見つかりません: ' . implode(', ', $missingCritical) . 
+                              '\n利用可能なヘッダー: ' . implode(', ', $headers));
+        }
+        
+        // フィールドマッピングを保存
+        $this->fieldMapping = $foundFields;
+        
+        return true;
     }
     
     /**
