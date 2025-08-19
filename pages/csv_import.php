@@ -1,6 +1,14 @@
 // テンプレートダウンロード機能
         function downloadTemplate() {
-            const fields = <?= json_encode(array_keys($csvTemplate['fields'])) ?>;
+            // Smiley配食事業の23フィールド定義
+            const fields = [
+                'delivery_date', 'user_code', 'user_name', 'company_code', 'company_name',
+                'department_code', 'department_name', 'product_code', 'product_name',
+                'category_code', 'category_name', 'quantity', 'unit_price', 'total_amount',
+                'supplier_code', 'supplier_name', 'corporation_code', 'corporation_name',
+                'employee_type_code', 'employee_type_name', 'delivery_time', 'cooperation_code', 'notes'
+            ];
+            
             const csvContent = fields.join(',') + '\n';
             
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -89,6 +97,37 @@ $csvTemplate = [
         'notes' => '備考（例: 特別指示）'
     ]
 ];
+
+// エラーハンドリング強化
+if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fields'])) {
+    $csvTemplate = [
+        'fields' => [
+            'delivery_date' => '配達日',
+            'user_code' => '利用者コード', 
+            'user_name' => '利用者名',
+            'company_code' => '配達先企業コード',
+            'company_name' => '配達先企業名',
+            'department_code' => '配達先部署コード',
+            'department_name' => '配達先部署名',
+            'product_code' => '商品コード',
+            'product_name' => '商品名',
+            'category_code' => '商品カテゴリコード',
+            'category_name' => '商品カテゴリ名',
+            'quantity' => '数量',
+            'unit_price' => '単価',
+            'total_amount' => '合計金額',
+            'supplier_code' => '給食業者コード',
+            'supplier_name' => '給食業者名',
+            'corporation_code' => '法人コード',
+            'corporation_name' => '法人名',
+            'employee_type_code' => '従業員区分コード',
+            'employee_type_name' => '従業員区分名',
+            'delivery_time' => '配達時間',
+            'cooperation_code' => '協力会社コード',
+            'notes' => '備考'
+        ]
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="ja">
