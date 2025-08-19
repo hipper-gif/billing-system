@@ -19,31 +19,31 @@ class SmileyCSVImporter {
     private $supplierCache = [];
     private $productCache = [];
     
-    // Smiley配食事業のCSVフィールド定義（23フィールド）
-    private $expectedFields = [
-        'delivery_date',          // 配達日
-        'user_code',             // 利用者コード
-        'user_name',             // 利用者名
-        'company_code',          // 配達先企業コード
-        'company_name',          // 配達先企業名
-        'department_code',       // 配達先部署コード
-        'department_name',       // 配達先部署名
-        'product_code',          // 商品コード
-        'product_name',          // 商品名
-        'category_code',         // 商品カテゴリコード
-        'category_name',         // 商品カテゴリ名
-        'quantity',              // 数量
-        'unit_price',            // 単価
-        'total_amount',          // 合計金額
-        'supplier_code',         // 給食業者コード
-        'supplier_name',         // 給食業者名
-        'corporation_code',      // 法人コード
-        'corporation_name',      // 法人名（株式会社Smiley）
-        'employee_type_code',    // 従業員区分コード
-        'employee_type_name',    // 従業員区分名
-        'delivery_time',         // 配達時間
-        'cooperation_code',      // 協力会社コード
-        'notes'                  // 備考
+    // 実際のSmiley配食システムCSVフィールドマッピング
+    private $actualFieldMapping = [
+        'corporation_code' => '法人CD',
+        'corporation_name' => '法人名', 
+        'company_code' => '事業所CD',
+        'company_name' => '事業所名',
+        'supplier_code' => '給食業者CD',
+        'supplier_name' => '給食業者名',
+        'category_code' => '給食区分CD',
+        'category_name' => '給食区分名',
+        'delivery_date' => '配達日',
+        'department_code' => '部門CD',
+        'department_name' => '部門名',
+        'user_code' => '社員CD',
+        'user_name' => '社員名',
+        'employee_type_code' => '雇用形態CD',
+        'employee_type_name' => '雇用形態名',
+        'product_code' => '給食ﾒﾆｭｰCD',
+        'product_name' => '給食ﾒﾆｭｰ名',
+        'quantity' => '数量',
+        'unit_price' => '単価',
+        'total_amount' => '金額',
+        'notes' => '備考',
+        'delivery_time' => '受取時間',
+        'cooperation_code' => '連携CD'
     ];
     
     public function __construct() {
@@ -156,72 +156,47 @@ class SmileyCSVImporter {
     }
     
     /**
-     * ヘッダー検証
+     * ヘッダー検証（実際のSmiley配食システム形式対応）
      */
     private function validateHeaders($headers) {
-        // フィールド数チェック（最低限必要なフィールド数）
-        if (count($headers) < 10) {
-            throw new Exception('CSVフィールド数が少なすぎます。最低10フィールド必要です。実際: ' . count($headers));
+        // 実際のヘッダー数チェック（23フィールド期待）
+        if (count($headers) !== 23) {
+            throw new Exception('CSVフィールド数が正しくありません。期待値: 23、実際: ' . count($headers) . 
+                              '\nヘッダー: ' . implode(', ', $headers));
         }
         
-        // ヘッダーの正規化
-        $normalizedHeaders = array_map(function($header) {
-            // 全角・半角スペース、特殊文字を除去して正規化
-            $normalized = trim($header);
-            $normalized = str_replace(['　', ' ', '\t', '\r', '\n'], '', $normalized);
-            $normalized = mb_strtolower($normalized, 'UTF-8');
-            return $normalized;
-        }, $headers);
+        // ヘッダーの正規化とマッピング作成
+        $this->fieldMapping = [];
         
-        // 必須フィールドの柔軟なマッピング
-        $requiredFieldPatterns = [
-            'delivery_date' => ['配達日', 'はいたつび', 'はいたつひ', 'delivery', 'date'],
-            'user_code' => ['利用者コード', 'りようしゃこーど', 'usercode', 'user', 'code'],
-            'user_name' => ['利用者名', 'りようしゃめい', 'username', 'name'],
-            'company_name' => ['配達先企業名', 'はいたつさききぎょうめい', 'company', 'きぎょう', '企業'],
-            'product_code' => ['商品コード', 'しょうひんこーど', 'productcode', 'product'],
-            'corporation_name' => ['法人名', 'ほうじんめい', 'corporation', 'corp']
-        ];
-        
-        $foundFields = [];
-        
-        foreach ($requiredFieldPatterns as $fieldKey => $patterns) {
-            $found = false;
+        foreach ($headers as $index => $header) {
+            $cleanHeader = trim($header);
             
-            foreach ($normalizedHeaders as $index => $header) {
-                foreach ($patterns as $pattern) {
-                    $normalizedPattern = mb_strtolower($pattern, 'UTF-8');
-                    if (strpos($header, $normalizedPattern) !== false) {
-                        $foundFields[$fieldKey] = $index;
-                        $found = true;
-                        break 2;
-                    }
-                }
-            }
-            
-            if (!$found) {
-                // デバッグ情報をログに記録
-                error_log("Missing field: {$fieldKey}. Available headers: " . implode(', ', $headers));
+            // 実際のフィールドマッピングと照合
+            $mappedField = array_search($cleanHeader, $this->actualFieldMapping);
+            if ($mappedField !== false) {
+                $this->fieldMapping[$mappedField] = $index;
             }
         }
         
-        // 必須フィールドのうち、最低限必要なものをチェック
-        $criticalFields = ['company_name', 'user_name'];
-        $missingCritical = [];
+        // 必須フィールドチェック
+        $requiredFields = ['corporation_name', 'company_name', 'delivery_date', 'user_code', 'user_name', 'product_code'];
+        $missingFields = [];
         
-        foreach ($criticalFields as $critical) {
-            if (!isset($foundFields[$critical])) {
-                $missingCritical[] = $critical;
+        foreach ($requiredFields as $required) {
+            if (!isset($this->fieldMapping[$required])) {
+                $missingFields[] = $required . ' (期待ヘッダー: ' . $this->actualFieldMapping[$required] . ')';
             }
         }
         
-        if (!empty($missingCritical)) {
-            throw new Exception('重要フィールドが見つかりません: ' . implode(', ', $missingCritical) . 
-                              '\n利用可能なヘッダー: ' . implode(', ', $headers));
+        if (!empty($missingFields)) {
+            throw new Exception('必須フィールドが見つかりません: ' . implode(', ', $missingFields) . 
+                              '\n実際のヘッダー: ' . implode(', ', $headers));
         }
         
-        // フィールドマッピングを保存
-        $this->fieldMapping = $foundFields;
+        // 法人名「Smiley」チェック用にヘッダー位置を記録
+        if (isset($this->fieldMapping['corporation_name'])) {
+            error_log("Corporation name field found at index: " . $this->fieldMapping['corporation_name']);
+        }
         
         return true;
     }
@@ -271,14 +246,24 @@ class SmileyCSVImporter {
     }
     
     /**
-     * 行データ正規化
+     * 行データ正規化（実際のSmiley配食システム形式対応）
      */
     private function normalizeRowData($row, $rowNumber) {
-        if (count($row) !== count($this->expectedFields)) {
-            throw new Exception("フィールド数が正しくありません（期待値: " . count($this->expectedFields) . "、実際: " . count($row) . "）");
+        if (count($row) !== 23) {
+            throw new Exception("フィールド数が正しくありません（期待値: 23、実際: " . count($row) . "）");
         }
         
-        $data = array_combine($this->expectedFields, $row);
+        // フィールドマッピングを使用してデータを正規化
+        $data = [];
+        
+        foreach ($this->actualFieldMapping as $internalKey => $csvHeader) {
+            if (isset($this->fieldMapping[$internalKey])) {
+                $index = $this->fieldMapping[$internalKey];
+                $data[$internalKey] = isset($row[$index]) ? trim($row[$index]) : '';
+            } else {
+                $data[$internalKey] = '';
+            }
+        }
         
         // データクリーニング
         foreach ($data as $key => $value) {
@@ -291,15 +276,15 @@ class SmileyCSVImporter {
         }
         
         if (empty($data['user_code'])) {
-            throw new Exception('利用者コードが未入力です');
+            throw new Exception('社員CDが未入力です');
         }
         
         if (empty($data['company_name'])) {
-            throw new Exception('配達先企業名が未入力です');
+            throw new Exception('事業所名が未入力です');
         }
         
         if (empty($data['product_code'])) {
-            throw new Exception('商品コードが未入力です');
+            throw new Exception('給食メニューCDが未入力です');
         }
         
         // 日付形式チェック・変換
