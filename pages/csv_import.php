@@ -468,8 +468,8 @@ if (!isset($csvTemplate) || !is_array($csvTemplate) || !isset($csvTemplate['fiel
                 this.resultArea = document.getElementById('resultArea');
                 this.resultContent = document.getElementById('resultContent');
                 
-                // API URL設定（本格版に戻す）
-                this.apiUrl = '../api/import.php';
+                // API URL設定（エラーチェック用）
+                this.apiUrl = '../api/error_check.php';
                 
                 this.initializeEventListeners();
             }
