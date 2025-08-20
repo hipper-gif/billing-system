@@ -1,310 +1,325 @@
 <?php
 /**
- * Smiley配食事業 CSVインポートAPI
- * Ajax通信でCSVファイルを処理
+ * CSVインポートAPI（根本解決版）
+ * FileUploadHandler対応・エラーハンドリング強化
  */
 
-// CORS対応
+// エラー設定
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+// ヘッダー設定
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
-// OPTIONSリクエスト対応
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
-
-// POSTリクエストのみ受付
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
+// レスポンス関数
+function sendResponse($success, $message, $data = [], $code = 200) {
+    http_response_code($code);
     echo json_encode([
-        'success' => false,
-        'message' => 'POSTリクエストのみ対応しています'
-    ]);
+        'success' => $success,
+        'message' => $message,
+        'data' => $data,
+        'timestamp' => date('Y-m-d H:i:s'),
+        'version' => '4.0.0'
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-// 必要なファイル読み込み
-require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../classes/SmileyCSVImporter.php';
-
-// セッション開始
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+// OPTIONS対応
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    sendResponse(true, 'OPTIONS OK');
 }
-
-// エラーハンドリング設定
-set_error_handler(function($severity, $message, $file, $line) {
-    throw new ErrorException($message, 0, $severity, $file, $line);
-});
 
 try {
-    // アップロードファイルチェック
-    if (!isset($_FILES['csv_file'])) {
-        throw new Exception('CSVファイルがアップロードされていません');
+    // 必須ファイル読み込み
+    require_once '../config/database.php';
+    require_once '../classes/Database.php';
+    require_once '../classes/SmileyCSVImporter.php';
+    require_once '../classes/FileUploadHandler.php';
+    
+    // SecurityHelperは必須ではないため、存在チェック
+    $securityHelperExists = false;
+    if (file_exists('../classes/SecurityHelper.php')) {
+        require_once '../classes/SecurityHelper.php';
+        $securityHelperExists = class_exists('SecurityHelper');
     }
     
-    $uploadedFile = $_FILES['csv_file'];
+    // リクエスト処理
+    switch ($_SERVER['REQUEST_METHOD']) {
+        case 'GET':
+            handleGetRequest($securityHelperExists);
+            break;
+        case 'POST':
+            handlePostRequest($securityHelperExists);
+            break;
+        default:
+            sendResponse(false, 'サポートされていないHTTPメソッドです', [], 405);
+    }
     
-    // アップロードエラーチェック
-    if ($uploadedFile['error'] !== UPLOAD_ERR_OK) {
-        $errorMessages = [
-            UPLOAD_ERR_INI_SIZE => 'ファイルサイズが上限を超えています（php.ini）',
-            UPLOAD_ERR_FORM_SIZE => 'ファイルサイズが上限を超えています（フォーム）',
-            UPLOAD_ERR_PARTIAL => 'ファイルが一部しかアップロードされませんでした',
-            UPLOAD_ERR_NO_FILE => 'ファイルがアップロードされませんでした',
-            UPLOAD_ERR_NO_TMP_DIR => '一時ディレクトリがありません',
-            UPLOAD_ERR_CANT_WRITE => 'ディスクへの書き込みに失敗しました',
-            UPLOAD_ERR_EXTENSION => 'PHP拡張によりアップロードが停止されました',
+} catch (Throwable $e) {
+    sendResponse(false, 'システム初期化エラー', [
+        'error' => $e->getMessage(),
+        'file' => basename($e->getFile()),
+        'line' => $e->getLine(),
+        'trace' => DEBUG_MODE ? $e->getTraceAsString() : 'デバッグモードで詳細確認可能'
+    ], 500);
+}
+
+/**
+ * GET リクエスト処理
+ */
+function handleGetRequest($securityHelperExists) {
+    $action = $_GET['action'] ?? 'status';
+    
+    switch ($action) {
+        case 'test':
+            sendResponse(true, 'CSVインポートAPI根本解決版 - 正常稼働中', [
+                'version' => '4.0.0',
+                'methods' => ['GET', 'POST'],
+                'php_version' => PHP_VERSION,
+                'security_helper' => $securityHelperExists,
+                'components' => [
+                    'Database' => class_exists('Database'),
+                    'SmileyCSVImporter' => class_exists('SmileyCSVImporter'),
+                    'FileUploadHandler' => class_exists('FileUploadHandler'),
+                    'SecurityHelper' => $securityHelperExists
+                ],
+                'endpoints' => [
+                    'GET ?action=test' => 'API動作確認',
+                    'GET ?action=status' => 'システム状況確認',
+                    'GET ?action=upload_info' => 'アップロード設定確認',
+                    'POST with csv_file' => 'CSVファイルインポート'
+                ]
+            ]);
+            break;
+            
+        case 'status':
+            try {
+                // Database接続確認
+                $db = Database::getInstance();
+                
+                // 基本テーブル確認
+                $tables = ['companies', 'departments', 'users', 'suppliers', 'products', 'orders'];
+                $tableStatus = [];
+                
+                foreach ($tables as $table) {
+                    try {
+                        $stmt = $db->query("SHOW TABLES LIKE '{$table}'");
+                        $tableStatus[$table] = $stmt->rowCount() > 0;
+                    } catch (Exception $e) {
+                        $tableStatus[$table] = false;
+                    }
+                }
+                
+                // ディレクトリ確認
+                $uploadDir = '../uploads/';
+                $dirStatus = [
+                    'uploads_dir_exists' => is_dir($uploadDir),
+                    'uploads_dir_writable' => is_writable($uploadDir),
+                    'uploads_dir_path' => realpath($uploadDir)
+                ];
+                
+                sendResponse(true, 'システム正常稼働中', [
+                    'database_connection' => true,
+                    'database_class' => get_class($db),
+                    'tables' => $tableStatus,
+                    'directories' => $dirStatus,
+                    'required_classes' => [
+                        'Database' => class_exists('Database'),
+                        'SmileyCSVImporter' => class_exists('SmileyCSVImporter'),
+                        'FileUploadHandler' => class_exists('FileUploadHandler'),
+                        'SecurityHelper' => $securityHelperExists
+                    ],
+                    'php_config' => [
+                        'upload_max_filesize' => ini_get('upload_max_filesize'),
+                        'post_max_size' => ini_get('post_max_size'),
+                        'max_execution_time' => ini_get('max_execution_time'),
+                        'memory_limit' => ini_get('memory_limit')
+                    ]
+                ]);
+                
+            } catch (Exception $e) {
+                sendResponse(false, 'システム異常', [
+                    'error' => $e->getMessage(),
+                    'file' => basename($e->getFile()),
+                    'line' => $e->getLine()
+                ], 500);
+            }
+            break;
+            
+        case 'upload_info':
+            try {
+                $fileHandler = new FileUploadHandler();
+                $uploadInfo = $fileHandler->getUploadInfo();
+                
+                sendResponse(true, 'アップロード設定情報', $uploadInfo);
+                
+            } catch (Exception $e) {
+                sendResponse(false, 'アップロード設定取得エラー', [
+                    'error' => $e->getMessage()
+                ], 500);
+            }
+            break;
+            
+        default:
+            sendResponse(false, '不明なアクションです', [
+                'available_actions' => ['test', 'status', 'upload_info'],
+                'provided_action' => $action
+            ], 400);
+    }
+}
+
+/**
+ * POST リクエスト処理（CSVインポート）
+ */
+function handlePostRequest($securityHelperExists) {
+    try {
+        // セッション開始（SecurityHelperがある場合のみ）
+        if ($securityHelperExists && method_exists('SecurityHelper', 'secureSessionStart')) {
+            SecurityHelper::secureSessionStart();
+        } else {
+            if (session_status() === PHP_SESSION_NONE) {
+                session_start();
+            }
+        }
+        
+        // CSRF検証（SecurityHelperがある場合のみ）
+        if ($securityHelperExists && method_exists('SecurityHelper', 'validateCSRFToken')) {
+            $csrfToken = $_POST['csrf_token'] ?? '';
+            if (!empty($csrfToken) && !SecurityHelper::validateCSRFToken($csrfToken)) {
+                sendResponse(false, 'CSRF検証エラー', [], 403);
+            }
+        }
+        
+        // ファイル存在確認
+        if (!isset($_FILES['csv_file'])) {
+            sendResponse(false, 'CSVファイルがアップロードされていません', [
+                'received_files' => array_keys($_FILES),
+                'expected_field' => 'csv_file'
+            ], 400);
+        }
+        
+        $file = $_FILES['csv_file'];
+        
+        // ファイルアップロード処理
+        $fileHandler = new FileUploadHandler();
+        $uploadResult = $fileHandler->uploadFile($file);
+        
+        if (!$uploadResult['success']) {
+            sendResponse(false, 'ファイルアップロードエラー', [
+                'errors' => $uploadResult['errors'],
+                'file_info' => [
+                    'name' => $file['name'] ?? 'unknown',
+                    'size' => $file['size'] ?? 0,
+                    'error' => $file['error'] ?? 'unknown'
+                ]
+            ], 400);
+        }
+        
+        // CSVインポート実行
+        $importer = new SmileyCSVImporter();
+        
+        $importOptions = [
+            'encoding' => $_POST['encoding'] ?? 'UTF-8',
+            'delimiter' => $_POST['delimiter'] ?? ',',
+            'has_header' => true
         ];
         
-        $message = $errorMessages[$uploadedFile['error']] ?? 'アップロードエラーが発生しました';
-        throw new Exception($message);
-    }
-    
-    // ファイル形式チェック
-    $fileName = $uploadedFile['name'];
-    $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-    
-    if ($fileExtension !== 'csv') {
-        throw new Exception('CSVファイルのみアップロード可能です（拡張子: .csv）');
-    }
-    
-    // MIMEタイプチェック
-    $allowedMimeTypes = [
-        'text/csv',
-        'text/plain',
-        'application/csv',
-        'application/vnd.ms-excel'
-    ];
-    
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mimeType = finfo_file($finfo, $uploadedFile['tmp_name']);
-    finfo_close($finfo);
-    
-    if (!in_array($mimeType, $allowedMimeTypes)) {
-        throw new Exception('無効なファイル形式です。CSVファイルをアップロードしてください。');
-    }
-    
-    // ファイルサイズチェック
-    $maxSize = defined('UPLOAD_MAX_SIZE') ? UPLOAD_MAX_SIZE : 10 * 1024 * 1024; // 10MB
-    if ($uploadedFile['size'] > $maxSize) {
-        $maxSizeMB = round($maxSize / 1024 / 1024, 1);
-        throw new Exception("ファイルサイズが大きすぎます（最大{$maxSizeMB}MB）");
-    }
-    
-    // 空ファイルチェック
-    if ($uploadedFile['size'] === 0) {
-        throw new Exception('ファイルが空です');
-    }
-    
-    // 一時保存ディレクトリ確認・作成
-    $tempDir = defined('TEMP_DIR') ? TEMP_DIR : __DIR__ . '/../temp/';
-    if (!is_dir($tempDir)) {
-        if (!mkdir($tempDir, 0755, true)) {
-            throw new Exception('一時ディレクトリの作成に失敗しました');
+        $startTime = microtime(true);
+        $result = $importer->importCSV($uploadResult['filepath'], $importOptions);
+        $processingTime = round(microtime(true) - $startTime, 2);
+        
+        // 一時ファイル削除
+        $fileHandler->deleteFile($uploadResult['filepath']);
+        
+        // セキュリティログ記録（SecurityHelperがある場合のみ）
+        if ($securityHelperExists && method_exists('SecurityHelper', 'logSecurityEvent')) {
+            SecurityHelper::logSecurityEvent('csv_import_success', [
+                'filename' => $uploadResult['original_name'],
+                'filesize' => $uploadResult['filesize'],
+                'records_total' => $result['stats']['total_rows'] ?? 0,
+                'records_success' => $result['stats']['success_rows'] ?? 0,
+                'processing_time' => $processingTime
+            ]);
         }
-    }
-    
-    // 安全なファイル名生成
-    $safeFileName = 'csv_import_' . date('YmdHis') . '_' . uniqid() . '.csv';
-    $tempFilePath = $tempDir . $safeFileName;
-    
-    // ファイル移動
-    if (!move_uploaded_file($uploadedFile['tmp_name'], $tempFilePath)) {
-        throw new Exception('ファイルの保存に失敗しました');
-    }
-    
-    // インポートオプション設定
-    $options = [
-        'encoding' => $_POST['encoding'] ?? 'UTF-8',
-        'delimiter' => $_POST['delimiter'] ?? ',',
-        'has_header' => true
-    ];
-    
-    // 区切り文字の変換
-    if ($options['delimiter'] === '\t') {
-        $options['delimiter'] = "\t";
-    }
-    
-    // セキュリティ: オプション値検証
-    $validEncodings = ['UTF-8', 'Shift_JIS', 'EUC-JP'];
-    if (!in_array($options['encoding'], $validEncodings)) {
-        $options['encoding'] = 'UTF-8';
-    }
-    
-    $validDelimiters = [',', "\t", ';'];
-    if (!in_array($options['delimiter'], $validDelimiters)) {
-        $options['delimiter'] = ',';
-    }
-    
-    // CSVインポート実行
-    $importer = new SmileyCSVImporter();
-    
-    // タイムアウト対策
-    set_time_limit(300); // 5分
-    ini_set('memory_limit', '256M');
-    
-    // インポート処理開始時間記録
-    $startTime = microtime(true);
-    
-    // メイン処理実行
-    $result = $importer->importCSV($tempFilePath, $options);
-    
-    // 処理時間計算
-    $executionTime = round(microtime(true) - $startTime, 2);
-    $result['execution_time'] = $executionTime;
-    
-    // 成功レスポンス
-    $response = [
-        'success' => true,
-        'message' => 'CSVインポートが正常に完了しました',
-        'data' => $result,
-        'stats' => $importer->getStats(),
-        'errors' => $importer->getErrors(),
-        'execution_time' => $executionTime,
-        'file_info' => [
-            'name' => $fileName,
-            'size' => $uploadedFile['size'],
-            'rows_processed' => $result['stats']['processed_rows'] ?? 0
-        ]
-    ];
-    
-    // ログ記録
-    if (defined('DEBUG_MODE') && DEBUG_MODE) {
-        error_log("CSV Import Success: {$fileName}, Rows: {$result['stats']['processed_rows']}, Time: {$executionTime}s");
-    }
-    
-    // 一時ファイル削除
-    if (file_exists($tempFilePath)) {
-        unlink($tempFilePath);
-    }
-    
-    // 結果出力
-    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-    
-} catch (Exception $e) {
-    // エラーレスポンス
-    $errorResponse = [
-        'success' => false,
-        'message' => $e->getMessage(),
-        'error_code' => $e->getCode(),
-        'file_info' => [
-            'name' => $_FILES['csv_file']['name'] ?? 'unknown',
-            'size' => $_FILES['csv_file']['size'] ?? 0
-        ]
-    ];
-    
-    // デバッグ情報追加
-    if (defined('DEBUG_MODE') && DEBUG_MODE) {
-        $errorResponse['debug'] = [
-            'file' => $e->getFile(),
-            'line' => $e->getLine(),
-            'trace' => $e->getTraceAsString()
-        ];
-    }
-    
-    // エラーログ記録
-    error_log("CSV Import Error: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
-    
-    // 一時ファイル削除（エラーの場合も）
-    if (isset($tempFilePath) && file_exists($tempFilePath)) {
-        unlink($tempFilePath);
-    }
-    
-    // HTTPステータス設定
-    http_response_code(400);
-    
-    // エラーレスポンス出力
-    echo json_encode($errorResponse, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-    
-} catch (Error $e) {
-    // 致命的エラー対応
-    $fatalErrorResponse = [
-        'success' => false,
-        'message' => 'システムエラーが発生しました。管理者にお問い合わせください。',
-        'error_type' => 'fatal_error'
-    ];
-    
-    if (defined('DEBUG_MODE') && DEBUG_MODE) {
-        $fatalErrorResponse['debug'] = [
-            'message' => $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine()
-        ];
-    }
-    
-    error_log("CSV Import Fatal Error: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
-    
-    http_response_code(500);
-    echo json_encode($fatalErrorResponse, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-}
-
-/**
- * ファイルサイズを人間が読みやすい形式に変換
- */
-function formatFileSize($bytes) {
-    $units = ['B', 'KB', 'MB', 'GB'];
-    $bytes = max($bytes, 0);
-    $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-    $pow = min($pow, count($units) - 1);
-    
-    $bytes /= pow(1024, $pow);
-    
-    return round($bytes, 2) . ' ' . $units[$pow];
-}
-
-/**
- * CSV文字エンコーディング自動検出
- */
-function detectCSVEncoding($filePath) {
-    $content = file_get_contents($filePath, false, null, 0, 1024); // 最初の1KBで判定
-    
-    $encodings = ['UTF-8', 'Shift_JIS', 'EUC-JP', 'ASCII'];
-    
-    foreach ($encodings as $encoding) {
-        if (mb_check_encoding($content, $encoding)) {
-            return $encoding;
+        
+        // 成功レスポンス
+        sendResponse(true, 'CSVインポートが正常に完了しました', [
+            'batch_id' => $result['batch_id'],
+            'filename' => $uploadResult['original_name'],
+            'stats' => [
+                'total_records' => $result['stats']['total_rows'] ?? 0,
+                'success_records' => $result['stats']['success_rows'] ?? 0,
+                'error_records' => $result['stats']['error_rows'] ?? 0,
+                'new_companies' => $result['stats']['new_companies'] ?? 0,
+                'new_departments' => $result['stats']['new_departments'] ?? 0,
+                'new_users' => $result['stats']['new_users'] ?? 0,
+                'new_products' => $result['stats']['new_products'] ?? 0,
+                'duplicate_orders' => $result['stats']['duplicate_orders'] ?? 0,
+                'processing_time' => $processingTime . '秒'
+            ],
+            'errors' => array_slice($result['errors'] ?? [], 0, 10), // 最初の10件のみ
+            'has_more_errors' => count($result['errors'] ?? []) > 10,
+            'summary_message' => $result['summary_message'] ?? '',
+            'import_details' => [
+                'upload_info' => [
+                    'original_filename' => $uploadResult['original_name'],
+                    'upload_filename' => $uploadResult['filename'],
+                    'file_size' => round($uploadResult['filesize'] / 1024, 2) . 'KB'
+                ],
+                'processing_info' => [
+                    'encoding_used' => $importOptions['encoding'],
+                    'delimiter_used' => $importOptions['delimiter'],
+                    'batch_id' => $result['batch_id']
+                ]
+            ]
+        ]);
+        
+    } catch (Throwable $e) {
+        // エラーログ記録（SecurityHelperがある場合のみ）
+        if ($securityHelperExists && method_exists('SecurityHelper', 'logSecurityEvent')) {
+            SecurityHelper::logSecurityEvent('csv_import_error', [
+                'error_message' => $e->getMessage(),
+                'file' => basename($e->getFile()),
+                'line' => $e->getLine(),
+                'uploaded_file' => $_FILES['csv_file']['name'] ?? 'unknown'
+            ]);
         }
+        
+        // アップロードファイルがある場合は削除
+        if (isset($uploadResult) && $uploadResult['success']) {
+            $fileHandler->deleteFile($uploadResult['filepath']);
+        }
+        
+        sendResponse(false, 'CSVインポート中にエラーが発生しました', [
+            'error_message' => $e->getMessage(),
+            'error_file' => basename($e->getFile()),
+            'error_line' => $e->getLine(),
+            'troubleshooting' => [
+                'check_csv_format' => 'CSVファイルが23列の正しい形式であることを確認してください',
+                'check_file_encoding' => 'ファイルのエンコーディング（UTF-8またはShift-JIS）を確認してください',
+                'check_file_size' => 'ファイルサイズが10MB以下であることを確認してください',
+                'check_corporation_name' => '法人名が「株式会社Smiley」であることを確認してください'
+            ],
+            'debug_info' => DEBUG_MODE ? [
+                'trace' => $e->getTraceAsString(),
+                'previous' => $e->getPrevious() ? $e->getPrevious()->getMessage() : null
+            ] : 'デバッグモードで詳細確認可能'
+        ], 500);
     }
-    
-    return 'UTF-8'; // デフォルト
 }
 
 /**
- * CSVファイルの基本検証
+ * システム定数定義（config/database.phpで定義されていない場合のフォールバック）
  */
-function validateCSVStructure($filePath, $expectedFieldCount = 23) {
-    $handle = fopen($filePath, 'r');
-    if (!$handle) {
-        throw new Exception('CSVファイルを開けませんでした');
-    }
-    
-    // ヘッダー行読み込み
-    $header = fgetcsv($handle);
-    fclose($handle);
-    
-    if ($header === false) {
-        throw new Exception('CSVファイルが空または読み込めませんでした');
-    }
-    
-    // フィールド数チェック
-    if (count($header) !== $expectedFieldCount) {
-        throw new Exception("CSVフィールド数が正しくありません。期待値: {$expectedFieldCount}、実際: " . count($header));
-    }
-    
-    return true;
+if (!defined('DEBUG_MODE')) {
+    define('DEBUG_MODE', false);
 }
 
-// 実行時間制限解除（大容量ファイル対応）
-if (function_exists('ignore_user_abort')) {
-    ignore_user_abort(true);
-}
-
-// メモリ制限緩和
-if (function_exists('ini_set')) {
-    ini_set('memory_limit', '512M');
+if (!defined('UPLOAD_MAX_SIZE')) {
+    define('UPLOAD_MAX_SIZE', 10 * 1024 * 1024); // 10MB
 }
 ?>
