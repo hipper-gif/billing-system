@@ -1,10 +1,10 @@
 <?php
 /**
- * 完全修正版 CSVインポートAPI
- * api/import.php - クラス重複エラー対策版
+ * 完全動作版 CSVインポートAPI - 最終版
+ * api/import.php
  */
 
-// エラー表示設定
+// エラー設定
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
@@ -15,77 +15,58 @@ header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
-// OPTIONS リクエスト対応
+// OPTIONS対応
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// エラーハンドリング関数
-function sendError($message, $code = 400, $details = []) {
+// レスポンス関数
+function sendResponse($success, $message, $data = [], $code = 200) {
     http_response_code($code);
     echo json_encode([
-        'success' => false,
-        'error' => $message,
-        'details' => $details,
-        'timestamp' => date('Y-m-d H:i:s')
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-// 成功レスポンス関数
-function sendSuccess($data, $message = 'Success') {
-    echo json_encode([
-        'success' => true,
+        'success' => $success,
         'message' => $message,
         'data' => $data,
-        'timestamp' => date('Y-m-d H:i:s')
+        'timestamp' => date('Y-m-d H:i:s'),
+        'version' => '3.0.0'
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 try {
-    // 1. データベース設定読み込み（一度だけ）
-    if (!defined('DB_CONFIG_LOADED')) {
-        require_once '../config/database.php';
-        define('DB_CONFIG_LOADED', true);
+    // 1. 必須設定読み込み
+    require_once '../config/database.php';
+    
+    // 2. 必要クラス読み込み（重複チェック）
+    if (!class_exists('Database')) {
+        require_once '../classes/Database.php';
+    }
+    if (!class_exists('SecurityHelper')) {
+        require_once '../classes/SecurityHelper.php';
+    }
+    if (!class_exists('SmileyCSVImporter')) {
+        require_once '../classes/SmileyCSVImporter.php';
     }
     
-    // 2. ClassLoader使用した安全な読み込み
-    if (!class_exists('ClassLoader')) {
-        require_once '../classes/ClassLoader.php';
-    }
-    
-    // 3. 必要クラスを安全に読み込み
-    $loader = ClassLoader::getInstance();
-    $loadResult = ClassLoader::loadRequiredClasses('../classes');
-    
-    if (!$loadResult['success']) {
-        sendError('クラス読み込みエラー', 500, $loadResult);
-    }
-    
-    // 4. メソッド別処理
+    // 3. リクエスト処理
     switch ($_SERVER['REQUEST_METHOD']) {
         case 'GET':
             handleGetRequest();
             break;
-            
         case 'POST':
             handlePostRequest();
             break;
-            
         default:
-            sendError('対応していないメソッドです', 405);
+            sendResponse(false, 'サポートされていないメソッドです', [], 405);
     }
     
 } catch (Throwable $e) {
-    // PHP7対応のエラーキャッチ
-    sendError('システムエラーが発生しました', 500, [
-        'error_message' => $e->getMessage(),
+    sendResponse(false, 'システムエラーが発生しました', [
+        'error' => $e->getMessage(),
         'file' => basename($e->getFile()),
-        'line' => $e->getLine(),
-        'type' => get_class($e)
-    ]);
+        'line' => $e->getLine()
+    ], 500);
 }
 
 /**
@@ -96,27 +77,25 @@ function handleGetRequest() {
     
     switch ($action) {
         case 'test':
-            // テスト応答
-            sendSuccess([
-                'message' => 'CSVインポートAPI正常稼働中',
-                'version' => '2.0.0',
+            sendResponse(true, 'CSVインポートAPI正常稼働中 - 最終版', [
+                'version' => '3.0.0',
                 'methods' => ['GET', 'POST'],
-                'loaded_classes' => ClassLoader::getLoadedClasses(),
                 'php_version' => PHP_VERSION,
-                'memory_usage' => memory_get_usage(true) . ' bytes'
+                'endpoints' => [
+                    'GET ?action=test' => 'API動作確認',
+                    'GET ?action=status' => 'システム状況確認',
+                    'GET ?action=db_test' => 'データベース接続確認',
+                    'POST with csv_file' => 'CSVファイルインポート'
+                ]
             ]);
             break;
             
         case 'status':
-            // システム状態確認
             try {
-                if (!class_exists('Database')) {
-                    sendError('Databaseクラスが読み込まれていません', 500);
-                }
+                // Database接続確認
+                $db = Database::getInstance();
                 
-                $db = new Database();
-                
-                // 基本テーブル存在確認
+                // 基本テーブル確認
                 $tables = ['companies', 'departments', 'users', 'suppliers', 'products', 'orders'];
                 $tableStatus = [];
                 
@@ -129,33 +108,47 @@ function handleGetRequest() {
                     }
                 }
                 
-                sendSuccess([
+                sendResponse(true, 'システム正常稼働中', [
                     'database_connection' => true,
+                    'database_class' => get_class($db),
                     'tables' => $tableStatus,
-                    'loaded_classes' => ClassLoader::getLoadedClasses(),
-                    'timestamp' => date('Y-m-d H:i:s')
-                ], 'システム正常稼働中');
+                    'required_classes' => [
+                        'Database' => class_exists('Database'),
+                        'SecurityHelper' => class_exists('SecurityHelper'),
+                        'SmileyCSVImporter' => class_exists('SmileyCSVImporter')
+                    ]
+                ]);
                 
             } catch (Exception $e) {
-                sendError('データベース接続エラー', 500, [
-                    'error' => $e->getMessage(),
-                    'loaded_classes' => ClassLoader::getLoadedClasses()
-                ]);
+                sendResponse(false, 'システム異常', [
+                    'error' => $e->getMessage()
+                ], 500);
             }
             break;
             
-        case 'classes':
-            // クラス読み込み状況確認
-            sendSuccess([
-                'loaded_classes' => ClassLoader::getLoadedClasses(),
-                'declared_classes' => array_filter(get_declared_classes(), function($class) {
-                    return in_array($class, ['Database', 'SmileyCSVImporter', 'SecurityHelper', 'ClassLoader']);
-                })
-            ]);
+        case 'db_test':
+            try {
+                $db = Database::getInstance();
+                $stmt = $db->query("SELECT 1 as test, NOW() as current_time, DATABASE() as db_name");
+                $result = $stmt->fetch();
+                
+                sendResponse(true, 'データベース接続成功', [
+                    'connection_method' => 'Database::getInstance()',
+                    'query_result' => $result,
+                    'pdo_available' => $db->getConnection() !== null
+                ]);
+                
+            } catch (Exception $e) {
+                sendResponse(false, 'データベース接続エラー', [
+                    'error' => $e->getMessage()
+                ], 500);
+            }
             break;
             
         default:
-            sendError('不明なアクションです', 400);
+            sendResponse(false, '不明なアクションです', [
+                'available_actions' => ['test', 'status', 'db_test']
+            ], 400);
     }
 }
 
@@ -164,59 +157,55 @@ function handleGetRequest() {
  */
 function handlePostRequest() {
     try {
-        // 必要クラスの存在確認
-        $requiredClasses = ['Database', 'SmileyCSVImporter', 'SecurityHelper'];
-        foreach ($requiredClasses as $class) {
-            if (!class_exists($class)) {
-                sendError("必要なクラスが読み込まれていません: {$class}", 500);
-            }
-        }
-        
-        // セッション開始
+        // 1. セッション開始
         SecurityHelper::secureSessionStart();
         
-        // ファイルアップロード検証
+        // 2. ファイル検証
         if (!isset($_FILES['csv_file'])) {
-            sendError('CSVファイルがアップロードされていません', 400);
+            sendResponse(false, 'CSVファイルがアップロードされていません', [], 400);
         }
         
         $file = $_FILES['csv_file'];
         $fileValidation = SecurityHelper::validateFileUpload($file);
         
         if (!$fileValidation['valid']) {
-            sendError('ファイル検証エラー', 400, ['errors' => $fileValidation['errors']]);
+            sendResponse(false, 'ファイル検証エラー', [
+                'errors' => $fileValidation['errors']
+            ], 400);
         }
         
-        // データベース接続
-        $db = new Database();
+        // 3. データベース接続
+        $db = Database::getInstance();
         
-        // CSVインポーター初期化
+        // 4. CSVインポーター初期化
         $importer = new SmileyCSVImporter($db);
         
-        // インポートオプション設定
-        $importOptions = [
+        // 5. インポートオプション
+        $options = [
             'encoding' => $_POST['encoding'] ?? 'auto',
             'overwrite' => isset($_POST['overwrite']) ? (bool)$_POST['overwrite'] : false,
             'validate_smiley' => true,
             'dry_run' => isset($_POST['dry_run']) ? (bool)$_POST['dry_run'] : false
         ];
         
-        // CSVインポート実行
+        // 6. インポート実行
         $startTime = microtime(true);
-        $result = $importer->importFile($file['tmp_name'], $importOptions);
+        $result = $importer->importFile($file['tmp_name'], $options);
         $processingTime = round(microtime(true) - $startTime, 2);
         
-        // セキュリティログ記録
-        SecurityHelper::logSecurityEvent('csv_import', [
+        // 7. ログ記録
+        SecurityHelper::logSecurityEvent('csv_import_success', [
             'filename' => $file['name'],
             'filesize' => $file['size'],
-            'records_processed' => $result['stats']['total'] ?? 0,
+            'records_total' => $result['stats']['total'] ?? 0,
+            'records_success' => $result['stats']['success'] ?? 0,
             'processing_time' => $processingTime
         ]);
         
-        // 成功レスポンス
-        sendSuccess([
+        // 8. 成功レスポンス
+        sendResponse(true, 'CSVインポートが正常に完了しました', [
             'batch_id' => $result['batch_id'] ?? null,
+            'filename' => $file['name'],
             'stats' => [
                 'total_records' => $result['stats']['total'] ?? 0,
                 'success_records' => $result['stats']['success'] ?? 0,
@@ -224,23 +213,34 @@ function handlePostRequest() {
                 'duplicate_records' => $result['stats']['duplicate'] ?? 0,
                 'processing_time' => $processingTime . '秒'
             ],
-            'errors' => array_slice($result['errors'] ?? [], 0, 10),
-            'has_more_errors' => count($result['errors'] ?? []) > 10
-        ], 'CSVインポートが完了しました');
+            'errors' => array_slice($result['errors'] ?? [], 0, 5), // 最初の5件のみ
+            'has_more_errors' => count($result['errors'] ?? []) > 5,
+            'import_summary' => [
+                'database_connection' => 'Database::getInstance()',
+                'validation_passed' => true,
+                'encoding_detected' => $result['encoding'] ?? 'unknown'
+            ]
+        ]);
         
     } catch (Throwable $e) {
+        // エラーログ記録
         SecurityHelper::logSecurityEvent('csv_import_error', [
             'error_message' => $e->getMessage(),
             'file' => basename($e->getFile()),
-            'line' => $e->getLine()
+            'line' => $e->getLine(),
+            'uploaded_file' => $_FILES['csv_file']['name'] ?? 'unknown'
         ]);
         
-        sendError('CSVインポート処理でエラーが発生しました', 500, [
+        sendResponse(false, 'CSVインポート中にエラーが発生しました', [
             'error_message' => $e->getMessage(),
             'error_file' => basename($e->getFile()),
             'error_line' => $e->getLine(),
-            'loaded_classes' => ClassLoader::getLoadedClasses()
-        ]);
+            'troubleshooting' => [
+                'check_csv_format' => 'CSVファイルの形式を確認してください',
+                'check_file_encoding' => 'ファイルのエンコーディングを確認してください',
+                'check_file_size' => 'ファイルサイズが10MB以下であることを確認してください'
+            ]
+        ], 500);
     }
 }
 ?>
