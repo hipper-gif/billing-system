@@ -476,7 +476,7 @@
                     this.updateProgress(10, 'ファイルをアップロード中...');
 
                     // API呼び出し
-                    const response = await fetch('../api/import_500_debug.php', {
+                    const response = await fetch('../api/csv_error_analyzer.php', {
                         method: 'POST',
                         body: formData
                     });
