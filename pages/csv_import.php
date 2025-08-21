@@ -518,6 +518,9 @@
                 this.resultsContainer.style.display = 'block';
                 this.uploadArea.classList.remove('processing');
 
+                // デバッグ用：レスポンス内容をコンソールに表示
+                console.log('Import Result:', result);
+
                 if (result.success) {
                     this.showSuccessResults(result);
                 } else {
@@ -530,8 +533,8 @@
                 const statsGrid = document.getElementById('statsGrid');
                 const importDetails = document.getElementById('importDetails');
 
-                // 統計カード作成
-                const stats = result.data.stats;
+                // 統計カード作成（安全な値取得）
+                const stats = result.data.stats || {};
                 statsGrid.innerHTML = `
                     <div class="stat-card">
                         <div class="stat-number">${stats.total_records || 0}</div>
@@ -551,7 +554,7 @@
                     </div>
                 `;
 
-                // 詳細情報
+                // 詳細情報（安全な値取得）
                 importDetails.innerHTML = `
                     <ul class="list-unstyled">
                         <li><strong>バッチID:</strong> ${result.data.batch_id || 'N/A'}</li>
@@ -561,18 +564,29 @@
                     </ul>
                 `;
 
-                // エラーがある場合は表示
-                if (result.data.errors && result.data.errors.length > 0) {
+                // エラーがある場合は表示（安全チェック）
+                const errors = result.data.errors || [];
+                if (Array.isArray(errors) && errors.length > 0) {
                     const errorSection = document.createElement('div');
                     errorSection.className = 'mt-3';
                     errorSection.innerHTML = `
-                        <h6 class="text-warning">部分的なエラー (${result.data.errors.length}件)</h6>
+                        <h6 class="text-warning">部分的なエラー (${errors.length}件)</h6>
                         <div class="error-list" style="max-height: 150px;">
-                            ${result.data.errors.map(error => `
-                                <div class="error-item">
-                                    <strong>行${error.row}:</strong> ${error.errors.join(', ')}
-                                </div>
-                            `).join('')}
+                            ${errors.map(error => {
+                                if (typeof error === 'object' && error.errors) {
+                                    return `
+                                        <div class="error-item">
+                                            <strong>行${error.row || 'N/A'}:</strong> ${Array.isArray(error.errors) ? error.errors.join(', ') : error.errors}
+                                        </div>
+                                    `;
+                                } else {
+                                    return `
+                                        <div class="error-item">
+                                            ${typeof error === 'string' ? error : JSON.stringify(error)}
+                                        </div>
+                                    `;
+                                }
+                            }).join('')}
                         </div>
                         ${result.data.has_more_errors ? '<small class="text-muted">※ 他にもエラーがあります</small>' : ''}
                     `;
