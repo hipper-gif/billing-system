@@ -81,20 +81,6 @@
         .badge-warning { background-color: #fff3cd; color: #856404; }
         .badge-inactive { background-color: #f8d7da; color: #721c24; }
         
-        .filter-card {
-            background: white;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        }
-        
-        .loading-spinner {
-            display: none;
-            text-align: center;
-            padding: 2rem;
-        }
-        
         .user-avatar {
             width: 40px;
             height: 40px;
@@ -108,19 +94,10 @@
             font-size: 1.1rem;
         }
         
-        .pagination .page-link {
-            color: var(--smiley-green);
-            border-color: #dee2e6;
-        }
-        
-        .pagination .page-item.active .page-link {
-            background-color: var(--smiley-green);
-            border-color: var(--smiley-green);
-        }
-        
-        .form-select:focus, .form-control:focus {
-            border-color: var(--smiley-green);
-            box-shadow: 0 0 0 0.2rem rgba(46, 139, 87, 0.25);
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 2rem;
         }
         
         @media (max-width: 768px) {
@@ -169,11 +146,6 @@
             <div class="col">
                 <h2><i class="fas fa-users text-success me-2"></i>利用者管理</h2>
                 <p class="text-muted mb-0">配食サービス利用者の管理・統計確認</p>
-            </div>
-            <div class="col-auto">
-                <button class="btn btn-smiley" data-bs-toggle="modal" data-bs-target="#addUserModal">
-                    <i class="fas fa-plus me-2"></i>利用者追加
-                </button>
             </div>
         </div>
 
@@ -241,55 +213,12 @@
             </div>
         </div>
 
-        <!-- フィルター -->
-        <div class="filter-card">
-            <div class="row">
-                <div class="col-lg-3 col-md-6 mb-3">
-                    <label for="companyFilter" class="form-label">企業フィルター</label>
-                    <select class="form-select" id="companyFilter">
-                        <option value="">すべての企業</option>
-                    </select>
-                </div>
-                <div class="col-lg-3 col-md-6 mb-3">
-                    <label for="departmentFilter" class="form-label">部署フィルター</label>
-                    <select class="form-select" id="departmentFilter">
-                        <option value="">すべての部署</option>
-                    </select>
-                </div>
-                <div class="col-lg-3 col-md-6 mb-3">
-                    <label for="statusFilter" class="form-label">活動状況</label>
-                    <select class="form-select" id="statusFilter">
-                        <option value="all">すべて</option>
-                        <option value="active">活動中 (30日以内)</option>
-                        <option value="warning">注意 (30-90日前)</option>
-                        <option value="inactive">非活動 (90日以上)</option>
-                    </select>
-                </div>
-                <div class="col-lg-3 col-md-6 mb-3">
-                    <label for="searchInput" class="form-label">検索</label>
-                    <div class="input-group">
-                        <input type="text" class="form-control" id="searchInput" placeholder="名前・メール・電話">
-                        <button class="btn btn-outline-secondary" type="button" id="searchBtn">
-                            <i class="fas fa-search"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- 利用者一覧 -->
         <div class="card">
             <div class="card-header bg-white">
                 <div class="d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">利用者一覧</h5>
-                    <div class="d-flex align-items-center">
-                        <span class="text-muted me-3" id="resultCount">-</span>
-                        <select class="form-select form-select-sm" id="perPageSelect" style="width: auto;">
-                            <option value="20">20件/ページ</option>
-                            <option value="50">50件/ページ</option>
-                            <option value="100">100件/ページ</option>
-                        </select>
-                    </div>
+                    <span class="text-muted" id="resultCount">-</span>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -318,521 +247,188 @@
                         </tbody>
                     </table>
                 </div>
-
-                <!-- ページネーション -->
-                <div class="d-flex justify-content-between align-items-center p-3">
-                    <div class="text-muted" id="paginationInfo">-</div>
-                    <nav>
-                        <ul class="pagination mb-0" id="pagination">
-                            <!-- 動的に生成 -->
-                        </ul>
-                    </nav>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 利用者追加モーダル -->
-    <div class="modal fade" id="addUserModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">新規利用者追加</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="addUserForm">
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="addCompanyId" class="form-label">企業 <span class="text-danger">*</span></label>
-                                <select class="form-select" id="addCompanyId" name="company_id" required>
-                                    <option value="">企業を選択</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="addDepartmentId" class="form-label">部署 <span class="text-danger">*</span></label>
-                                <select class="form-select" id="addDepartmentId" name="department_id" required>
-                                    <option value="">部署を選択</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="addName" class="form-label">利用者名 <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="addName" name="name" required maxlength="100">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="addEmail" class="form-label">メールアドレス</label>
-                                <input type="email" class="form-control" id="addEmail" name="email" maxlength="255">
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="addPhone" class="form-label">電話番号</label>
-                                <input type="tel" class="form-control" id="addPhone" name="phone" maxlength="20">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="addPaymentMethod" class="form-label">支払い方法</label>
-                                <select class="form-select" id="addPaymentMethod" name="payment_method">
-                                    <option value="company">企業請求</option>
-                                    <option value="individual">個人請求</option>
-                                    <option value="cash">現金</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="addAddress" class="form-label">住所</label>
-                            <textarea class="form-control" id="addAddress" name="address" rows="2" maxlength="255"></textarea>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="addAllergies" class="form-label">アレルギー情報</label>
-                                <textarea class="form-control" id="addAllergies" name="allergies" rows="2" maxlength="500"></textarea>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="addDietaryRestrictions" class="form-label">食事制限</label>
-                                <textarea class="form-control" id="addDietaryRestrictions" name="dietary_restrictions" rows="2" maxlength="500"></textarea>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
-                    <button type="button" class="btn btn-smiley" id="saveUserBtn">
-                        <i class="fas fa-save me-2"></i>保存
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 利用者編集モーダル -->
-    <div class="modal fade" id="editUserModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">利用者情報編集</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="editUserForm">
-                        <input type="hidden" id="editUserId" name="user_id">
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="editCompanyId" class="form-label">企業 <span class="text-danger">*</span></label>
-                                <select class="form-select" id="editCompanyId" name="company_id" required>
-                                    <option value="">企業を選択</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="editDepartmentId" class="form-label">部署 <span class="text-danger">*</span></label>
-                                <select class="form-select" id="editDepartmentId" name="department_id" required>
-                                    <option value="">部署を選択</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="editName" class="form-label">利用者名 <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="editName" name="name" required maxlength="100">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="editEmail" class="form-label">メールアドレス</label>
-                                <input type="email" class="form-control" id="editEmail" name="email" maxlength="255">
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-4 mb-3">
-                                <label for="editPhone" class="form-label">電話番号</label>
-                                <input type="tel" class="form-control" id="editPhone" name="phone" maxlength="20">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label for="editPaymentMethod" class="form-label">支払い方法</label>
-                                <select class="form-select" id="editPaymentMethod" name="payment_method">
-                                    <option value="company">企業請求</option>
-                                    <option value="individual">個人請求</option>
-                                    <option value="cash">現金</option>
-                                </select>
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label for="editStatus" class="form-label">ステータス</label>
-                                <select class="form-select" id="editStatus" name="status">
-                                    <option value="active">有効</option>
-                                    <option value="inactive">無効</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="editAddress" class="form-label">住所</label>
-                            <textarea class="form-control" id="editAddress" name="address" rows="2" maxlength="255"></textarea>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="editAllergies" class="form-label">アレルギー情報</label>
-                                <textarea class="form-control" id="editAllergies" name="allergies" rows="2" maxlength="500"></textarea>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="editDietaryRestrictions" class="form-label">食事制限</label>
-                                <textarea class="form-control" id="editDietaryRestrictions" name="dietary_restrictions" rows="2" maxlength="500"></textarea>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
-                    <button type="button" class="btn btn-smiley" id="updateUserBtn">
-                        <i class="fas fa-save me-2"></i>更新
-                    </button>
-                </div>
             </div>
         </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
     <script>
-        class UserManager {
-            constructor() {
-                this.currentPage = 1;
-                this.perPage = 20;
-                this.totalPages = 1;
-                this.filters = {
-                    company_id: '',
-                    department_id: '',
-                    status: 'all',
-                    search: ''
-                };
-                
-                this.init();
-            }
+        // シンプルで確実な実装
+        async function loadUsers() {
+            console.log('利用者データ読み込み開始');
             
-            async init() {
-                await this.loadCompanies();
-                await this.loadUsers();
-                this.setupEventListeners();
-            }
+            // ローディング表示
+            document.getElementById('loadingSpinner').style.display = 'block';
             
-            setupEventListeners() {
-                // フィルター変更
-                document.getElementById('companyFilter').addEventListener('change', (e) => {
-                    this.filters.company_id = e.target.value;
-                    this.loadDepartments(e.target.value);
-                    this.resetPagination();
-                    this.loadUsers();
-                });
+            try {
+                const response = await fetch('../api/users.php');
                 
-                document.getElementById('departmentFilter').addEventListener('change', (e) => {
-                    this.filters.department_id = e.target.value;
-                    this.resetPagination();
-                    this.loadUsers();
-                });
-                
-                document.getElementById('statusFilter').addEventListener('change', (e) => {
-                    this.filters.status = e.target.value;
-                    this.resetPagination();
-                    this.loadUsers();
-                });
-                
-                // 検索
-                document.getElementById('searchBtn').addEventListener('click', () => {
-                    this.filters.search = document.getElementById('searchInput').value;
-                    this.resetPagination();
-                    this.loadUsers();
-                });
-                
-                document.getElementById('searchInput').addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        this.filters.search = e.target.value;
-                        this.resetPagination();
-                        this.loadUsers();
-                    }
-                });
-                
-                // ページサイズ変更
-                document.getElementById('perPageSelect').addEventListener('change', (e) => {
-                    this.perPage = parseInt(e.target.value);
-                    this.resetPagination();
-                    this.loadUsers();
-                });
-                
-                // 利用者追加
-                document.getElementById('saveUserBtn').addEventListener('click', () => {
-                    this.saveUser();
-                });
-                
-                // 利用者更新
-                document.getElementById('updateUserBtn').addEventListener('click', () => {
-                    this.updateUser();
-                });
-                
-                // モーダル内企業選択
-                document.getElementById('addCompanyId').addEventListener('change', (e) => {
-                    this.loadDepartmentsForModal(e.target.value, 'addDepartmentId');
-                });
-                
-                document.getElementById('editCompanyId').addEventListener('change', (e) => {
-                    this.loadDepartmentsForModal(e.target.value, 'editDepartmentId');
-                });
-            }
-            
-            async loadCompanies() {
-                try {
-                    const response = await fetch('../api/companies.php');
-                    const data = await response.json();
-                    
-                    if (data.companies) {
-                        this.populateCompanySelect('companyFilter', data.companies);
-                        this.populateCompanySelect('addCompanyId', data.companies);
-                        this.populateCompanySelect('editCompanyId', data.companies);
-                    }
-                } catch (error) {
-                    console.error('企業データの読み込みに失敗:', error);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-            }
-            
-            populateCompanySelect(selectId, companies) {
-                const select = document.getElementById(selectId);
-                const defaultOption = select.querySelector('option[value=""]');
-                select.innerHTML = '';
-                select.appendChild(defaultOption);
                 
-                companies.forEach(company => {
-                    const option = document.createElement('option');
-                    option.value = company.id;
-                    option.textContent = company.name;
-                    select.appendChild(option);
-                });
-            }
-            
-            async loadDepartments(companyId) {
-                const departmentSelect = document.getElementById('departmentFilter');
-                departmentSelect.innerHTML = '<option value="">すべての部署</option>';
+                const data = await response.json();
+                console.log('データ取得成功:', data);
                 
-                if (!companyId) return;
-                
-                try {
-                    const response = await fetch(`../api/departments.php?company_id=${companyId}`);
-                    const data = await response.json();
-                    
-                    if (data.departments) {
-                        data.departments.forEach(dept => {
-                            const option = document.createElement('option');
-                            option.value = dept.id;
-                            option.textContent = dept.name;
-                            departmentSelect.appendChild(option);
-                        });
-                    }
-                } catch (error) {
-                    console.error('部署データの読み込みに失敗:', error);
+                // 統計情報表示
+                if (data.stats) {
+                    document.getElementById('totalUsers').textContent = parseInt(data.stats.total_users || 0).toLocaleString();
+                    document.getElementById('activeUsers').textContent = parseInt(data.stats.active_users || 0).toLocaleString();
+                    document.getElementById('recentActiveUsers').textContent = parseInt(data.stats.recent_active_users || 0).toLocaleString();
+                    document.getElementById('totalSales').textContent = `¥${parseInt(data.stats.total_sales || 0).toLocaleString()}`;
                 }
-            }
-            
-            async loadDepartmentsForModal(companyId, selectId) {
-                const select = document.getElementById(selectId);
-                select.innerHTML = '<option value="">部署を選択</option>';
                 
-                if (!companyId) return;
-                
-                try {
-                    const response = await fetch(`../api/departments.php?company_id=${companyId}`);
-                    const data = await response.json();
-                    
-                    if (data.departments) {
-                        data.departments.forEach(dept => {
-                            const option = document.createElement('option');
-                            option.value = dept.id;
-                            option.textContent = dept.name;
-                            select.appendChild(option);
-                        });
-                    }
-                } catch (error) {
-                    console.error('部署データの読み込みに失敗:', error);
+                // 利用者一覧表示
+                if (data.users && data.users.length > 0) {
+                    displayUsers(data.users);
+                    document.getElementById('resultCount').textContent = `${data.users.length}件`;
+                } else {
+                    showNoData();
                 }
-            }
-            
-            async loadUsers() {
-                this.showLoading();
                 
-                try {
-                    const params = new URLSearchParams({
-                        page: this.currentPage,
-                        limit: this.perPage,
-                        ...this.filters
-                    });
-                    
-                    const response = await fetch(`../api/users.php?${params}`);
-                    const data = await response.json();
-                    
-                    if (data.users) {
-                        this.renderUsers(data.users);
-                        this.renderPagination(data.pagination);
-                        this.renderStats(data.stats);
-                        this.updateResultCount(data.pagination.total_count);
-                    }
-                } catch (error) {
-                    console.error('利用者データの読み込みに失敗:', error);
-                    this.showError('利用者データの読み込みに失敗しました');
-                } finally {
-                    this.hideLoading();
-                }
+            } catch (error) {
+                console.error('エラー:', error);
+                showError('データの読み込みに失敗しました: ' + error.message);
+            } finally {
+                document.getElementById('loadingSpinner').style.display = 'none';
             }
+        }
+        
+        function displayUsers(users) {
+            const tbody = document.getElementById('usersTableBody');
+            tbody.innerHTML = '';
             
-            renderUsers(users) {
-                const tbody = document.getElementById('usersTableBody');
-                tbody.innerHTML = '';
+            users.forEach(user => {
+                const row = document.createElement('tr');
                 
-                users.forEach(user => {
-                    const row = document.createElement('tr');
-                    
-                    // 企業名・部署名の表示を修正
-                    const companyName = user.company_name_display || user.company_name_from_table || user.company_name || '-';
-                    const departmentName = user.department_name_display || user.department_name || user.department || '-';
-                    
-                    row.innerHTML = `
-                        <td>
-                            <div class="d-flex align-items-center">
-                                <div class="user-avatar me-3">
-                                    ${user.user_name.charAt(0)}
-                                </div>
-                                <div>
-                                    <div class="fw-semibold">${this.escapeHtml(user.user_name)}</div>
-                                    <small class="text-muted">${user.email || '-'}</small>
-                                </div>
+                // 企業名・部署名の表示
+                const companyName = user.company_name_display || user.company_name_from_table || user.company_name || '-';
+                const departmentName = user.department_name_display || user.department_name || user.department || '-';
+                
+                // 活動状況の表示
+                const activityBadge = getActivityBadge(user.activity_status);
+                
+                // 支払い方法の表示
+                const paymentMethod = getPaymentMethodText(user.payment_method);
+                
+                // 最終注文日の表示
+                const lastOrderDate = user.last_order_date ? formatDate(user.last_order_date) : '-';
+                
+                row.innerHTML = `
+                    <td>
+                        <div class="d-flex align-items-center">
+                            <div class="user-avatar me-3">
+                                ${escapeHtml(user.user_name).charAt(0)}
                             </div>
-                        </td>
-                        <td>
-                            <div class="fw-semibold">${this.escapeHtml(companyName)}</div>
-                            <small class="text-muted">${this.escapeHtml(departmentName)}</small>
-                        </td>
-                        <td class="d-none-mobile">
-                            <div>${user.phone || '-'}</div>
-                            <small class="text-muted">${this.getPaymentMethodText(user.payment_method)}</small>
-                        </td>
-                        <td>
-                            <span class="badge badge-${user.activity_status}">
-                                ${this.getActivityStatusText(user.activity_status)}
-                            </span>
-                        </td>
-                        <td class="d-none-mobile">
-                            <div>注文: ${parseInt(user.total_orders).toLocaleString()}回</div>
-                            <small class="text-muted">金額: ¥${parseInt(user.total_amount).toLocaleString()}</small>
-                        </td>
-                        <td class="d-none-mobile">
-                            ${user.last_order_date ? this.formatDate(user.last_order_date) : '-'}
-                        </td>
-                        <td>
-                            <div class="dropdown">
-                                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
-                                    操作
-                                </button>
-                                <ul class="dropdown-menu">
-                                    <li><a class="dropdown-item" href="user_detail.php?id=${user.id}">
-                                        <i class="fas fa-eye me-2"></i>詳細
-                                    </a></li>
-                                    <li><a class="dropdown-item" href="#" onclick="userManager.editUser(${user.id})">
-                                        <i class="fas fa-edit me-2"></i>編集
-                                    </a></li>
-                                    <li><hr class="dropdown-divider"></li>
-                                    <li><a class="dropdown-item text-danger" href="#" onclick="userManager.deleteUser(${user.id}, '${this.escapeHtml(user.user_name)}')">
-                                        <i class="fas fa-trash me-2"></i>削除
-                                    </a></li>
-                                </ul>
+                            <div>
+                                <div class="fw-semibold">${escapeHtml(user.user_name)}</div>
+                                <small class="text-muted">${user.email || '-'}</small>
                             </div>
-                        </td>
-                    `;
-                    tbody.appendChild(row);
-                });
-            }
-            
-            renderPagination(pagination) {
-                this.totalPages = pagination.total_pages;
-                const paginationEl = document.getElementById('pagination');
-                paginationEl.innerHTML = '';
+                        </div>
+                    </td>
+                    <td>
+                        <div class="fw-semibold">${escapeHtml(companyName)}</div>
+                        <small class="text-muted">${escapeHtml(departmentName)}</small>
+                    </td>
+                    <td class="d-none-mobile">
+                        <div>${user.phone || '-'}</div>
+                        <small class="text-muted">${paymentMethod}</small>
+                    </td>
+                    <td>
+                        ${activityBadge}
+                    </td>
+                    <td class="d-none-mobile">
+                        <div>注文: ${parseInt(user.total_orders || 0).toLocaleString()}回</div>
+                        <small class="text-muted">金額: ¥${parseInt(user.total_amount || 0).toLocaleString()}</small>
+                    </td>
+                    <td class="d-none-mobile">
+                        ${lastOrderDate}
+                    </td>
+                    <td>
+                        <div class="dropdown">
+                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                                操作
+                            </button>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="user_detail.php?id=${user.id}">
+                                    <i class="fas fa-eye me-2"></i>詳細
+                                </a></li>
+                            </ul>
+                        </div>
+                    </td>
+                `;
                 
-                // 前へボタン
-                const prevLi = document.createElement('li');
-                prevLi.className = `page-item ${this.currentPage === 1 ? 'disabled' : ''}`;
-                prevLi.innerHTML = `<a class="page-link" href="#" onclick="userManager.changePage(${this.currentPage - 1})">前へ</a>`;
-                paginationEl.appendChild(prevLi);
-                
-                // ページ番号
-                const startPage = Math.max(1, this.currentPage - 2);
-                const endPage = Math.min(this.totalPages, this.currentPage + 2);
-                
-                for (let i = startPage; i <= endPage; i++) {
-                    const li = document.createElement('li');
-                    li.className = `page-item ${i === this.currentPage ? 'active' : ''}`;
-                    li.innerHTML = `<a class="page-link" href="#" onclick="userManager.changePage(${i})">${i}</a>`;
-                    paginationEl.appendChild(li);
-                }
-                
-                // 次へボタン
-                const nextLi = document.createElement('li');
-                nextLi.className = `page-item ${this.currentPage === this.totalPages ? 'disabled' : ''}`;
-                nextLi.innerHTML = `<a class="page-link" href="#" onclick="userManager.changePage(${this.currentPage + 1})">次へ</a>`;
-                paginationEl.appendChild(nextLi);
-                
-                // ページ情報更新
-                document.getElementById('paginationInfo').textContent = 
-                    `${pagination.total_count}件中 ${((this.currentPage - 1) * this.perPage) + 1}-${Math.min(this.currentPage * this.perPage, pagination.total_count)}件を表示`;
-            }
+                tbody.appendChild(row);
+            });
             
-            renderStats(stats) {
-                document.getElementById('totalUsers').textContent = parseInt(stats.total_users).toLocaleString();
-                document.getElementById('activeUsers').textContent = parseInt(stats.active_users).toLocaleString();
-                document.getElementById('recentActiveUsers').textContent = parseInt(stats.recent_active_users).toLocaleString();
-                document.getElementById('totalSales').textContent = `¥${parseInt(stats.total_sales).toLocaleString()}`;
-            }
+            console.log(`${users.length}件の利用者を表示しました`);
+        }
+        
+        function getActivityBadge(status) {
+            const statusMap = {
+                'active': { class: 'badge-active', text: '活動中' },
+                'warning': { class: 'badge-warning', text: '注意' },
+                'inactive': { class: 'badge-inactive', text: '非活動' }
+            };
             
-            updateResultCount(count) {
-                document.getElementById('resultCount').textContent = `${count.toLocaleString()}件`;
-            }
-            
-            changePage(page) {
-                if (page >= 1 && page <= this.totalPages) {
-                    this.currentPage = page;
-                    this.loadUsers();
-                }
-            }
-            
-            resetPagination() {
-                this.currentPage = 1;
-            }
-            
-            async saveUser() {
-                const form = document.getElementById('addUserForm');
-                const formData = new FormData(form);
-                const userData = Object.fromEntries(formData);
-                
-                // フィールド名をAPIに合わせる
-                userData.user_name = userData.name;
-                delete userData.name;
-                
-                try {
-                    const response = await fetch('../api/users.php', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(userData)
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (response.ok && result.success) {
-                        bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();
-                        form.reset();
-                        this.loadUsers();
-                        this.showAlert('利用者を追加しました', 'success');
-                    } else {
-                        this.showValidationErrors(result.errors || [result.error]);
-                    }
-                } catch (error) {
-                    console.error('利用者追加エラー:', error);
-                    this.showAlert('利用者の追加に失敗しました', 'danger');
-                }
-            }
-            
-            async editUser(userId) {
-                try {
-                    const response = await fetch(`../api/users.php?id=${userId}`);
-                    const data = await response.json();
+            const statusInfo = statusMap[status] || statusMap['inactive'];
+            return `<span class="badge badge-activity ${statusInfo.class}">${statusInfo.text}</span>`;
+        }
+        
+        function getPaymentMethodText(method) {
+            const methodMap = {
+                'cash': '現金',
+                'bank_transfer': '銀行振込',
+                'account_debit': '口座振替',
+                'mixed': '混合'
+            };
+            return methodMap[method] || '不明';
+        }
+        
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('ja-JP', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function showError(message) {
+            const tbody = document.getElementById('usersTableBody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center py-4">
+                        <i class="fas fa-exclamation-circle text-danger me-2"></i>
+                        ${message}
+                    </td>
+                </tr>
+            `;
+        }
+        
+        function showNoData() {
+            const tbody = document.getElementById('usersTableBody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center py-4">
+                        <i class="fas fa-info-circle text-muted me-2"></i>
+                        利用者データがありません
+                    </td>
+                </tr>
+            `;
+        }
+        
+        // ページ読み込み完了後に実行
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('ページ読み込み完了 - 利用者データ読み込み開始');
+            loadUsers();
+        });
+    </script>
+</body>
+</html>
