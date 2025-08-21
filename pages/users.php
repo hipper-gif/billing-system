@@ -18,42 +18,33 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
         
-        /* ヘッダー修正 */
+        /* ヘッダー修正（他ページと統一） */
         .navbar {
             background: linear-gradient(135deg, var(--smiley-green), var(--smiley-dark-green));
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 0.5rem 0;
         }
         
         .navbar-brand {
             font-weight: 700;
             font-size: 1.4rem;
-            display: flex;
-            align-items: center;
-            height: 40px;
-        }
-        
-        .navbar-nav {
-            align-items: center;
-            height: 40px;
         }
         
         .navbar-nav .nav-link {
-            display: flex;
-            align-items: center;
-            height: 40px;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            margin: 0 0.25rem;
+            color: rgba(255, 255, 255, 0.9);
             transition: all 0.3s ease;
+            padding: 0.5rem 1rem;
         }
         
         .navbar-nav .nav-link:hover {
+            color: white;
             background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
         }
         
         .navbar-nav .nav-link.active {
+            color: white;
             background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
             font-weight: 600;
         }
         
@@ -141,43 +132,25 @@
     </style>
 </head>
 <body>
-    <!-- ナビゲーション（修正版） -->
+    <!-- ナビゲーション（他ページと統一） -->
     <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container">
             <a class="navbar-brand" href="../index.php">
-                <i class="fas fa-utensils me-2"></i>Smiley配食システム
+                <i class="fas fa-home me-2"></i>Smiley配食事業
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
+            <div class="collapse navbar-collapse">
+                <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="../index.php">
-                            <i class="fas fa-home me-1"></i>ダッシュボード
-                        </a>
+                        <a class="nav-link" href="csv_import.php">CSVインポート</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="companies.php">
-                            <i class="fas fa-building me-1"></i>企業管理
-                        </a>
+                        <a class="nav-link" href="companies.php">配達先企業</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="departments.php">
-                            <i class="fas fa-sitemap me-1"></i>部署管理
-                        </a>
+                        <a class="nav-link" href="departments.php">部署管理</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link active" href="users.php">
-                            <i class="fas fa-users me-1"></i>利用者管理
-                        </a>
-                    </li>
-                </ul>
-                <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <a class="nav-link" href="csv_import.php">
-                            <i class="fas fa-upload me-1"></i>CSVインポート
-                        </a>
+                        <a class="nav-link active" href="users.php">利用者管理</a>
                     </li>
                 </ul>
             </div>
