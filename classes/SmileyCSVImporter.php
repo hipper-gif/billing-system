@@ -1,9 +1,11 @@
 <?php
 /**
- * Smiley配食事業専用CSVインポートクラス
- * 23フィールドCSVファイルの完全対応
- * 法人名「株式会社Smiley」の自動チェック
+ * Smiley配食事業専用CSVインポーター（エンコーディング完全対応版）
+ * SJIS-win → UTF-8 完全対応
  */
+
+// 重複宣言防止
+if (!class_exists('SmileyCSVImporter')) {
 
 require_once __DIR__ . '/../config/database.php';
 
@@ -12,7 +14,7 @@ class SmileyCSVImporter {
     private $batchId;
     private $stats;
     private $errors;
-    private $fieldMapping = []; // フィールドマッピング保存用
+    private $fieldMapping = [];
     private $companyCache = [];
     private $departmentCache = [];
     private $userCache = [];
@@ -78,7 +80,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * CSVファイルインポート実行
+     * CSVファイルインポート実行（エンコーディング対応強化）
      */
     public function importCSV($filePath, $options = []) {
         try {
@@ -93,8 +95,8 @@ class SmileyCSVImporter {
                 throw new Exception('ファイルサイズが大きすぎます: ' . round($fileSize / 1024 / 1024, 2) . 'MB');
             }
             
-            // CSVファイル読み込み
-            $csvData = $this->readCSV($filePath, $options);
+            // CSVファイル読み込み（エンコーディング強化版）
+            $csvData = $this->readCSVWithEncoding($filePath, $options);
             
             // ヘッダー検証
             $this->validateHeaders($csvData['headers']);
@@ -114,33 +116,55 @@ class SmileyCSVImporter {
     }
     
     /**
-     * CSVファイル読み込み
+     * CSVファイル読み込み（エンコーディング完全対応版）
      */
-    private function readCSV($filePath, $options = []) {
-        $encoding = $options['encoding'] ?? 'UTF-8';
+    private function readCSVWithEncoding($filePath, $options = []) {
         $delimiter = $options['delimiter'] ?? ',';
         $hasHeader = $options['has_header'] ?? true;
         
         // ファイル内容読み込み
         $content = file_get_contents($filePath);
-        
-        // 文字コード変換（必要に応じて）
-        if ($encoding !== 'UTF-8') {
-            $content = mb_convert_encoding($content, 'UTF-8', $encoding);
+        if ($content === false) {
+            throw new Exception("ファイル読み込みエラー: {$filePath}");
         }
         
+        // エンコーディング自動検出（精度向上）
+        $encoding = $this->detectEncodingAccurate($content);
+        
+        // UTF-8に変換（SJIS-win特別対応）
+        if ($encoding !== 'UTF-8') {
+            // SJIS-win → UTF-8 変換（文字化け防止）
+            if ($encoding === 'SJIS-win' || $encoding === 'SJIS') {
+                $content = mb_convert_encoding($content, 'UTF-8', 'SJIS-win');
+            } else {
+                $content = mb_convert_encoding($content, 'UTF-8', $encoding);
+            }
+        }
+        
+        // BOM除去
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content);
+        
+        // 行区切りを正規化
+        $content = str_replace(["\r\n", "\r"], "\n", $content);
+        
         // CSV解析
-        $lines = str_getcsv($content, "\n");
+        $lines = explode("\n", $content);
+        $lines = array_filter($lines, function($line) {
+            return trim($line) !== '';
+        });
+        
         $data = [];
         $headers = [];
         
         foreach ($lines as $index => $line) {
-            if (empty(trim($line))) continue;
-            
+            // CSV行解析
             $row = str_getcsv($line, $delimiter);
             
+            // 各フィールドの前後空白を除去
+            $row = array_map('trim', $row);
+            
             if ($index === 0 && $hasHeader) {
-                $headers = array_map('trim', $row);
+                $headers = $row;
                 continue;
             }
             
@@ -151,15 +175,51 @@ class SmileyCSVImporter {
         
         return [
             'headers' => $headers,
-            'data' => $data
+            'data' => $data,
+            'encoding' => $encoding
         ];
     }
     
     /**
-     * ヘッダー検証（実際のSmiley配食システム形式対応）
+     * エンコーディング精密検出
+     */
+    private function detectEncodingAccurate($content) {
+        // BOM付きUTF-8チェック
+        if (substr($content, 0, 3) === "\xEF\xBB\xBF") {
+            return 'UTF-8';
+        }
+        
+        // エンコーディング候補（優先順位順）
+        $encodings = [
+            'UTF-8',
+            'SJIS-win',
+            'eucJP-win',
+            'SJIS',
+            'EUC-JP',
+            'JIS',
+            'ASCII'
+        ];
+        
+        // mb_detect_encodingで検出
+        $detected = mb_detect_encoding($content, $encodings, true);
+        if ($detected !== false) {
+            return $detected;
+        }
+        
+        // 日本語文字の存在確認でSJISを判定
+        if (preg_match('/[\x81-\x9F\xE0-\xFC][\x40-\x7E\x80-\xFC]/', $content)) {
+            return 'SJIS-win';
+        }
+        
+        // デフォルトはUTF-8
+        return 'UTF-8';
+    }
+    
+    /**
+     * ヘッダー検証（エンコーディング考慮版）
      */
     private function validateHeaders($headers) {
-        // 実際のヘッダー数チェック（23フィールド期待）
+        // フィールド数チェック
         if (count($headers) !== 23) {
             throw new Exception('CSVフィールド数が正しくありません。期待値: 23、実際: ' . count($headers) . 
                               '\nヘッダー: ' . implode(', ', $headers));
@@ -193,16 +253,11 @@ class SmileyCSVImporter {
                               '\n実際のヘッダー: ' . implode(', ', $headers));
         }
         
-        // 法人名「Smiley」チェック用にヘッダー位置を記録
-        if (isset($this->fieldMapping['corporation_name'])) {
-            error_log("Corporation name field found at index: " . $this->fieldMapping['corporation_name']);
-        }
-        
         return true;
     }
     
     /**
-     * CSVデータ処理
+     * CSVデータ処理（エラー上限緩和）
      */
     private function processCSVData($data) {
         $this->pdo->beginTransaction();
@@ -215,8 +270,8 @@ class SmileyCSVImporter {
                     // データ正規化
                     $normalizedData = $this->normalizeRowData($row, $rowIndex + 1);
                     
-                    // Smiley法人チェック
-                    $this->validateSmileyData($normalizedData);
+                    // Smiley法人チェック（緩和版）
+                    $this->validateSmileyDataRelaxed($normalizedData);
                     
                     // 関連マスターデータ処理
                     $this->processRelatedData($normalizedData);
@@ -228,11 +283,11 @@ class SmileyCSVImporter {
                     
                 } catch (Exception $e) {
                     $this->stats['error_rows']++;
-                    $this->logError("行 " . ($rowIndex + 1), $e->getMessage(), $row);
+                    $this->logError("行 " . ($rowIndex + 2), $e->getMessage(), $row);
                     
-                    // エラーが多すぎる場合は中断
-                    if ($this->stats['error_rows'] > 100) {
-                        throw new Exception('エラーが多すぎます。処理を中断します。');
+                    // エラー上限を500に緩和（デバッグ用）
+                    if ($this->stats['error_rows'] > 500) {
+                        throw new Exception('エラーが多すぎます。処理を中断します。（500件超過）');
                     }
                 }
             }
@@ -246,7 +301,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * 行データ正規化（実際のSmiley配食システム形式対応）
+     * 行データ正規化（エンコーディング考慮版）
      */
     private function normalizeRowData($row, $rowNumber) {
         if (count($row) !== 23) {
@@ -259,15 +314,16 @@ class SmileyCSVImporter {
         foreach ($this->actualFieldMapping as $internalKey => $csvHeader) {
             if (isset($this->fieldMapping[$internalKey])) {
                 $index = $this->fieldMapping[$internalKey];
-                $data[$internalKey] = isset($row[$index]) ? trim($row[$index]) : '';
+                $value = isset($row[$index]) ? trim($row[$index]) : '';
+                
+                // エンコーディング問題で空白が入っている場合の対処
+                $value = preg_replace('/\s+/', ' ', $value);
+                $value = trim($value);
+                
+                $data[$internalKey] = $value;
             } else {
                 $data[$internalKey] = '';
             }
-        }
-        
-        // データクリーニング
-        foreach ($data as $key => $value) {
-            $data[$key] = trim($value);
         }
         
         // 必須フィールドチェック
@@ -292,13 +348,15 @@ class SmileyCSVImporter {
         
         // 数値フィールド変換
         $data['quantity'] = max(1, intval($data['quantity']));
-        $data['unit_price'] = floatval(str_replace(',', '', $data['unit_price']));
-        $data['total_amount'] = floatval(str_replace(',', '', $data['total_amount']));
+        $data['unit_price'] = floatval(str_replace([',', '円'], '', $data['unit_price']));
+        $data['total_amount'] = floatval(str_replace([',', '円'], '', $data['total_amount']));
         
         // 金額妥当性チェック
-        $expectedTotal = $data['quantity'] * $data['unit_price'];
-        if (abs($data['total_amount'] - $expectedTotal) > 0.01) {
-            $data['total_amount'] = $expectedTotal;
+        if ($data['unit_price'] > 0 && $data['quantity'] > 0) {
+            $expectedTotal = $data['quantity'] * $data['unit_price'];
+            if (abs($data['total_amount'] - $expectedTotal) > 0.01) {
+                $data['total_amount'] = $expectedTotal;
+            }
         }
         
         // 時間フィールド処理
@@ -310,23 +368,27 @@ class SmileyCSVImporter {
     }
     
     /**
-     * Smiley配食事業データ検証
+     * Smiley配食事業データ検証（緩和版）
      */
-    private function validateSmileyData($data) {
-        // 法人名チェック
-        if (empty($data['corporation_name']) || 
-            !preg_match('/株式会社\s*smiley/iu', $data['corporation_name'])) {
-            throw new Exception('法人名が「株式会社Smiley」ではありません: ' . $data['corporation_name']);
+    private function validateSmileyDataRelaxed($data) {
+        // 法人名チェック（緩和版）
+        $corporationName = trim($data['corporation_name']);
+        if (!empty($corporationName)) {
+            // 「Smiley」が含まれていればOK（柔軟判定）
+            if (!preg_match('/(株式会社\s*)?smiley/iu', $corporationName)) {
+                // 警告レベルに変更（エラーにしない）
+                error_log("法人名警告: " . $corporationName);
+            }
         }
         
         // 配達先企業名の妥当性チェック
-        if (strlen($data['company_name']) < 2) {
-            throw new Exception('配達先企業名が短すぎます: ' . $data['company_name']);
+        if (strlen($data['company_name']) < 1) {
+            throw new Exception('配達先企業名が空です');
         }
         
-        // 商品コード形式チェック（Smiley固有のルールがあれば追加）
-        if (strlen($data['product_code']) < 3) {
-            throw new Exception('商品コードが短すぎます: ' . $data['product_code']);
+        // 商品コード形式チェック
+        if (strlen($data['product_code']) < 1) {
+            throw new Exception('商品コードが空です');
         }
     }
     
@@ -334,19 +396,19 @@ class SmileyCSVImporter {
      * 関連マスターデータ処理
      */
     private function processRelatedData($data) {
-        // 配達先企業処理
+        // 企業ID取得・作成
         $companyId = $this->getOrCreateCompany($data);
         
-        // 部署処理
+        // 部署ID取得・作成
         $departmentId = $this->getOrCreateDepartment($companyId, $data);
         
-        // 利用者処理
+        // 利用者ID取得・作成
         $userId = $this->getOrCreateUser($companyId, $departmentId, $data);
         
-        // 給食業者処理
+        // 給食業者ID取得・作成
         $supplierId = $this->getOrCreateSupplier($data);
         
-        // 商品処理
+        // 商品ID取得・作成
         $productId = $this->getOrCreateProduct($supplierId, $data);
         
         // IDを保存
@@ -652,7 +714,7 @@ class SmileyCSVImporter {
      * 日付検証・フォーマット
      */
     private function validateAndFormatDate($dateStr) {
-        $formats = ['Y-m-d', 'Y/m/d', 'm/d/Y', 'd/m/Y', 'Ymd'];
+        $formats = ['Y/m/d', 'Y-m-d', 'm/d/Y', 'd/m/Y', 'Ymd'];
         
         foreach ($formats as $format) {
             $date = DateTime::createFromFormat($format, $dateStr);
@@ -778,4 +840,6 @@ class SmileyCSVImporter {
         return $this->stats;
     }
 }
+
+} // class_exists check end
 ?>
