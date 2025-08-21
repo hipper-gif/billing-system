@@ -394,4 +394,176 @@ function handlePost($db) {
             $input['company_id'],
             $input['department_id'] ?? null,
             $input['company_name'] ?? '',
-            $input['
+            $input['department'] ?? '',
+            $input['email'] ?? null,
+            $input['phone'] ?? null,
+            $input['address'] ?? null,
+            $input['payment_method'] ?? 'cash'
+        ]);
+        
+        if ($result) {
+            $userId = $db->lastInsertId();
+            echo json_encode(['success' => true, 'user_id' => $userId, 'user_code' => $userCode], JSON_UNESCAPED_UNICODE);
+        } else {
+            http_response_code(500);
+            echo json_encode(['error' => '利用者の作成に失敗しました'], JSON_UNESCAPED_UNICODE);
+        }
+        
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['error' => '利用者作成エラー: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+}
+
+/**
+ * PUT: 利用者情報更新
+ */
+function handlePut($db) {
+    $userId = $_GET['id'] ?? null;
+    if (!$userId) {
+        http_response_code(400);
+        echo json_encode(['error' => 'User ID is required'], JSON_UNESCAPED_UNICODE);
+        return;
+    }
+    
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!$input) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid JSON input'], JSON_UNESCAPED_UNICODE);
+        return;
+    }
+    
+    // バリデーション
+    $errors = validateUserInput($input, $userId);
+    if (!empty($errors)) {
+        http_response_code(400);
+        echo json_encode(['errors' => $errors], JSON_UNESCAPED_UNICODE);
+        return;
+    }
+    
+    try {
+        // 利用者存在確認
+        $checkSql = "SELECT id FROM users WHERE id = ? AND is_active = 1";
+        $checkStmt = $db->prepare($checkSql);
+        $checkStmt->execute([$userId]);
+        
+        if (!$checkStmt->fetch()) {
+            http_response_code(404);
+            echo json_encode(['error' => '利用者が見つかりません'], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+        
+        // 更新
+        $sql = "
+            UPDATE users SET
+                user_name = ?, company_id = ?, department_id = ?, 
+                company_name = ?, department = ?, email = ?,
+                phone = ?, address = ?, payment_method = ?, 
+                is_active = ?, updated_at = NOW()
+            WHERE id = ?
+        ";
+        
+        $stmt = $db->prepare($sql);
+        $result = $stmt->execute([
+            $input['user_name'],
+            $input['company_id'],
+            $input['department_id'] ?? null,
+            $input['company_name'] ?? '',
+            $input['department'] ?? '',
+            $input['email'] ?? null,
+            $input['phone'] ?? null,
+            $input['address'] ?? null,
+            $input['payment_method'] ?? 'cash',
+            $input['is_active'] ?? 1,
+            $userId
+        ]);
+        
+        if ($result) {
+            echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+        } else {
+            http_response_code(500);
+            echo json_encode(['error' => '利用者情報の更新に失敗しました'], JSON_UNESCAPED_UNICODE);
+        }
+        
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['error' => '更新エラー: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+}
+
+/**
+ * DELETE: 利用者削除（論理削除）
+ */
+function handleDelete($db) {
+    $userId = $_GET['id'] ?? null;
+    if (!$userId) {
+        http_response_code(400);
+        echo json_encode(['error' => 'User ID is required'], JSON_UNESCAPED_UNICODE);
+        return;
+    }
+    
+    try {
+        // 論理削除（is_active = 0）
+        $sql = "UPDATE users SET is_active = 0, updated_at = NOW() WHERE id = ?";
+        $stmt = $db->prepare($sql);
+        $result = $stmt->execute([$userId]);
+        
+        if ($result) {
+            echo json_encode([
+                'success' => true,
+                'delete_type' => 'soft'
+            ], JSON_UNESCAPED_UNICODE);
+        } else {
+            http_response_code(500);
+            echo json_encode(['error' => '利用者の削除に失敗しました'], JSON_UNESCAPED_UNICODE);
+        }
+        
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['error' => '削除エラー: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+}
+
+/**
+ * 利用者入力バリデーション
+ */
+function validateUserInput($input, $userId = null) {
+    $errors = [];
+    
+    // 必須項目チェック
+    if (empty($input['company_id'])) {
+        $errors['company_id'] = '企業を選択してください';
+    }
+    
+    if (empty($input['user_name']) || strlen(trim($input['user_name'])) < 1) {
+        $errors['user_name'] = '利用者名を入力してください';
+    }
+    
+    // 文字数制限
+    if (!empty($input['user_name']) && mb_strlen($input['user_name']) > 100) {
+        $errors['user_name'] = '利用者名は100文字以内で入力してください';
+    }
+    
+    if (!empty($input['email'])) {
+        if (!filter_var($input['email'], FILTER_VALIDATE_EMAIL)) {
+            $errors['email'] = '正しいメールアドレスを入力してください';
+        }
+        if (mb_strlen($input['email']) > 255) {
+            $errors['email'] = 'メールアドレスは255文字以内で入力してください';
+        }
+    }
+    
+    if (!empty($input['phone']) && mb_strlen($input['phone']) > 20) {
+        $errors['phone'] = '電話番号は20文字以内で入力してください';
+    }
+    
+    // 支払い方法チェック
+    $validPaymentMethods = ['cash', 'bank_transfer', 'account_debit', 'mixed'];
+    if (!empty($input['payment_method']) && !in_array($input['payment_method'], $validPaymentMethods)) {
+        $errors['payment_method'] = '正しい支払い方法を選択してください';
+    }
+    
+    return $errors;
+}
+?>
+?>
