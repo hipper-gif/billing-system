@@ -47,11 +47,15 @@ try {
     
     $tables = ['companies', 'departments', 'users', 'orders'];
     foreach ($tables as $table) {
-        $stmt = $pdo->prepare("SHOW TABLES LIKE :table");
-        $stmt->bindValue(':table', $table);
-        $stmt->execute();
-        $exists = $stmt->fetch() ? "✅ 存在" : "❌ 存在しない";
-        echo "テーブル '{$table}': {$exists}<br>";
+        try {
+            // SHOW TABLES LIKEの正しい書き方
+            $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+            $stmt->execute([$table]);
+            $exists = $stmt->fetch() ? "✅ 存在" : "❌ 存在しない";
+            echo "テーブル '{$table}': {$exists}<br>";
+        } catch (Exception $e) {
+            echo "テーブル '{$table}': エラー - " . $e->getMessage() . "<br>";
+        }
     }
     
     echo "<h2>4. 各テーブルのレコード数確認</h2>";
