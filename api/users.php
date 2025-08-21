@@ -161,12 +161,12 @@ function getUserList($db) {
         $countStmt = $db->query($countSql, $params);
         $totalCount = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
         
-        // 利用者一覧取得（注文統計含む）
+        // 利用者一覧取得（実際のデータ構造対応）
         $sql = "
             SELECT 
                 u.*,
-                c.company_name as company_name_from_table,
-                d.department_name,
+                COALESCE(c.company_name, u.company_name) as company_name_display,
+                COALESCE(d.department_name, u.department) as department_name_display,
                 COALESCE(order_stats.total_orders, 0) as total_orders,
                 COALESCE(order_stats.total_amount, 0) as total_amount,
                 COALESCE(order_stats.last_order_date, NULL) as last_order_date,
@@ -177,18 +177,18 @@ function getUserList($db) {
                     ELSE 'inactive'
                 END as activity_status
             FROM users u
-            LEFT JOIN companies c ON u.company_id = c.id
-            LEFT JOIN departments d ON u.department_id = d.id
+            LEFT JOIN companies c ON u.company_id = c.id AND c.is_active = 1
+            LEFT JOIN departments d ON u.department_id = d.id AND d.is_active = 1
             LEFT JOIN (
                 SELECT 
-                    user_id,
+                    user_code,
                     COUNT(*) as total_orders,
                     SUM(total_amount) as total_amount,
                     MAX(order_date) as last_order_date,
                     COUNT(CASE WHEN order_date >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as recent_orders
                 FROM orders
-                GROUP BY user_id
-            ) order_stats ON u.id = order_stats.user_id
+                GROUP BY user_code
+            ) order_stats ON u.user_code = order_stats.user_code
             WHERE {$whereClause}
             ORDER BY u.created_at DESC
             LIMIT {$limit} OFFSET {$offset}
@@ -208,13 +208,13 @@ function getUserList($db) {
             FROM users u
             LEFT JOIN (
                 SELECT 
-                    user_id,
+                    user_code,
                     SUM(total_amount) as total_amount,
                     MAX(order_date) as last_order_date,
                     SUM(CASE WHEN order_date >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN total_amount ELSE 0 END) as recent_amount
                 FROM orders
-                GROUP BY user_id
-            ) order_stats ON u.id = order_stats.user_id
+                GROUP BY user_code
+            ) order_stats ON u.user_code = order_stats.user_code
             WHERE u.is_active = 1
         ";
         
@@ -250,15 +250,15 @@ function getUserDetail($db, $userId) {
         $sql = "
             SELECT 
                 u.*,
-                c.company_name as company_name_from_table,
-                c.company_address,
-                c.contact_phone as company_phone,
-                d.department_name,
-                d.manager_name as department_manager,
-                d.manager_phone as department_phone
+                COALESCE(c.company_name, u.company_name) as company_name_display,
+                COALESCE(c.company_address, '') as company_address,
+                COALESCE(c.contact_phone, '') as company_phone,
+                COALESCE(d.department_name, u.department) as department_name_display,
+                COALESCE(d.manager_name, '') as department_manager,
+                COALESCE(d.manager_phone, '') as department_phone
             FROM users u
-            LEFT JOIN companies c ON u.company_id = c.id
-            LEFT JOIN departments d ON u.department_id = d.id
+            LEFT JOIN companies c ON u.company_id = c.id AND c.is_active = 1
+            LEFT JOIN departments d ON u.department_id = d.id AND d.is_active = 1
             WHERE u.id = ? AND u.is_active = 1
         ";
         
@@ -276,12 +276,12 @@ function getUserDetail($db, $userId) {
             SELECT 
                 o.*
             FROM orders o
-            WHERE o.user_id = ?
+            WHERE o.user_code = ?
             ORDER BY o.order_date DESC, o.created_at DESC
             LIMIT 20
         ";
         
-        $ordersStmt = $db->query($ordersSql, [$userId]);
+        $ordersStmt = $db->query($ordersSql, [$user['user_code']]);
         $orders = $ordersStmt->fetchAll(PDO::FETCH_ASSOC);
         
         // 月別注文統計（過去12ヶ月）
@@ -291,13 +291,13 @@ function getUserDetail($db, $userId) {
                 COUNT(*) as order_count,
                 SUM(total_amount) as total_amount
             FROM orders
-            WHERE user_id = ? 
+            WHERE user_code = ? 
                 AND order_date >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
             GROUP BY DATE_FORMAT(order_date, '%Y-%m')
             ORDER BY month DESC
         ";
         
-        $monthlyStatsStmt = $db->query($monthlyStatsSql, [$userId]);
+        $monthlyStatsStmt = $db->query($monthlyStatsSql, [$user['user_code']]);
         $monthlyStats = $monthlyStatsStmt->fetchAll(PDO::FETCH_ASSOC);
         
         // 総計統計
@@ -310,10 +310,10 @@ function getUserDetail($db, $userId) {
                 MIN(order_date) as first_order_date,
                 COUNT(CASE WHEN order_date >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as recent_orders
             FROM orders
-            WHERE user_id = ?
+            WHERE user_code = ?
         ";
         
-        $totalStatsStmt = $db->query($totalStatsSql, [$userId]);
+        $totalStatsStmt = $db->query($totalStatsSql, [$user['user_code']]);
         $totalStats = $totalStatsStmt->fetch(PDO::FETCH_ASSOC);
         
         echo json_encode([
