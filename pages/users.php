@@ -18,14 +18,43 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
         
+        /* ヘッダー修正 */
         .navbar {
             background: linear-gradient(135deg, var(--smiley-green), var(--smiley-dark-green));
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 0.5rem 0;
         }
         
         .navbar-brand {
             font-weight: 700;
             font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            height: 40px;
+        }
+        
+        .navbar-nav {
+            align-items: center;
+            height: 40px;
+        }
+        
+        .navbar-nav .nav-link {
+            display: flex;
+            align-items: center;
+            height: 40px;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            margin: 0 0.25rem;
+            transition: all 0.3s ease;
+        }
+        
+        .navbar-nav .nav-link:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .navbar-nav .nav-link.active {
+            background-color: rgba(255, 255, 255, 0.2);
+            font-weight: 600;
         }
         
         .card {
@@ -95,7 +124,7 @@
         }
         
         .loading-spinner {
-            display: none;
+            display: block;
             text-align: center;
             padding: 2rem;
         }
@@ -112,7 +141,7 @@
     </style>
 </head>
 <body>
-    <!-- ナビゲーション -->
+    <!-- ナビゲーション（修正版） -->
     <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container">
             <a class="navbar-brand" href="../index.php">
@@ -124,16 +153,31 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="../index.php"><i class="fas fa-home me-1"></i>ダッシュボード</a>
+                        <a class="nav-link" href="../index.php">
+                            <i class="fas fa-home me-1"></i>ダッシュボード
+                        </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="companies.php"><i class="fas fa-building me-1"></i>企業管理</a>
+                        <a class="nav-link" href="companies.php">
+                            <i class="fas fa-building me-1"></i>企業管理
+                        </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="departments.php"><i class="fas fa-sitemap me-1"></i>部署管理</a>
+                        <a class="nav-link" href="departments.php">
+                            <i class="fas fa-sitemap me-1"></i>部署管理
+                        </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link active" href="users.php"><i class="fas fa-users me-1"></i>利用者管理</a>
+                        <a class="nav-link active" href="users.php">
+                            <i class="fas fa-users me-1"></i>利用者管理
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="csv_import.php">
+                            <i class="fas fa-upload me-1"></i>CSVインポート
+                        </a>
                     </li>
                 </ul>
             </div>
@@ -146,6 +190,11 @@
             <div class="col">
                 <h2><i class="fas fa-users text-success me-2"></i>利用者管理</h2>
                 <p class="text-muted mb-0">配食サービス利用者の管理・統計確認</p>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-smiley" onclick="alert('利用者追加機能は開発中です')">
+                    <i class="fas fa-plus me-2"></i>利用者追加
+                </button>
             </div>
         </div>
 
@@ -213,12 +262,60 @@
             </div>
         </div>
 
+        <!-- フィルター -->
+        <div class="card mb-4">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="fas fa-filter text-success me-2"></i>検索・フィルター</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-lg-3 col-md-6 mb-3">
+                        <label for="companyFilter" class="form-label">企業フィルター</label>
+                        <select class="form-select" id="companyFilter">
+                            <option value="">すべての企業</option>
+                        </select>
+                    </div>
+                    <div class="col-lg-3 col-md-6 mb-3">
+                        <label for="departmentFilter" class="form-label">部署フィルター</label>
+                        <select class="form-select" id="departmentFilter">
+                            <option value="">すべての部署</option>
+                        </select>
+                    </div>
+                    <div class="col-lg-3 col-md-6 mb-3">
+                        <label for="statusFilter" class="form-label">活動状況</label>
+                        <select class="form-select" id="statusFilter">
+                            <option value="all">すべて</option>
+                            <option value="active">活動中 (30日以内)</option>
+                            <option value="warning">注意 (30-90日前)</option>
+                            <option value="inactive">非活動 (90日以上)</option>
+                        </select>
+                    </div>
+                    <div class="col-lg-3 col-md-6 mb-3">
+                        <label for="searchInput" class="form-label">検索</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="searchInput" placeholder="名前・メール・電話">
+                            <button class="btn btn-outline-secondary" type="button" id="searchBtn">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- 利用者一覧 -->
         <div class="card">
             <div class="card-header bg-white">
                 <div class="d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">利用者一覧</h5>
-                    <span class="text-muted" id="resultCount">-</span>
+                    <div class="d-flex align-items-center">
+                        <span class="text-muted me-3" id="resultCount">-</span>
+                        <select class="form-select form-select-sm" id="perPageSelect" style="width: auto;">
+                            <option value="20">20件/ページ</option>
+                            <option value="50">50件/ページ</option>
+                            <option value="100">100件/ページ</option>
+                        </select>
+                    </div>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -253,65 +350,154 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
     <script>
-        // シンプルで確実な実装
-        async function loadUsers() {
-            console.log('利用者データ読み込み開始');
-            
-            // ローディング表示
-            document.getElementById('loadingSpinner').style.display = 'block';
+        console.log('🚀 利用者管理システム開始');
+        
+        // グローバル変数
+        let currentUsers = [];
+        let filteredUsers = [];
+        
+        // ページ読み込み完了後に実行
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('📄 DOM読み込み完了');
+            initializeUserManagement();
+        });
+        
+        async function initializeUserManagement() {
+            console.log('🔧 利用者管理初期化開始');
             
             try {
-                const response = await fetch('../api/users.php');
+                // 1. 利用者データ読み込み
+                await loadUsers();
                 
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
+                // 2. 企業データ読み込み
+                await loadCompanies();
                 
-                const data = await response.json();
-                console.log('データ取得成功:', data);
+                // 3. イベントリスナー設定
+                setupEventListeners();
                 
-                // 統計情報表示
-                if (data.stats) {
-                    document.getElementById('totalUsers').textContent = parseInt(data.stats.total_users || 0).toLocaleString();
-                    document.getElementById('activeUsers').textContent = parseInt(data.stats.active_users || 0).toLocaleString();
-                    document.getElementById('recentActiveUsers').textContent = parseInt(data.stats.recent_active_users || 0).toLocaleString();
-                    document.getElementById('totalSales').textContent = `¥${parseInt(data.stats.total_sales || 0).toLocaleString()}`;
-                }
-                
-                // 利用者一覧表示
-                if (data.users && data.users.length > 0) {
-                    displayUsers(data.users);
-                    document.getElementById('resultCount').textContent = `${data.users.length}件`;
-                } else {
-                    showNoData();
-                }
+                console.log('✅ 利用者管理初期化完了');
                 
             } catch (error) {
-                console.error('エラー:', error);
-                showError('データの読み込みに失敗しました: ' + error.message);
-            } finally {
-                document.getElementById('loadingSpinner').style.display = 'none';
+                console.error('❌ 初期化エラー:', error);
+                showError('システムの初期化に失敗しました: ' + error.message);
             }
         }
         
+        async function loadUsers() {
+            console.log('📥 利用者データ読み込み開始');
+            
+            try {
+                showLoading(true);
+                
+                const response = await fetch('../api/users.php');
+                console.log('📡 API Response Status:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('📊 取得データ:', data);
+                
+                if (!data.users) {
+                    throw new Error('利用者データが見つかりません');
+                }
+                
+                currentUsers = data.users;
+                filteredUsers = [...currentUsers];
+                
+                // 統計情報表示
+                updateStats(data.stats);
+                
+                // 利用者一覧表示
+                displayUsers(filteredUsers);
+                
+                console.log(`✅ ${currentUsers.length}件の利用者データを読み込みました`);
+                
+            } catch (error) {
+                console.error('❌ 利用者データ読み込みエラー:', error);
+                showError('利用者データの読み込みに失敗しました: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        async function loadCompanies() {
+            console.log('🏢 企業データ読み込み開始');
+            
+            try {
+                const response = await fetch('../api/companies.php');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('🏢 企業データ取得:', data.companies?.length || 0, '件');
+                    
+                    if (data.companies) {
+                        populateCompanyFilter(data.companies);
+                    }
+                }
+            } catch (error) {
+                console.error('⚠️ 企業データ読み込みエラー:', error);
+                // エラーでも処理を続行
+            }
+        }
+        
+        function populateCompanyFilter(companies) {
+            const select = document.getElementById('companyFilter');
+            select.innerHTML = '<option value="">すべての企業</option>';
+            
+            companies.forEach(company => {
+                const option = document.createElement('option');
+                option.value = company.id;
+                option.textContent = company.company_name;
+                select.appendChild(option);
+            });
+        }
+        
+        function updateStats(stats) {
+            if (!stats) return;
+            
+            console.log('📈 統計情報更新:', stats);
+            
+            document.getElementById('totalUsers').textContent = parseInt(stats.total_users || 0).toLocaleString();
+            document.getElementById('activeUsers').textContent = parseInt(stats.active_users || 0).toLocaleString();
+            document.getElementById('recentActiveUsers').textContent = parseInt(stats.recent_active_users || 0).toLocaleString();
+            document.getElementById('totalSales').textContent = `¥${parseInt(stats.total_sales || 0).toLocaleString()}`;
+        }
+        
         function displayUsers(users) {
+            console.log('👥 利用者表示開始:', users.length, '件');
+            
             const tbody = document.getElementById('usersTableBody');
             tbody.innerHTML = '';
             
-            users.forEach(user => {
+            if (users.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="text-center py-4">
+                            <i class="fas fa-info-circle text-muted me-2"></i>
+                            表示する利用者がありません
+                        </td>
+                    </tr>
+                `;
+                document.getElementById('resultCount').textContent = '0件';
+                return;
+            }
+            
+            users.forEach((user, index) => {
                 const row = document.createElement('tr');
                 
                 // 企業名・部署名の表示
                 const companyName = user.company_name_display || user.company_name_from_table || user.company_name || '-';
                 const departmentName = user.department_name_display || user.department_name || user.department || '-';
                 
-                // 活動状況の表示
+                // 活動状況バッジ
                 const activityBadge = getActivityBadge(user.activity_status);
                 
-                // 支払い方法の表示
+                // 支払い方法
                 const paymentMethod = getPaymentMethodText(user.payment_method);
                 
-                // 最終注文日の表示
+                // 最終注文日
                 const lastOrderDate = user.last_order_date ? formatDate(user.last_order_date) : '-';
                 
                 row.innerHTML = `
@@ -353,6 +539,9 @@
                                 <li><a class="dropdown-item" href="user_detail.php?id=${user.id}">
                                     <i class="fas fa-eye me-2"></i>詳細
                                 </a></li>
+                                <li><a class="dropdown-item" href="#" onclick="editUser(${user.id})">
+                                    <i class="fas fa-edit me-2"></i>編集
+                                </a></li>
                             </ul>
                         </div>
                     </td>
@@ -361,9 +550,80 @@
                 tbody.appendChild(row);
             });
             
-            console.log(`${users.length}件の利用者を表示しました`);
+            document.getElementById('resultCount').textContent = `${users.length}件`;
+            console.log(`✅ ${users.length}件の利用者を表示しました`);
         }
         
+        function setupEventListeners() {
+            console.log('🎯 イベントリスナー設定');
+            
+            // 検索ボタン
+            document.getElementById('searchBtn').addEventListener('click', performSearch);
+            
+            // 検索入力でEnterキー
+            document.getElementById('searchInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    performSearch();
+                }
+            });
+            
+            // フィルター変更
+            document.getElementById('companyFilter').addEventListener('change', performSearch);
+            document.getElementById('departmentFilter').addEventListener('change', performSearch);
+            document.getElementById('statusFilter').addEventListener('change', performSearch);
+        }
+        
+        function performSearch() {
+            console.log('🔍 検索実行');
+            
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const companyId = document.getElementById('companyFilter').value;
+            const departmentId = document.getElementById('departmentFilter').value;
+            const status = document.getElementById('statusFilter').value;
+            
+            filteredUsers = currentUsers.filter(user => {
+                // 検索条件チェック
+                if (searchTerm && !user.user_name.toLowerCase().includes(searchTerm) && 
+                    !user.email?.toLowerCase().includes(searchTerm) &&
+                    !user.phone?.includes(searchTerm)) {
+                    return false;
+                }
+                
+                // 企業フィルター
+                if (companyId && user.company_id != companyId) {
+                    return false;
+                }
+                
+                // ステータスフィルター
+                if (status !== 'all' && user.activity_status !== status) {
+                    return false;
+                }
+                
+                return true;
+            });
+            
+            console.log(`🔍 検索結果: ${filteredUsers.length}件`);
+            displayUsers(filteredUsers);
+        }
+        
+        function showLoading(show) {
+            document.getElementById('loadingSpinner').style.display = show ? 'block' : 'none';
+        }
+        
+        function showError(message) {
+            console.error('❌', message);
+            const tbody = document.getElementById('usersTableBody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center py-4">
+                        <i class="fas fa-exclamation-circle text-danger me-2"></i>
+                        ${message}
+                    </td>
+                </tr>
+            `;
+        }
+        
+        // ユーティリティ関数
         function getActivityBadge(status) {
             const statusMap = {
                 'active': { class: 'badge-active', text: '活動中' },
@@ -396,39 +656,15 @@
         
         function escapeHtml(text) {
             const div = document.createElement('div');
-            div.textContent = text;
+            div.textContent = text || '';
             return div.innerHTML;
         }
         
-        function showError(message) {
-            const tbody = document.getElementById('usersTableBody');
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="text-center py-4">
-                        <i class="fas fa-exclamation-circle text-danger me-2"></i>
-                        ${message}
-                    </td>
-                </tr>
-            `;
+        function editUser(userId) {
+            alert('利用者編集機能は開発中です。利用者ID: ' + userId);
         }
         
-        function showNoData() {
-            const tbody = document.getElementById('usersTableBody');
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="text-center py-4">
-                        <i class="fas fa-info-circle text-muted me-2"></i>
-                        利用者データがありません
-                    </td>
-                </tr>
-            `;
-        }
-        
-        // ページ読み込み完了後に実行
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('ページ読み込み完了 - 利用者データ読み込み開始');
-            loadUsers();
-        });
+        console.log('✅ JavaScript読み込み完了');
     </script>
 </body>
 </html>
