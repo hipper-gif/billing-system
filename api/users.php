@@ -13,7 +13,7 @@ require_once '../config/database.php';
 require_once '../classes/Database.php';
 
 try {
-    $db = new Database();
+    $db = Database::getInstance();
     $method = $_SERVER['REQUEST_METHOD'];
     
     // デバッグモード確認
