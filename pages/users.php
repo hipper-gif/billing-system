@@ -682,21 +682,26 @@
                 
                 users.forEach(user => {
                     const row = document.createElement('tr');
+                    
+                    // 企業名・部署名の表示を修正
+                    const companyName = user.company_name_display || user.company_name_from_table || user.company_name || '-';
+                    const departmentName = user.department_name_display || user.department_name || user.department || '-';
+                    
                     row.innerHTML = `
                         <td>
                             <div class="d-flex align-items-center">
                                 <div class="user-avatar me-3">
-                                    ${user.name.charAt(0)}
+                                    ${user.user_name.charAt(0)}
                                 </div>
                                 <div>
-                                    <div class="fw-semibold">${this.escapeHtml(user.name)}</div>
+                                    <div class="fw-semibold">${this.escapeHtml(user.user_name)}</div>
                                     <small class="text-muted">${user.email || '-'}</small>
                                 </div>
                             </div>
                         </td>
                         <td>
-                            <div class="fw-semibold">${this.escapeHtml(user.company_name)}</div>
-                            <small class="text-muted">${this.escapeHtml(user.department_name)}</small>
+                            <div class="fw-semibold">${this.escapeHtml(companyName)}</div>
+                            <small class="text-muted">${this.escapeHtml(departmentName)}</small>
                         </td>
                         <td class="d-none-mobile">
                             <div>${user.phone || '-'}</div>
@@ -727,7 +732,7 @@
                                         <i class="fas fa-edit me-2"></i>編集
                                     </a></li>
                                     <li><hr class="dropdown-divider"></li>
-                                    <li><a class="dropdown-item text-danger" href="#" onclick="userManager.deleteUser(${user.id}, '${this.escapeHtml(user.name)}')">
+                                    <li><a class="dropdown-item text-danger" href="#" onclick="userManager.deleteUser(${user.id}, '${this.escapeHtml(user.user_name)}')">
                                         <i class="fas fa-trash me-2"></i>削除
                                     </a></li>
                                 </ul>
@@ -797,6 +802,10 @@
                 const form = document.getElementById('addUserForm');
                 const formData = new FormData(form);
                 const userData = Object.fromEntries(formData);
+                
+                // フィールド名をAPIに合わせる
+                userData.user_name = userData.name;
+                delete userData.name;
                 
                 try {
                     const response = await fetch('../api/users.php', {
