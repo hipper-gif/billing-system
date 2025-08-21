@@ -1,6 +1,6 @@
 <?php
 /**
- * 利用者管理API（実テーブル構造対応版）
+ * 利用者管理API（既存Database互換版）
  * Smiley配食事業 請求書・集金管理システム
  */
 
@@ -9,13 +9,11 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('X-XSS-Protection: 1; mode=block');
 
+require_once '../config/database.php';
 require_once '../classes/Database.php';
-require_once '../classes/SecurityHelper.php';
-
-SecurityHelper::setSecurityHeaders();
 
 try {
-    $db = Database::getInstance();
+    $db = new Database();
     $method = $_SERVER['REQUEST_METHOD'];
     
     // デバッグモード確認
@@ -65,13 +63,11 @@ function handleDebug($db) {
         $debug_info['database_connection'] = 'SUCCESS';
         
         // 2. usersテーブルデータ数確認
-        $countSql = "SELECT COUNT(*) as total FROM users WHERE is_active = 1";
-        $countStmt = $db->prepare($countSql);
-        $countStmt->execute();
+        $countStmt = $db->query("SELECT COUNT(*) as total FROM users WHERE is_active = 1");
         $debug_info['users_count'] = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
         
         // 3. 簡単なデータサンプル確認（最初の3件）
-        $sampleSql = "
+        $sampleStmt = $db->query("
             SELECT 
                 u.id, u.user_code, u.user_name, u.company_id, u.department_id,
                 u.company_name, u.department, u.email, u.phone, u.payment_method,
@@ -79,27 +75,19 @@ function handleDebug($db) {
             FROM users u 
             WHERE u.is_active = 1 
             LIMIT 3
-        ";
-        $sampleStmt = $db->prepare($sampleSql);
-        $sampleStmt->execute();
+        ");
         $debug_info['users_sample'] = $sampleStmt->fetchAll(PDO::FETCH_ASSOC);
         
         // 4. companiesテーブル確認
-        $companiesSql = "SELECT COUNT(*) as total FROM companies WHERE is_active = 1";
-        $companiesStmt = $db->prepare($companiesSql);
-        $companiesStmt->execute();
+        $companiesStmt = $db->query("SELECT COUNT(*) as total FROM companies WHERE is_active = 1");
         $debug_info['companies_count'] = $companiesStmt->fetch(PDO::FETCH_ASSOC)['total'];
         
         // 5. departmentsテーブル確認
-        $departmentsSql = "SELECT COUNT(*) as total FROM departments WHERE is_active = 1";
-        $departmentsStmt = $db->prepare($departmentsSql);
-        $departmentsStmt->execute();
+        $departmentsStmt = $db->query("SELECT COUNT(*) as total FROM departments WHERE is_active = 1");
         $debug_info['departments_count'] = $departmentsStmt->fetch(PDO::FETCH_ASSOC)['total'];
         
         // 6. ordersテーブル確認
-        $ordersSql = "SELECT COUNT(*) as total FROM orders";
-        $ordersStmt = $db->prepare($ordersSql);
-        $ordersStmt->execute();
+        $ordersStmt = $db->query("SELECT COUNT(*) as total FROM orders");
         $debug_info['orders_count'] = $ordersStmt->fetch(PDO::FETCH_ASSOC)['total'];
         
         echo json_encode($debug_info, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
@@ -170,8 +158,7 @@ function getUserList($db) {
             FROM users u
             WHERE {$whereClause}
         ";
-        $countStmt = $db->prepare($countSql);
-        $countStmt->execute($params);
+        $countStmt = $db->query($countSql, $params);
         $totalCount = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
         
         // 利用者一覧取得（注文統計含む）
@@ -204,14 +191,10 @@ function getUserList($db) {
             ) order_stats ON u.id = order_stats.user_id
             WHERE {$whereClause}
             ORDER BY u.created_at DESC
-            LIMIT ? OFFSET ?
+            LIMIT {$limit} OFFSET {$offset}
         ";
         
-        $params[] = $limit;
-        $params[] = $offset;
-        
-        $stmt = $db->prepare($sql);
-        $stmt->execute($params);
+        $stmt = $db->query($sql, $params);
         $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
         // 統計情報取得
@@ -235,8 +218,7 @@ function getUserList($db) {
             WHERE u.is_active = 1
         ";
         
-        $statsStmt = $db->prepare($statsSql);
-        $statsStmt->execute();
+        $statsStmt = $db->query($statsSql);
         $stats = $statsStmt->fetch(PDO::FETCH_ASSOC);
         
         echo json_encode([
@@ -280,8 +262,7 @@ function getUserDetail($db, $userId) {
             WHERE u.id = ? AND u.is_active = 1
         ";
         
-        $stmt = $db->prepare($sql);
-        $stmt->execute([$userId]);
+        $stmt = $db->query($sql, [$userId]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if (!$user) {
@@ -300,8 +281,7 @@ function getUserDetail($db, $userId) {
             LIMIT 20
         ";
         
-        $ordersStmt = $db->prepare($ordersSql);
-        $ordersStmt->execute([$userId]);
+        $ordersStmt = $db->query($ordersSql, [$userId]);
         $orders = $ordersStmt->fetchAll(PDO::FETCH_ASSOC);
         
         // 月別注文統計（過去12ヶ月）
@@ -317,8 +297,7 @@ function getUserDetail($db, $userId) {
             ORDER BY month DESC
         ";
         
-        $monthlyStatsStmt = $db->prepare($monthlyStatsSql);
-        $monthlyStatsStmt->execute([$userId]);
+        $monthlyStatsStmt = $db->query($monthlyStatsSql, [$userId]);
         $monthlyStats = $monthlyStatsStmt->fetchAll(PDO::FETCH_ASSOC);
         
         // 総計統計
@@ -334,8 +313,7 @@ function getUserDetail($db, $userId) {
             WHERE user_id = ?
         ";
         
-        $totalStatsStmt = $db->prepare($totalStatsSql);
-        $totalStatsStmt->execute([$userId]);
+        $totalStatsStmt = $db->query($totalStatsSql, [$userId]);
         $totalStats = $totalStatsStmt->fetch(PDO::FETCH_ASSOC);
         
         echo json_encode([
@@ -387,8 +365,7 @@ function handlePost($db) {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())
         ";
         
-        $stmt = $db->prepare($sql);
-        $result = $stmt->execute([
+        $stmt = $db->query($sql, [
             $userCode,
             $input['user_name'],
             $input['company_id'],
@@ -401,7 +378,7 @@ function handlePost($db) {
             $input['payment_method'] ?? 'cash'
         ]);
         
-        if ($result) {
+        if ($stmt) {
             $userId = $db->lastInsertId();
             echo json_encode(['success' => true, 'user_id' => $userId, 'user_code' => $userCode], JSON_UNESCAPED_UNICODE);
         } else {
@@ -443,9 +420,7 @@ function handlePut($db) {
     
     try {
         // 利用者存在確認
-        $checkSql = "SELECT id FROM users WHERE id = ? AND is_active = 1";
-        $checkStmt = $db->prepare($checkSql);
-        $checkStmt->execute([$userId]);
+        $checkStmt = $db->query("SELECT id FROM users WHERE id = ? AND is_active = 1", [$userId]);
         
         if (!$checkStmt->fetch()) {
             http_response_code(404);
@@ -463,8 +438,7 @@ function handlePut($db) {
             WHERE id = ?
         ";
         
-        $stmt = $db->prepare($sql);
-        $result = $stmt->execute([
+        $stmt = $db->query($sql, [
             $input['user_name'],
             $input['company_id'],
             $input['department_id'] ?? null,
@@ -478,7 +452,7 @@ function handlePut($db) {
             $userId
         ]);
         
-        if ($result) {
+        if ($stmt) {
             echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
         } else {
             http_response_code(500);
@@ -504,11 +478,9 @@ function handleDelete($db) {
     
     try {
         // 論理削除（is_active = 0）
-        $sql = "UPDATE users SET is_active = 0, updated_at = NOW() WHERE id = ?";
-        $stmt = $db->prepare($sql);
-        $result = $stmt->execute([$userId]);
+        $stmt = $db->query("UPDATE users SET is_active = 0, updated_at = NOW() WHERE id = ?", [$userId]);
         
-        if ($result) {
+        if ($stmt) {
             echo json_encode([
                 'success' => true,
                 'delete_type' => 'soft'
@@ -565,5 +537,4 @@ function validateUserInput($input, $userId = null) {
     
     return $errors;
 }
-?>
 ?>
