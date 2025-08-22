@@ -40,7 +40,8 @@ function checkSystemHealth() {
 
 function checkDatabaseConnection() {
     try {
-        $db = new Database();
+        // Singletonパターンのため getInstance() を使用
+        $db = Database::getInstance();
         $db->query('SELECT 1');
         
         return [
@@ -72,7 +73,8 @@ function checkDatabaseTables() {
     ];
     
     try {
-        $db = new Database();
+        // Singletonパターンのため getInstance() を使用
+        $db = Database::getInstance();
         
         // 方法1: SHOW TABLES を使用
         $stmt = $db->query('SHOW TABLES');
@@ -181,7 +183,8 @@ function checkSystemConfig() {
 
 function getSystemInfo() {
     try {
-        $db = new Database();
+        // Singletonパターンのため getInstance() を使用
+        $db = Database::getInstance();
         $stmt = $db->query('SELECT VERSION() as mysql_version');
         $mysqlVersion = $stmt->fetch()['mysql_version'] ?? 'Unknown';
     } catch (Exception $e) {
