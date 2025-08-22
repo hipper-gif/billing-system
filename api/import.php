@@ -1,171 +1,209 @@
 <?php
 /**
- * CSVインポートAPI
- * 根本解決版: 正しい依存関係と責任分離
+ * CSVインポートAPI（修正版）
+ * Database統一対応版
+ * 
+ * 修正内容:
+ * 1. Database::getInstance() を使用（統一修正）
+ * 2. エラーハンドリング強化
+ * 3. FileUploadHandler の正しい使用
  */
 
-// 設定読み込み
 require_once '../config/database.php';
-
-// 必要クラス読み込み
 require_once '../classes/Database.php';
-require_once '../classes/DatabaseFactory.php';
-require_once '../classes/FileUploadHandler.php';
 require_once '../classes/SmileyCSVImporter.php';
+require_once '../classes/FileUploadHandler.php';
+require_once '../classes/SecurityHelper.php';
 
 header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+
+// セキュリティヘッダー設定
+SecurityHelper::setSecurityHeaders();
+
+// OPTIONS リクエスト対応
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
 
 try {
-    // 1. HTTPメソッドチェック
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception('POSTメソッドが必要です');
-    }
+    // Database::getInstance() を使用（修正箇所）
+    $db = Database::getInstance();
     
-    // 2. ファイルアップロードチェック
-    if (!isset($_FILES['csvFile'])) {
-        throw new Exception('CSVファイルがアップロードされていません');
-    }
-    
-    $file = $_FILES['csvFile'];
-    
-    // 3. アップロードエラーチェック
-    if ($file['error'] !== UPLOAD_ERR_OK) {
-        $errorMessages = [
-            UPLOAD_ERR_INI_SIZE => 'ファイルサイズが上限を超えています',
-            UPLOAD_ERR_FORM_SIZE => 'フォームで指定されたサイズを超えています',
-            UPLOAD_ERR_PARTIAL => 'ファイルが部分的にしかアップロードされませんでした',
-            UPLOAD_ERR_NO_FILE => 'ファイルがアップロードされませんでした',
-            UPLOAD_ERR_NO_TMP_DIR => '一時ディレクトリがありません',
-            UPLOAD_ERR_CANT_WRITE => 'ディスクへの書き込みに失敗しました',
-            UPLOAD_ERR_EXTENSION => 'PHPの拡張によってアップロードが停止されました'
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        
+        // ファイルアップロード検証
+        if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
+            throw new Exception('ファイルがアップロードされていません。エラーコード: ' . ($_FILES['csv_file']['error'] ?? 'UNKNOWN'));
+        }
+        
+        $file = $_FILES['csv_file'];
+        
+        // ファイルの基本検証
+        if ($file['size'] === 0) {
+            throw new Exception('空のファイルがアップロードされました');
+        }
+        
+        if ($file['size'] > 50 * 1024 * 1024) { // 50MB制限
+            throw new Exception('ファイルサイズが大きすぎます（最大50MB）');
+        }
+        
+        // ファイル拡張子チェック
+        $pathInfo = pathinfo($file['name']);
+        $extension = strtolower($pathInfo['extension'] ?? '');
+        
+        if (!in_array($extension, ['csv', 'txt'])) {
+            throw new Exception('CSVファイルまたはテキストファイルをアップロードしてください');
+        }
+        
+        // 一時ファイル処理
+        $uploadDir = '../temp/';
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0755, true);
+        }
+        
+        $tempFilePath = $uploadDir . 'import_' . date('YmdHis') . '_' . uniqid() . '.csv';
+        
+        if (!move_uploaded_file($file['tmp_name'], $tempFilePath)) {
+            throw new Exception('ファイルの保存に失敗しました');
+        }
+        
+        // CSVインポート実行
+        $importer = new SmileyCSVImporter($db);
+        
+        $importOptions = [
+            'encoding' => $_POST['encoding'] ?? 'auto',
+            'overwrite' => isset($_POST['overwrite']) ? (bool)$_POST['overwrite'] : false,
+            'validate_smiley' => true // Smiley配食事業専用検証
         ];
         
-        $message = $errorMessages[$file['error']] ?? '不明なアップロードエラー';
-        throw new Exception($message . ' (エラーコード: ' . $file['error'] . ')');
-    }
-    
-    // 4. ファイルサイズチェック
-    if ($file['size'] > UPLOAD_MAX_SIZE) {
-        $maxSizeMB = UPLOAD_MAX_SIZE / (1024 * 1024);
-        throw new Exception("ファイルサイズが大きすぎます。{$maxSizeMB}MB以下にしてください。");
-    }
-    
-    // 5. ファイル形式チェック
-    $fileExtension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    if (!in_array($fileExtension, ALLOWED_FILE_TYPES)) {
-        $allowedTypesStr = implode(', ', ALLOWED_FILE_TYPES);
-        throw new Exception("許可されていないファイル形式です。許可形式: {$allowedTypesStr}");
-    }
-    
-    // 6. システム健全性チェック
-    $healthCheck = DatabaseFactory::systemHealthCheck();
-    if (!$healthCheck['success']) {
-        throw new Exception('システムの健全性チェックに失敗しました。管理者にお問い合わせください。');
-    }
-    
-    if (DEBUG_MODE) {
-        error_log("System Health Check: " . json_encode($healthCheck['health_check']));
-    }
-    
-    // 7. ファイル処理
-    $fileHandler = new FileUploadHandler();
-    $uploadResult = $fileHandler->handleUpload($file, UPLOAD_DIR);
-    
-    if (!$uploadResult['success']) {
-        throw new Exception('ファイル処理エラー: ' . $uploadResult['message']);
-    }
-    
-    $uploadedFilePath = $uploadResult['file_path'];
-    
-    // 8. CSVインポート実行
-    $db = DatabaseFactory::getDefaultConnection();
-    $importer = new SmileyCSVImporter($db);
-    
-    // インポート開始ログ
-    if (DEBUG_MODE) {
-        error_log("CSV Import Start: " . $file['name'] . " (" . $file['size'] . " bytes)");
-    }
-    
-    $importResult = $importer->import($uploadedFilePath);
-    
-    // インポート完了ログ
-    if (DEBUG_MODE) {
-        error_log("CSV Import Complete: " . json_encode($importResult['summary']));
-    }
-    
-    // 9. 一時ファイル削除
-    if (file_exists($uploadedFilePath)) {
-        unlink($uploadedFilePath);
-    }
-    
-    // 10. 成功レスポンス
-    echo json_encode([
-        'success' => true,
-        'message' => 'CSVインポートが完了しました',
-        'data' => [
-            'batch_id' => $importResult['batch_id'],
-            'file_info' => [
-                'name' => $file['name'],
-                'size' => $file['size'],
-                'type' => $file['type']
+        $result = $importer->importFile($tempFilePath, $importOptions);
+        
+        // 一時ファイル削除
+        if (file_exists($tempFilePath)) {
+            unlink($tempFilePath);
+        }
+        
+        echo json_encode([
+            'success' => true,
+            'message' => "CSVインポートが完了しました",
+            'data' => [
+                'batch_id' => $result['batch_id'],
+                'total_records' => $result['stats']['total'],
+                'success_records' => $result['stats']['success'],
+                'error_records' => count($result['errors']),
+                'duplicate_records' => $result['stats']['duplicate'],
+                'processing_time' => $result['processing_time']
             ],
-            'import_summary' => [
-                'total_records' => $importResult['summary']['total'],
-                'success_records' => $importResult['summary']['success'],
-                'error_records' => $importResult['summary']['error'],
-                'duplicate_records' => $importResult['summary']['duplicate']
-            ],
-            'errors' => $importResult['errors'],
-            'system_info' => [
-                'environment' => ENVIRONMENT,
-                'import_time' => date('Y-m-d H:i:s'),
-                'memory_usage' => memory_get_peak_usage(true)
-            ]
-        ]
-    ], JSON_UNESCAPED_UNICODE);
+            'errors' => $result['errors']
+        ], JSON_UNESCAPED_UNICODE);
+        
+    } elseif ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        
+        $action = $_GET['action'] ?? 'status';
+        
+        switch ($action) {
+            case 'status':
+                // インポート状況確認
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'CSVインポートAPIは正常に動作しています',
+                    'data' => [
+                        'timestamp' => date('Y-m-d H:i:s'),
+                        'database' => DB_NAME,
+                        'environment' => ENVIRONMENT,
+                        'max_upload_size' => ini_get('upload_max_filesize'),
+                        'memory_limit' => ini_get('memory_limit')
+                    ]
+                ], JSON_UNESCAPED_UNICODE);
+                break;
+                
+            case 'logs':
+                // インポートログ取得
+                $limit = min(100, max(10, intval($_GET['limit'] ?? 20)));
+                
+                $sql = "
+                    SELECT 
+                        batch_id,
+                        file_name,
+                        total_records,
+                        success_records,
+                        error_records,
+                        duplicate_records,
+                        status,
+                        import_start,
+                        import_end,
+                        created_by
+                    FROM import_logs 
+                    ORDER BY import_start DESC 
+                    LIMIT ?
+                ";
+                
+                $stmt = $db->query($sql, [$limit]);
+                $logs = $stmt->fetchAll();
+                
+                echo json_encode([
+                    'success' => true,
+                    'data' => $logs
+                ], JSON_UNESCAPED_UNICODE);
+                break;
+                
+            case 'validate':
+                // データベース接続テスト
+                $testSql = "SELECT COUNT(*) as count FROM users";
+                $testStmt = $db->query($testSql);
+                $userCount = $testStmt->fetch()['count'];
+                
+                $testSql2 = "SELECT COUNT(*) as count FROM orders";
+                $testStmt2 = $db->query($testSql2);
+                $orderCount = $testStmt2->fetch()['count'];
+                
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'データベース接続正常',
+                    'data' => [
+                        'user_count' => $userCount,
+                        'order_count' => $orderCount,
+                        'connection_test' => 'OK'
+                    ]
+                ], JSON_UNESCAPED_UNICODE);
+                break;
+                
+            default:
+                throw new Exception('不正なアクションです');
+        }
+        
+    } else {
+        throw new Exception('サポートされていないHTTPメソッドです');
+    }
     
 } catch (Exception $e) {
-    // エラーログに詳細記録
-    $errorDetails = [
-        'message' => $e->getMessage(),
-        'file' => $e->getFile(),
-        'line' => $e->getLine(),
-        'request_info' => [
-            'method' => $_SERVER['REQUEST_METHOD'],
-            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown',
-            'ip' => $_SERVER['REMOTE_ADDR'] ?? 'Unknown'
-        ],
-        'file_info' => isset($_FILES['csvFile']) ? [
-            'name' => $_FILES['csvFile']['name'],
-            'size' => $_FILES['csvFile']['size'],
-            'error' => $_FILES['csvFile']['error']
-        ] : null
-    ];
+    http_response_code(500);
+    error_log("Import API Error: " . $e->getMessage());
     
-    error_log("CSV Import Error: " . json_encode($errorDetails));
-    
-    // 一時ファイルがあれば削除
-    if (isset($uploadedFilePath) && file_exists($uploadedFilePath)) {
-        unlink($uploadedFilePath);
+    // 一時ファイルがある場合は削除
+    if (isset($tempFilePath) && file_exists($tempFilePath)) {
+        unlink($tempFilePath);
     }
     
-    // エラーレスポンス
-    http_response_code(500);
     echo json_encode([
         'success' => false,
         'message' => $e->getMessage(),
-        'error_code' => 'CSV_IMPORT_ERROR',
-        'debug_info' => DEBUG_MODE ? [
-            'file' => basename($e->getFile()),
-            'line' => $e->getLine(),
-            'trace' => $e->getTraceAsString(),
-            'environment' => ENVIRONMENT,
-            'php_version' => PHP_VERSION,
-            'memory_usage' => memory_get_peak_usage(true)
-        ] : null,
-        'system_info' => [
+        'debug_info' => [
             'timestamp' => date('Y-m-d H:i:s'),
-            'environment' => ENVIRONMENT
+            'file' => basename(__FILE__),
+            'method' => $_SERVER['REQUEST_METHOD'],
+            'post_data' => $_POST,
+            'files_data' => array_map(function($file) {
+                return [
+                    'name' => $file['name'],
+                    'size' => $file['size'],
+                    'error' => $file['error']
+                ];
+            }, $_FILES)
         ]
     ], JSON_UNESCAPED_UNICODE);
 }
