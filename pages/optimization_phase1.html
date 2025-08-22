@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>データベース最適化 Phase 1 - 実行画面</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .bg-smiley { background-color: #2E8B57; }
+        .text-smiley { color: #2E8B57; }
+        .console-output {
+            background-color: #1e1e1e;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            height: 500px;
+            overflow-y: auto;
+            padding: 15px;
+            border-radius: 8px;
+            white-space: pre-wrap;
+        }
+        .step-card {
+            border-left: 4px solid #2E8B57;
+            margin-bottom: 20px;
+        }
+        .step-completed {
+            border-left-color: #28a745;
+            background-color: #f8fff9;
+        }
+        .step-running {
+            border-left-color: #ffc107;
+            background-color: #fffef8;
+        }
+        .step-pending {
+            border-left-color: #dee2e6;
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container-fluid py-4">
+        <div class="row">
+            <div class="col-12">
+                <div class="card shadow">
+                    <div class="card-header bg-smiley text-white">
+                        <h4 class="mb-0">
+                            <i class="fas fa-database me-2"></i>
+                            データベース最適化 Phase 1: バックアップ＆現状確認
+                        </h4>
+                    </div>
+                    <div class="card-body">
+                        <!-- 進捗表示 -->
+                        <div class="row mb-4">
+                            <div class="col-lg-6">
+                                <h5>実行ステップ</h5>
+                                <div class="step-card card step-pending" id="step1">
+                                    <div class="card-body py-2">
+                                        <strong>Step 1:</strong> 現在のテーブル構造分析
+                                        <div id="step1-status" class="small text-muted">待機中...</div>
+                                    </div>
+                                </div>
+                                <div class="step-card card step-pending" id="step2">
+                                    <div class="card-body py-2">
+                                        <strong>Step 2:</strong> 完全バックアップ作成
+                                        <div id="step2-status" class="small text-muted">待機中...</div>
+                                    </div>
+                                </div>
+                                <div class="step-card card step-pending" id="step3">
+                                    <div class="card-body py-2">
+                                        <strong>Step 3:</strong> データ量確認
+                                        <div id="step3-status" class="small text-muted">待機中...</div>
+                                    </div>
+                                </div>
+                                <div class="step-card card step-pending" id="step4">
+                                    <div class="card-body py-2">
+                                        <strong>Step 4:</strong> 依存関係確認
+                                        <div id="step4-status" class="small text-muted">待機中...</div>
+                                    </div>
+                                </div>
+                                <div class="step-card card step-pending" id="step5">
+                                    <div class="card-body py-2">
+                                        <strong>Step 5:</strong> 最適化プラン生成
+                                        <div id="step5-status" class="small text-muted">待機中...</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-6">
+                                <h5>実行統計</h5>
+                                <div class="card bg-light">
+                                    <div class="card-body">
+                                        <div class="row text-center">
+                                            <div class="col-6">
+                                                <h3 id="totalTables" class="text-smiley">0</h3>
+                                                <small>分析テーブル数</small>
+                                            </div>
+                                            <div class="col-6">
+                                                <h3 id="totalColumns" class="text-warning">0</h3>
+                                                <small>総カラム数</small>
+                                            </div>
+                                            <div class="col-6 mt-3">
+                                                <h3 id="totalRows" class="text-info">0</h3>
+                                                <small>総データ件数</small>
+                                            </div>
+                                            <div class="col-6 mt-3">
+                                                <h3 id="backupSize" class="text-success">0KB</h3>
+                                                <small>バックアップサイズ</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 実行ボタン -->
+                        <div class="row mb-4">
+                            <div class="col-12 text-center">
+                                <button id="startOptimization" class="btn btn-lg bg-smiley text-white me-3">
+                                    <i class="fas fa-play me-2"></i>Phase 1 実行開始
+                                </button>
+                                <button id="downloadBackup" class="btn btn-lg btn-success me-3" disabled>
+                                    <i class="fas fa-download me-2"></i>バックアップダウンロード
+                                </button>
+                                <button id="viewResults" class="btn btn-lg btn-info" disabled>
+                                    <i class="fas fa-chart-bar me-2"></i>分析結果表示
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- コンソール出力 -->
+                        <div class="row">
+                            <div class="col-12">
+                                <h5>実行ログ</h5>
+                                <div id="consoleOutput" class="console-output">
+                                    システム準備完了。「Phase 1 実行開始」ボタンをクリックしてください。
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 分析結果モーダル -->
+        <div class="modal fade" id="resultsModal" tabindex="-1">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header bg-smiley text-white">
+                        <h5 class="modal-title">分析結果詳細</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="analysisResults">
+                            <!-- 分析結果がここに表示されます -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentStep = 0;
+        let analysisData = {};
+
+        document.getElementById('startOptimization').addEventListener('click', function() {
+            this.disabled = true;
+            startPhase1Execution();
+        });
+
+        document.getElementById('viewResults').addEventListener('click', function() {
+            showAnalysisResults();
+        });
+
+        async function startPhase1Execution() {
+            const consoleOutput = document.getElementById('consoleOutput');
+            consoleOutput.innerHTML = '🚀 データベース最適化 Phase 1 開始...\n';
+
+            try {
+                // Step 1: テーブル構造分析
+                await executeStep(1, 'テーブル構造分析', async () => {
+                    const response = await fetch('../api/optimization_phase1.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'analyze_structure' })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        analysisData.structure = data.data;
+                        updateStatistics(data.data);
+                        appendConsole('✅ テーブル構造分析完了\n');
+                        
+                        // 分析結果の表示
+                        for (const [table, info] of Object.entries(data.data)) {
+                            appendConsole(`📊 ${table}: ${info.column_count}カラム, ${info.row_count}件\n`);
+                        }
+                    } else {
+                        throw new Error(data.message);
+                    }
+                });
+
+                // Step 2: バックアップ作成
+                await executeStep(2, 'バックアップ作成', async () => {
+                    appendConsole('📦 完全バックアップ作成中...\n');
+                    const response = await fetch('../api/optimization_phase1.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'create_backup' })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        analysisData.backup = data.data;
+                        document.getElementById('downloadBackup').disabled = false;
+                        document.getElementById('backupSize').textContent = data.data.size;
+                        appendConsole(`✅ バックアップ完了: ${data.data.filename}\n`);
+                    } else {
+                        throw new Error(data.message);
+                    }
+                });
+
+                // Step 3: データ量確認
+                await executeStep(3, 'データ量確認', async () => {
+                    const response = await fetch('../api/optimization_phase1.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'check_data_volume' })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        analysisData.volume = data.data;
+                        document.getElementById('totalRows').textContent = data.data.total_rows;
+                        appendConsole(`📈 総データ件数: ${data.data.total_rows}件\n`);
+                    } else {
+                        throw new Error(data.message);
+                    }
+                });
+
+                // Step 4: 依存関係確認
+                await executeStep(4, '依存関係確認', async () => {
+                    const response = await fetch('../api/optimization_phase1.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'check_dependencies' })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        analysisData.dependencies = data.data;
+                        appendConsole('🔗 外部キー依存関係確認完了\n');
+                    } else {
+                        throw new Error(data.message);
+                    }
+                });
+
+                // Step 5: 最適化プラン生成
+                await executeStep(5, '最適化プラン生成', async () => {
+                    const response = await fetch('../api/optimization_phase1.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'generate_plan' })
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        analysisData.plan = data.data;
+                        appendConsole('🎯 最適化プラン生成完了\n');
+                        
+                        // プラン概要表示
+                        for (const [table, plan] of Object.entries(data.data)) {
+                            const reduction = plan.current_columns - plan.target_columns;
+                            appendConsole(`   ${table}: ${plan.current_columns} → ${plan.target_columns} (-${reduction}カラム)\n`);
+                        }
+                    } else {
+                        throw new Error(data.message);
+                    }
+                });
+
+                appendConsole('\n✅ Phase 1 完了!\n');
+                appendConsole('==========================================\n');
+                appendConsole('📋 次のステップ: Phase 2 最適化テーブル作成\n');
+                
+                document.getElementById('viewResults').disabled = false;
+
+            } catch (error) {
+                appendConsole(`❌ エラー: ${error.message}\n`);
+                console.error('Phase 1 execution error:', error);
+            }
+        }
+
+        async function executeStep(stepNum, stepName, stepFunction) {
+            const stepElement = document.getElementById(`step${stepNum}`);
+            const statusElement = document.getElementById(`step${stepNum}-status`);
+            
+            // ステップ開始
+            stepElement.className = 'step-card card step-running';
+            statusElement.textContent = '実行中...';
+            statusElement.className = 'small text-warning';
+            
+            appendConsole(`🔄 Step ${stepNum}: ${stepName} 開始\n`);
+            
+            try {
+                await stepFunction();
+                
+                // ステップ完了
+                stepElement.className = 'step-card card step-completed';
+                statusElement.textContent = '完了';
+                statusElement.className = 'small text-success';
+                
+            } catch (error) {
+                // ステップエラー
+                stepElement.className = 'step-card card border-danger';
+                statusElement.textContent = 'エラー';
+                statusElement.className = 'small text-danger';
+                throw error;
+            }
+        }
+
+        function appendConsole(text) {
+            const consoleOutput = document.getElementById('consoleOutput');
+            consoleOutput.innerHTML += text;
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+
+        function updateStatistics(structureData) {
+            let totalTables = Object.keys(structureData).length;
+            let totalColumns = 0;
+            
+            for (const tableData of Object.values(structureData)) {
+                totalColumns += tableData.column_count;
+            }
+            
+            document.getElementById('totalTables').textContent = totalTables;
+            document.getElementById('totalColumns').textContent = totalColumns;
+        }
+
+        function showAnalysisResults() {
+            const resultsDiv = document.getElementById('analysisResults');
+            
+            let html = '<div class="row">';
+            
+            // テーブル構造分析結果
+            if (analysisData.structure) {
+                html += '<div class="col-md-6 mb-4">';
+                html += '<h6 class="text-smiley">📊 テーブル構造分析</h6>';
+                html += '<div class="table-responsive">';
+                html += '<table class="table table-sm table-bordered">';
+                html += '<thead class="table-light"><tr><th>テーブル</th><th>カラム数</th><th>データ件数</th><th>サイズ</th></tr></thead>';
+                html += '<tbody>';
+                
+                for (const [table, data] of Object.entries(analysisData.structure)) {
+                    html += `<tr>
+                        <td><strong>${table}</strong></td>
+                        <td>${data.column_count}</td>
+                        <td>${data.row_count}</td>
+                        <td>${data.data_size}</td>
+                    </tr>`;
+                }
+                html += '</tbody></table></div></div>';
+            }
+            
+            // 最適化プラン
+            if (analysisData.plan) {
+                html += '<div class="col-md-6 mb-4">';
+                html += '<h6 class="text-smiley">🎯 最適化プラン</h6>';
+                html += '<div class="table-responsive">';
+                html += '<table class="table table-sm table-bordered">';
+                html += '<thead class="table-light"><tr><th>テーブル</th><th>現在</th><th>目標</th><th>削減</th><th>削減率</th></tr></thead>';
+                html += '<tbody>';
+                
+                for (const [table, plan] of Object.entries(analysisData.plan)) {
+                    const reduction = plan.current_columns - plan.target_columns;
+                    const reductionRate = ((reduction / plan.current_columns) * 100).toFixed(1);
+                    
+                    html += `<tr>
+                        <td><strong>${table}</strong></td>
+                        <td>${plan.current_columns}</td>
+                        <td>${plan.target_columns}</td>
+                        <td class="text-danger">-${reduction}</td>
+                        <td class="text-success">${reductionRate}%</td>
+                    </tr>`;
+                }
+                html += '</tbody></table></div></div>';
+            }
+            
+            html += '</div>';
+            
+            // 依存関係情報
+            if (analysisData.dependencies) {
+                html += '<div class="row mt-4">';
+                html += '<div class="col-12">';
+                html += '<h6 class="text-smiley">🔗 外部キー依存関係</h6>';
+                html += '<div class="alert alert-info">';
+                
+                for (const [table, deps] of Object.entries(analysisData.dependencies)) {
+                    if (deps && deps.length > 0) {
+                        html += `<strong>${table}テーブルへの参照:</strong><br>`;
+                        for (const dep of deps) {
+                            html += `&nbsp;&nbsp;• ${dep.table}.${dep.column} → ${dep.referenced_table}.${dep.referenced_column}<br>`;
+                        }
+                        html += '<br>';
+                    }
+                }
+                
+                html += '</div></div></div>';
+            }
+            
+            // バックアップ情報
+            if (analysisData.backup) {
+                html += '<div class="row mt-4">';
+                html += '<div class="col-12">';
+                html += '<h6 class="text-smiley">💾 バックアップ情報</h6>';
+                html += '<div class="alert alert-success">';
+                html += `<strong>ファイル名:</strong> ${analysisData.backup.filename}<br>`;
+                html += `<strong>サイズ:</strong> ${analysisData.backup.size}<br>`;
+                html += `<strong>作成日時:</strong> ${new Date().toLocaleString('ja-JP')}<br>`;
+                html += '<button class="btn btn-sm btn-success mt-2" onclick="downloadBackup()">バックアップダウンロード</button>';
+                html += '</div></div></div>';
+            }
+            
+            resultsDiv.innerHTML = html;
+            
+            // モーダル表示
+            const resultsModal = new bootstrap.Modal(document.getElementById('resultsModal'));
+            resultsModal.show();
+        }
+
+        function downloadBackup() {
+            if (analysisData.backup && analysisData.backup.filename) {
+                const link = document.createElement('a');
+                link.href = `../backups/optimization/${analysisData.backup.filename}`;
+                link.download = analysisData.backup.filename;
+                link.click();
+            }
+        }
+
+        // 初期状態の設定
+        document.addEventListener('DOMContentLoaded', function() {
+            appendConsole('システム準備完了。「Phase 1 実行開始」ボタンをクリックしてください。\n');
+            appendConsole('⚠️ 実行前の注意事項:\n');
+            appendConsole('1. 現在のデータベースの完全バックアップが作成されます\n');
+            appendConsole('2. 分析のみでデータの変更は行いません\n');
+            appendConsole('3. 実行時間は約1-2分程度です\n\n');
+        });
+    </script>
+</body>
+</html>
