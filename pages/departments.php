@@ -1,12 +1,13 @@
 <?php
 /**
- * 部署管理API（修正版）
- * Database統一対応版
+ * 部署管理API（根本修正版）
+ * SQLパラメータ数不一致エラーの完全解決
  * 
- * 修正内容:
- * 1. Database::getInstance() を使用（統一修正）
- * 2. 注文データ集計ロジック修正
- * 3. エラーハンドリング強化
+ * 根本修正内容:
+ * 1. WHERE句構築とパラメータバインディングの完全分離
+ * 2. 動的SQL生成の安全な実装
+ * 3. デバッグ情報の追加
+ * 4. エラーハンドリングの強化
  */
 
 require_once '../config/database.php';
@@ -28,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 try {
-    // Database::getInstance() を使用（修正箇所）
+    // Database::getInstance() を使用
     $db = Database::getInstance();
     
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
@@ -37,36 +38,51 @@ try {
         
         switch ($action) {
             case 'list':
-                // 部署一覧取得（修正版：注文データを正確に集計）
+                // 部署一覧取得（根本修正版：WHERE句とパラメータの完全対応）
                 $companyId = $_GET['company_id'] ?? null;
                 $isActive = $_GET['is_active'] ?? null;
                 $page = max(1, intval($_GET['page'] ?? 1));
                 $limit = min(100, max(10, intval($_GET['limit'] ?? 50)));
                 $offset = ($page - 1) * $limit;
                 
-                $where = [];
+                // WHERE句とパラメータを段階的に構築
+                $whereParts = [];
                 $params = [];
                 
+                // 企業IDフィルター
                 if ($companyId) {
-                    $where[] = "d.company_id = ?";
+                    $whereParts[] = "d.company_id = ?";
                     $params[] = $companyId;
                 }
                 
+                // アクティブ状態フィルター
                 if ($isActive !== null) {
-                    $where[] = "d.is_active = ?";
+                    $whereParts[] = "d.is_active = ?";
                     $params[] = $isActive ? 1 : 0;
                 } else {
-                    $where[] = "d.is_active = 1";
+                    // デフォルトはアクティブのみ
+                    $whereParts[] = "d.is_active = ?";
                     $params[] = 1;
                 }
                 
-                $whereClause = 'WHERE ' . implode(' AND ', $where);
+                // WHERE句構築
+                $whereClause = !empty($whereParts) ? 'WHERE ' . implode(' AND ', $whereParts) : '';
                 
-                // 修正版SQL：user_codeを使って正確な注文データを取得
+                // メインクエリ実行
                 $sql = "
                     SELECT 
-                        d.*,
+                        d.id,
+                        d.company_id,
+                        d.department_code,
+                        d.department_name,
+                        d.contact_person,
+                        d.phone_number,
+                        d.email_address,
+                        d.is_active,
+                        d.created_at,
+                        d.updated_at,
                         c.company_name,
+                        c.company_code,
                         COUNT(DISTINCT u.id) as user_count,
                         COUNT(DISTINCT o.id) as order_count,
                         COALESCE(SUM(o.total_amount), 0) as total_revenue,
@@ -78,21 +94,20 @@ try {
                     LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
                     LEFT JOIN orders o ON u.user_code = o.user_code AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 180 DAY)
                     {$whereClause}
-                    GROUP BY d.id
+                    GROUP BY d.id, d.company_id, d.department_code, d.department_name, d.contact_person, d.phone_number, d.email_address, d.is_active, d.created_at, d.updated_at, c.company_name, c.company_code
                     ORDER BY c.company_name ASC, d.department_name ASC
                     LIMIT ? OFFSET ?
                 ";
                 
-                $params[] = $limit;
-                $params[] = $offset;
+                // LIMITとOFFSETパラメータを追加
+                $queryParams = array_merge($params, [$limit, $offset]);
                 
-                $stmt = $db->query($sql, $params);
+                $stmt = $db->query($sql, $queryParams);
                 $departments = $stmt->fetchAll();
                 
-                // 総件数取得
+                // 総件数取得（同じWHERE条件を使用）
                 $countSql = "SELECT COUNT(*) as total FROM departments d {$whereClause}";
-                $countParams = array_slice($params, 0, -2); // limit, offsetを除く
-                $countStmt = $db->query($countSql, $countParams);
+                $countStmt = $db->query($countSql, $params);
                 $totalCount = $countStmt->fetch()['total'];
                 
                 echo json_encode([
@@ -103,12 +118,17 @@ try {
                         'per_page' => $limit,
                         'total' => $totalCount,
                         'total_pages' => ceil($totalCount / $limit)
+                    ],
+                    'debug' => [
+                        'where_clause' => $whereClause,
+                        'params_count' => count($params),
+                        'query_params_count' => count($queryParams)
                     ]
                 ], JSON_UNESCAPED_UNICODE);
                 break;
                 
             case 'detail':
-                // 部署詳細取得（修正版）
+                // 部署詳細取得
                 $departmentId = $_GET['id'] ?? null;
                 if (!$departmentId) {
                     throw new Exception('部署IDが指定されていません');
@@ -125,7 +145,7 @@ try {
                     LEFT JOIN companies c ON d.company_id = c.id
                     LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
                     WHERE d.id = ?
-                    GROUP BY d.id
+                    GROUP BY d.id, d.company_id, d.department_code, d.department_name, d.contact_person, d.phone_number, d.email_address, d.is_active, d.created_at, d.updated_at, c.company_name, c.company_code
                 ";
                 
                 $stmt = $db->query($sql, [$departmentId]);
@@ -135,7 +155,7 @@ try {
                     throw new Exception('部署が見つかりません');
                 }
                 
-                // 注文統計取得（修正版）
+                // 注文統計取得
                 $orderStatsSql = "
                     SELECT 
                         COUNT(DISTINCT o.id) as total_orders,
@@ -154,14 +174,18 @@ try {
                 // 利用者情報取得
                 $usersSql = "
                     SELECT 
-                        u.*,
+                        u.id,
+                        u.user_code,
+                        u.user_name,
+                        u.employee_type_name,
+                        u.is_active,
                         COUNT(DISTINCT o.id) as order_count,
                         COALESCE(SUM(o.total_amount), 0) as total_spent,
                         MAX(o.delivery_date) as last_order_date
                     FROM users u
                     LEFT JOIN orders o ON u.user_code = o.user_code AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
                     WHERE u.department_id = ? AND u.is_active = 1
-                    GROUP BY u.id
+                    GROUP BY u.id, u.user_code, u.user_name, u.employee_type_name, u.is_active
                     ORDER BY u.user_name ASC
                 ";
                 
@@ -171,28 +195,28 @@ try {
                 echo json_encode([
                     'success' => true,
                     'data' => [
-                        'department' => array_merge($department, $orderStats),
+                        'department' => array_merge($department, $orderStats ?: []),
                         'users' => $users
                     ]
                 ], JSON_UNESCAPED_UNICODE);
                 break;
                 
             case 'stats':
-                // 部署統計取得（修正版）
+                // 部署統計取得
                 $companyId = $_GET['company_id'] ?? null;
                 
-                $where = [];
+                $whereParts = [];
                 $params = [];
                 
                 if ($companyId) {
-                    $where[] = "d.company_id = ?";
+                    $whereParts[] = "d.company_id = ?";
                     $params[] = $companyId;
                 }
                 
-                $where[] = "d.is_active = 1";
+                $whereParts[] = "d.is_active = ?";
                 $params[] = 1;
                 
-                $whereClause = 'WHERE ' . implode(' AND ', $where);
+                $whereClause = 'WHERE ' . implode(' AND ', $whereParts);
                 
                 $sql = "
                     SELECT 
@@ -209,9 +233,16 @@ try {
                 $stmt = $db->query($sql, $params);
                 $stats = $stmt->fetch();
                 
-                // 注文関連統計（修正版）
-                $orderStatsWhere = $companyId ? "WHERE u.company_id = ?" : "";
-                $orderStatsParams = $companyId ? [$companyId] : [];
+                // 注文関連統計
+                $orderStatsWhere = '';
+                $orderStatsParams = [];
+                
+                if ($companyId) {
+                    $orderStatsWhere = "WHERE u.company_id = ? AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+                    $orderStatsParams = [$companyId];
+                } else {
+                    $orderStatsWhere = "WHERE o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+                }
                 
                 $orderStatsSql = "
                     SELECT 
@@ -222,13 +253,12 @@ try {
                     FROM orders o
                     INNER JOIN users u ON o.user_code = u.user_code
                     {$orderStatsWhere}
-                      AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                 ";
                 
                 $orderStatsStmt = $db->query($orderStatsSql, $orderStatsParams);
                 $orderStats = $orderStatsStmt->fetch();
                 
-                $combinedStats = array_merge($stats, $orderStats);
+                $combinedStats = array_merge($stats ?: [], $orderStats ?: []);
                 
                 echo json_encode([
                     'success' => true,
@@ -324,7 +354,7 @@ try {
             throw new Exception('部署が見つかりません');
         }
         
-        $updateFields = [];
+        $updateParts = [];
         $params = [];
         
         $allowedFields = [
@@ -334,7 +364,7 @@ try {
         
         foreach ($allowedFields as $field) {
             if (array_key_exists($field, $input)) {
-                $updateFields[] = "{$field} = ?";
+                $updateParts[] = "{$field} = ?";
                 $params[] = $input[$field];
             }
         }
@@ -350,18 +380,18 @@ try {
                 throw new Exception('この企業内で同じ部署コードが既に登録されています');
             }
             
-            $updateFields[] = "department_code = ?";
+            $updateParts[] = "department_code = ?";
             $params[] = $input['department_code'];
         }
         
-        if (empty($updateFields)) {
+        if (empty($updateParts)) {
             throw new Exception('更新する項目がありません');
         }
         
-        $updateFields[] = "updated_at = NOW()";
+        $updateParts[] = "updated_at = NOW()";
         $params[] = $departmentId;
         
-        $sql = "UPDATE departments SET " . implode(', ', $updateFields) . " WHERE id = ?";
+        $sql = "UPDATE departments SET " . implode(', ', $updateParts) . " WHERE id = ?";
         $db->query($sql, $params);
         
         echo json_encode([
@@ -417,7 +447,14 @@ try {
     error_log("Departments API Error: " . $e->getMessage());
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage()
+        'message' => 'クエリエラー: ' . $e->getMessage(),
+        'debug' => [
+            'file' => basename(__FILE__),
+            'line' => $e->getLine(),
+            'request_method' => $_SERVER['REQUEST_METHOD'],
+            'get_params' => $_GET,
+            'timestamp' => date('Y-m-d H:i:s')
+        ]
     ], JSON_UNESCAPED_UNICODE);
 }
 ?>
