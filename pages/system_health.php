@@ -104,17 +104,20 @@ function checkDatabaseTables() {
         $totalRequired = count($requiredTables);
         $completionRate = $totalRequired > 0 ? round(($existingCount / $totalRequired) * 100) : 0;
         
-        // 方法2: INFORMATION_SCHEMA を使用してダブルチェック
+        // 方法2: INFORMATION_SCHEMA を使用してダブルチェック（prepare不使用版）
         $infoSchemaCheck = [];
         foreach ($requiredTables as $tableName => $description) {
-            $stmt = $db->prepare("
-                SELECT COUNT(*) as table_count 
-                FROM INFORMATION_SCHEMA.TABLES 
-                WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-            ");
-            $stmt->execute([DB_NAME, $tableName]);
-            $result = $stmt->fetch();
-            $infoSchemaCheck[$tableName] = $result['table_count'] > 0;
+            try {
+                $sql = "SELECT COUNT(*) as table_count 
+                        FROM INFORMATION_SCHEMA.TABLES 
+                        WHERE TABLE_SCHEMA = '" . DB_NAME . "' 
+                        AND TABLE_NAME = '" . $tableName . "'";
+                $stmt = $db->query($sql);
+                $result = $stmt->fetch();
+                $infoSchemaCheck[$tableName] = $result['table_count'] > 0;
+            } catch (Exception $e) {
+                $infoSchemaCheck[$tableName] = false;
+            }
         }
         
         return [
