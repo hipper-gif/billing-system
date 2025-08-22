@@ -1,13 +1,12 @@
 <?php
 /**
- * 部署管理API（根本修正版）
- * SQLパラメータ数不一致エラーの完全解決
+ * 部署管理API（実テーブル構造対応版）
+ * departments テーブルの実際のカラム名に対応
  * 
- * 根本修正内容:
- * 1. WHERE句構築とパラメータバインディングの完全分離
- * 2. 動的SQL生成の安全な実装
- * 3. デバッグ情報の追加
- * 4. エラーハンドリングの強化
+ * 実際のテーブル構造:
+ * - manager_name (contact_personではない)
+ * - manager_phone (phone_numberではない)  
+ * - manager_email (email_addressではない)
  */
 
 require_once '../config/database.php';
@@ -38,7 +37,7 @@ try {
         
         switch ($action) {
             case 'list':
-                // 部署一覧取得（根本修正版：WHERE句とパラメータの完全対応）
+                // 部署一覧取得（実テーブル構造対応）
                 $companyId = $_GET['company_id'] ?? null;
                 $isActive = $_GET['is_active'] ?? null;
                 $page = max(1, intval($_GET['page'] ?? 1));
@@ -68,16 +67,31 @@ try {
                 // WHERE句構築
                 $whereClause = !empty($whereParts) ? 'WHERE ' . implode(' AND ', $whereParts) : '';
                 
-                // メインクエリ実行
+                // メインクエリ実行（実際のカラム名を使用）
                 $sql = "
                     SELECT 
                         d.id,
                         d.company_id,
                         d.department_code,
                         d.department_name,
-                        d.contact_person,
-                        d.phone_number,
-                        d.email_address,
+                        d.parent_department_id,
+                        d.department_level,
+                        d.department_path,
+                        d.manager_name,
+                        d.manager_title,
+                        d.manager_phone,
+                        d.manager_email,
+                        d.floor_building,
+                        d.room_number,
+                        d.delivery_location,
+                        d.delivery_time_default,
+                        d.delivery_notes,
+                        d.separate_billing,
+                        d.billing_contact_person,
+                        d.cost_center_code,
+                        d.budget_code,
+                        d.employee_count,
+                        d.daily_order_average,
                         d.is_active,
                         d.created_at,
                         d.updated_at,
@@ -94,7 +108,7 @@ try {
                     LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
                     LEFT JOIN orders o ON u.user_code = o.user_code AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 180 DAY)
                     {$whereClause}
-                    GROUP BY d.id, d.company_id, d.department_code, d.department_name, d.contact_person, d.phone_number, d.email_address, d.is_active, d.created_at, d.updated_at, c.company_name, c.company_code
+                    GROUP BY d.id, d.company_id, d.department_code, d.department_name, d.parent_department_id, d.department_level, d.department_path, d.manager_name, d.manager_title, d.manager_phone, d.manager_email, d.floor_building, d.room_number, d.delivery_location, d.delivery_time_default, d.delivery_notes, d.separate_billing, d.billing_contact_person, d.cost_center_code, d.budget_code, d.employee_count, d.daily_order_average, d.is_active, d.created_at, d.updated_at, c.company_name, c.company_code
                     ORDER BY c.company_name ASC, d.department_name ASC
                     LIMIT ? OFFSET ?
                 ";
@@ -128,7 +142,7 @@ try {
                 break;
                 
             case 'detail':
-                // 部署詳細取得
+                // 部署詳細取得（実テーブル構造対応）
                 $departmentId = $_GET['id'] ?? null;
                 if (!$departmentId) {
                     throw new Exception('部署IDが指定されていません');
@@ -145,7 +159,7 @@ try {
                     LEFT JOIN companies c ON d.company_id = c.id
                     LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
                     WHERE d.id = ?
-                    GROUP BY d.id, d.company_id, d.department_code, d.department_name, d.contact_person, d.phone_number, d.email_address, d.is_active, d.created_at, d.updated_at, c.company_name, c.company_code
+                    GROUP BY d.id, d.company_id, d.department_code, d.department_name, d.parent_department_id, d.department_level, d.department_path, d.manager_name, d.manager_title, d.manager_phone, d.manager_email, d.floor_building, d.room_number, d.delivery_location, d.delivery_time_default, d.delivery_notes, d.separate_billing, d.billing_contact_person, d.cost_center_code, d.budget_code, d.employee_count, d.daily_order_average, d.is_active, d.created_at, d.updated_at, c.company_name, c.company_code
                 ";
                 
                 $stmt = $db->query($sql, [$departmentId]);
@@ -277,7 +291,7 @@ try {
         
         switch ($action) {
             case 'create':
-                // 部署新規作成
+                // 部署新規作成（実テーブル構造対応）
                 $requiredFields = ['company_id', 'department_code', 'department_name'];
                 foreach ($requiredFields as $field) {
                     if (empty($input[$field])) {
@@ -308,7 +322,7 @@ try {
                 $sql = "
                     INSERT INTO departments (
                         company_id, department_code, department_name,
-                        contact_person, phone_number, email_address,
+                        manager_name, manager_phone, manager_email,
                         is_active, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 ";
@@ -317,9 +331,9 @@ try {
                     $input['company_id'],
                     $input['department_code'],
                     $input['department_name'],
-                    $input['contact_person'] ?? null,
-                    $input['phone_number'] ?? null,
-                    $input['email_address'] ?? null,
+                    $input['manager_name'] ?? null,
+                    $input['manager_phone'] ?? null,
+                    $input['manager_email'] ?? null,
                     isset($input['is_active']) ? ($input['is_active'] ? 1 : 0) : 1
                 ];
                 
@@ -358,8 +372,8 @@ try {
         $params = [];
         
         $allowedFields = [
-            'department_name', 'contact_person', 'phone_number', 
-            'email_address', 'is_active'
+            'department_name', 'manager_name', 'manager_phone', 
+            'manager_email', 'is_active'
         ];
         
         foreach ($allowedFields as $field) {
