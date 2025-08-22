@@ -1,593 +1,423 @@
 <?php
 /**
- * 部署管理画面（修正版）
+ * 部署管理API（修正版）
  * Database統一対応版
  * 
  * 修正内容:
- * 1. Database::getInstance() を使用
- * 2. エラーハンドリング強化
- * 3. Smiley配食事業専用UI
+ * 1. Database::getInstance() を使用（統一修正）
+ * 2. 注文データ集計ロジック修正
+ * 3. エラーハンドリング強化
  */
 
 require_once '../config/database.php';
 require_once '../classes/Database.php';
 require_once '../classes/SecurityHelper.php';
 
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+
 // セキュリティヘッダー設定
 SecurityHelper::setSecurityHeaders();
 
-// Database::getInstance() を使用（修正箇所）
-$db = Database::getInstance();
-
-// フィルター取得
-$companyFilter = $_GET['company_id'] ?? '';
-$searchTerm = $_GET['search'] ?? '';
-
-// 統計情報取得
-$stats = getDepartmentStats($db, $companyFilter);
-$departments = getDepartments($db, $companyFilter, $searchTerm);
-$companies = getCompanies($db);
-
-function getDepartmentStats($db, $companyFilter = '') {
-    try {
-        $stats = [
-            'total_departments' => 0,
-            'active_departments' => 0,
-            'companies_with_departments' => 0,
-            'users_in_departments' => 0,
-            'departments_with_orders' => 0,
-            'avg_users_per_department' => 0
-        ];
-
-        $whereClause = '';
-        $params = [];
-        
-        if ($companyFilter) {
-            $whereClause = 'WHERE d.company_id = ?';
-            $params[] = $companyFilter;
-        }
-
-        // 総部署数
-        $stmt = $db->query("SELECT COUNT(*) as total FROM departments d $whereClause", $params);
-        $result = $stmt->fetch();
-        $stats['total_departments'] = $result['total'] ?? 0;
-
-        // アクティブ部署数
-        $activeWhere = $whereClause ? $whereClause . ' AND d.is_active = 1' : 'WHERE d.is_active = 1';
-        $stmt = $db->query("SELECT COUNT(*) as active FROM departments d $activeWhere", $params);
-        $result = $stmt->fetch();
-        $stats['active_departments'] = $result['active'] ?? 0;
-
-        // 部署を持つ企業数
-        $stmt = $db->query("
-            SELECT COUNT(DISTINCT d.company_id) as companies 
-            FROM departments d 
-            WHERE d.is_active = 1
-        ");
-        $result = $stmt->fetch();
-        $stats['companies_with_departments'] = $result['companies'] ?? 0;
-
-        // 部署に所属する利用者数
-        $stmt = $db->query("
-            SELECT COUNT(u.id) as users 
-            FROM users u 
-            JOIN departments d ON u.department_id = d.id 
-            WHERE u.is_active = 1 AND d.is_active = 1
-        ");
-        $result = $stmt->fetch();
-        $stats['users_in_departments'] = $result['users'] ?? 0;
-
-        // 注文のある部署数
-        $stmt = $db->query("
-            SELECT COUNT(DISTINCT d.id) as departments 
-            FROM departments d 
-            JOIN users u ON d.id = u.department_id 
-            JOIN orders o ON u.user_code = o.user_code 
-            WHERE d.is_active = 1 AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-        ");
-        $result = $stmt->fetch();
-        $stats['departments_with_orders'] = $result['departments'] ?? 0;
-
-        // 部署あたりの平均利用者数
-        if ($stats['active_departments'] > 0) {
-            $stats['avg_users_per_department'] = round($stats['users_in_departments'] / $stats['active_departments'], 1);
-        }
-
-        return $stats;
-
-    } catch (Exception $e) {
-        error_log("Department stats error: " . $e->getMessage());
-        return [
-            'total_departments' => 'エラー',
-            'active_departments' => 'エラー',
-            'companies_with_departments' => 'エラー',
-            'users_in_departments' => 'エラー',
-            'departments_with_orders' => 'エラー',
-            'avg_users_per_department' => 'エラー',
-            'error' => $e->getMessage()
-        ];
-    }
+// OPTIONS リクエスト対応
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
 }
 
-function getDepartments($db, $companyFilter = '', $searchTerm = '') {
-    try {
-        $whereConditions = ['d.is_active = 1'];
+try {
+    // Database::getInstance() を使用（修正箇所）
+    $db = Database::getInstance();
+    
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        
+        $action = $_GET['action'] ?? 'list';
+        
+        switch ($action) {
+            case 'list':
+                // 部署一覧取得（修正版：注文データを正確に集計）
+                $companyId = $_GET['company_id'] ?? null;
+                $isActive = $_GET['is_active'] ?? null;
+                $page = max(1, intval($_GET['page'] ?? 1));
+                $limit = min(100, max(10, intval($_GET['limit'] ?? 50)));
+                $offset = ($page - 1) * $limit;
+                
+                $where = [];
+                $params = [];
+                
+                if ($companyId) {
+                    $where[] = "d.company_id = ?";
+                    $params[] = $companyId;
+                }
+                
+                if ($isActive !== null) {
+                    $where[] = "d.is_active = ?";
+                    $params[] = $isActive ? 1 : 0;
+                } else {
+                    $where[] = "d.is_active = 1";
+                    $params[] = 1;
+                }
+                
+                $whereClause = 'WHERE ' . implode(' AND ', $where);
+                
+                // 修正版SQL：user_codeを使って正確な注文データを取得
+                $sql = "
+                    SELECT 
+                        d.*,
+                        c.company_name,
+                        COUNT(DISTINCT u.id) as user_count,
+                        COUNT(DISTINCT o.id) as order_count,
+                        COALESCE(SUM(o.total_amount), 0) as total_revenue,
+                        MAX(o.delivery_date) as last_order_date,
+                        COUNT(DISTINCT CASE WHEN o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN o.id END) as recent_orders,
+                        COALESCE(SUM(CASE WHEN o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN o.total_amount ELSE 0 END), 0) as recent_revenue
+                    FROM departments d
+                    LEFT JOIN companies c ON d.company_id = c.id
+                    LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
+                    LEFT JOIN orders o ON u.user_code = o.user_code AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 180 DAY)
+                    {$whereClause}
+                    GROUP BY d.id
+                    ORDER BY c.company_name ASC, d.department_name ASC
+                    LIMIT ? OFFSET ?
+                ";
+                
+                $params[] = $limit;
+                $params[] = $offset;
+                
+                $stmt = $db->query($sql, $params);
+                $departments = $stmt->fetchAll();
+                
+                // 総件数取得
+                $countSql = "SELECT COUNT(*) as total FROM departments d {$whereClause}";
+                $countParams = array_slice($params, 0, -2); // limit, offsetを除く
+                $countStmt = $db->query($countSql, $countParams);
+                $totalCount = $countStmt->fetch()['total'];
+                
+                echo json_encode([
+                    'success' => true,
+                    'data' => $departments,
+                    'pagination' => [
+                        'current_page' => $page,
+                        'per_page' => $limit,
+                        'total' => $totalCount,
+                        'total_pages' => ceil($totalCount / $limit)
+                    ]
+                ], JSON_UNESCAPED_UNICODE);
+                break;
+                
+            case 'detail':
+                // 部署詳細取得（修正版）
+                $departmentId = $_GET['id'] ?? null;
+                if (!$departmentId) {
+                    throw new Exception('部署IDが指定されていません');
+                }
+                
+                // 基本情報取得
+                $sql = "
+                    SELECT 
+                        d.*,
+                        c.company_name,
+                        c.company_code,
+                        COUNT(DISTINCT u.id) as user_count
+                    FROM departments d
+                    LEFT JOIN companies c ON d.company_id = c.id
+                    LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
+                    WHERE d.id = ?
+                    GROUP BY d.id
+                ";
+                
+                $stmt = $db->query($sql, [$departmentId]);
+                $department = $stmt->fetch();
+                
+                if (!$department) {
+                    throw new Exception('部署が見つかりません');
+                }
+                
+                // 注文統計取得（修正版）
+                $orderStatsSql = "
+                    SELECT 
+                        COUNT(DISTINCT o.id) as total_orders,
+                        COALESCE(SUM(o.total_amount), 0) as total_revenue,
+                        MAX(o.delivery_date) as last_order_date,
+                        MIN(o.delivery_date) as first_order_date,
+                        COALESCE(AVG(o.total_amount), 0) as avg_order_amount
+                    FROM orders o
+                    INNER JOIN users u ON o.user_code = u.user_code
+                    WHERE u.department_id = ?
+                ";
+                
+                $orderStatsStmt = $db->query($orderStatsSql, [$departmentId]);
+                $orderStats = $orderStatsStmt->fetch();
+                
+                // 利用者情報取得
+                $usersSql = "
+                    SELECT 
+                        u.*,
+                        COUNT(DISTINCT o.id) as order_count,
+                        COALESCE(SUM(o.total_amount), 0) as total_spent,
+                        MAX(o.delivery_date) as last_order_date
+                    FROM users u
+                    LEFT JOIN orders o ON u.user_code = o.user_code AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+                    WHERE u.department_id = ? AND u.is_active = 1
+                    GROUP BY u.id
+                    ORDER BY u.user_name ASC
+                ";
+                
+                $usersStmt = $db->query($usersSql, [$departmentId]);
+                $users = $usersStmt->fetchAll();
+                
+                echo json_encode([
+                    'success' => true,
+                    'data' => [
+                        'department' => array_merge($department, $orderStats),
+                        'users' => $users
+                    ]
+                ], JSON_UNESCAPED_UNICODE);
+                break;
+                
+            case 'stats':
+                // 部署統計取得（修正版）
+                $companyId = $_GET['company_id'] ?? null;
+                
+                $where = [];
+                $params = [];
+                
+                if ($companyId) {
+                    $where[] = "d.company_id = ?";
+                    $params[] = $companyId;
+                }
+                
+                $where[] = "d.is_active = 1";
+                $params[] = 1;
+                
+                $whereClause = 'WHERE ' . implode(' AND ', $where);
+                
+                $sql = "
+                    SELECT 
+                        COUNT(DISTINCT d.id) as total_departments,
+                        COUNT(DISTINCT u.id) as total_users,
+                        COUNT(DISTINCT CASE WHEN u.is_active = 1 THEN u.id END) as active_users,
+                        COUNT(DISTINCT c.id) as companies_with_departments
+                    FROM departments d
+                    LEFT JOIN companies c ON d.company_id = c.id
+                    LEFT JOIN users u ON d.id = u.department_id
+                    {$whereClause}
+                ";
+                
+                $stmt = $db->query($sql, $params);
+                $stats = $stmt->fetch();
+                
+                // 注文関連統計（修正版）
+                $orderStatsWhere = $companyId ? "WHERE u.company_id = ?" : "";
+                $orderStatsParams = $companyId ? [$companyId] : [];
+                
+                $orderStatsSql = "
+                    SELECT 
+                        COUNT(*) as total_orders,
+                        SUM(total_amount) as total_revenue,
+                        COUNT(DISTINCT user_code) as ordering_users,
+                        AVG(total_amount) as avg_order_amount
+                    FROM orders o
+                    INNER JOIN users u ON o.user_code = u.user_code
+                    {$orderStatsWhere}
+                      AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                ";
+                
+                $orderStatsStmt = $db->query($orderStatsSql, $orderStatsParams);
+                $orderStats = $orderStatsStmt->fetch();
+                
+                $combinedStats = array_merge($stats, $orderStats);
+                
+                echo json_encode([
+                    'success' => true,
+                    'data' => $combinedStats
+                ], JSON_UNESCAPED_UNICODE);
+                break;
+                
+            default:
+                throw new Exception('不正なアクションです');
+        }
+        
+    } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        
+        $input = json_decode(file_get_contents('php://input'), true);
+        $action = $input['action'] ?? 'create';
+        
+        switch ($action) {
+            case 'create':
+                // 部署新規作成
+                $requiredFields = ['company_id', 'department_code', 'department_name'];
+                foreach ($requiredFields as $field) {
+                    if (empty($input[$field])) {
+                        throw new Exception("必須項目が入力されていません: {$field}");
+                    }
+                }
+                
+                // 企業存在チェック
+                $companyCheck = $db->query(
+                    "SELECT id FROM companies WHERE id = ? AND is_active = 1", 
+                    [$input['company_id']]
+                );
+                
+                if (!$companyCheck->fetch()) {
+                    throw new Exception('指定された企業が見つかりません');
+                }
+                
+                // 重複チェック（同一企業内での部署コード重複）
+                $duplicateCheck = $db->query(
+                    "SELECT id FROM departments WHERE company_id = ? AND department_code = ?", 
+                    [$input['company_id'], $input['department_code']]
+                );
+                
+                if ($duplicateCheck->fetch()) {
+                    throw new Exception('この企業内で同じ部署コードが既に登録されています');
+                }
+                
+                $sql = "
+                    INSERT INTO departments (
+                        company_id, department_code, department_name,
+                        contact_person, phone_number, email_address,
+                        is_active, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                ";
+                
+                $params = [
+                    $input['company_id'],
+                    $input['department_code'],
+                    $input['department_name'],
+                    $input['contact_person'] ?? null,
+                    $input['phone_number'] ?? null,
+                    $input['email_address'] ?? null,
+                    isset($input['is_active']) ? ($input['is_active'] ? 1 : 0) : 1
+                ];
+                
+                $db->query($sql, $params);
+                $newDepartmentId = $db->lastInsertId();
+                
+                echo json_encode([
+                    'success' => true,
+                    'message' => '部署を登録しました',
+                    'data' => ['id' => $newDepartmentId]
+                ], JSON_UNESCAPED_UNICODE);
+                break;
+                
+            default:
+                throw new Exception('不正なアクションです');
+        }
+        
+    } elseif ($_SERVER['REQUEST_METHOD'] === 'PUT') {
+        
+        $input = json_decode(file_get_contents('php://input'), true);
+        $departmentId = $input['id'] ?? null;
+        
+        if (!$departmentId) {
+            throw new Exception('部署IDが指定されていません');
+        }
+        
+        // 存在チェック
+        $departmentCheck = $db->query("SELECT id, company_id FROM departments WHERE id = ?", [$departmentId]);
+        $department = $departmentCheck->fetch();
+        
+        if (!$department) {
+            throw new Exception('部署が見つかりません');
+        }
+        
+        $updateFields = [];
         $params = [];
-
-        if ($companyFilter) {
-            $whereConditions[] = 'd.company_id = ?';
-            $params[] = $companyFilter;
+        
+        $allowedFields = [
+            'department_name', 'contact_person', 'phone_number', 
+            'email_address', 'is_active'
+        ];
+        
+        foreach ($allowedFields as $field) {
+            if (array_key_exists($field, $input)) {
+                $updateFields[] = "{$field} = ?";
+                $params[] = $input[$field];
+            }
         }
-
-        if ($searchTerm) {
-            $whereConditions[] = '(d.department_name LIKE ? OR c.company_name LIKE ?)';
-            $params[] = "%$searchTerm%";
-            $params[] = "%$searchTerm%";
+        
+        // 部署コード変更の場合は重複チェック
+        if (array_key_exists('department_code', $input)) {
+            $duplicateCheck = $db->query(
+                "SELECT id FROM departments WHERE company_id = ? AND department_code = ? AND id != ?", 
+                [$department['company_id'], $input['department_code'], $departmentId]
+            );
+            
+            if ($duplicateCheck->fetch()) {
+                throw new Exception('この企業内で同じ部署コードが既に登録されています');
+            }
+            
+            $updateFields[] = "department_code = ?";
+            $params[] = $input['department_code'];
         }
-
-        $whereClause = 'WHERE ' . implode(' AND ', $whereConditions);
-
-        $stmt = $db->query("
-            SELECT 
-                d.*,
-                c.company_name,
-                c.company_code,
+        
+        if (empty($updateFields)) {
+            throw new Exception('更新する項目がありません');
+        }
+        
+        $updateFields[] = "updated_at = NOW()";
+        $params[] = $departmentId;
+        
+        $sql = "UPDATE departments SET " . implode(', ', $updateFields) . " WHERE id = ?";
+        $db->query($sql, $params);
+        
+        echo json_encode([
+            'success' => true,
+            'message' => '部署情報を更新しました'
+        ], JSON_UNESCAPED_UNICODE);
+        
+    } elseif ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
+        
+        $departmentId = $_GET['id'] ?? null;
+        if (!$departmentId) {
+            throw new Exception('部署IDが指定されていません');
+        }
+        
+        // 関連データ確認
+        $relatedDataCheck = $db->query(
+            "SELECT 
                 COUNT(DISTINCT u.id) as user_count,
-                COUNT(DISTINCT CASE WHEN u.is_active = 1 THEN u.id END) as active_user_count,
-                COUNT(DISTINCT o.id) as order_count,
-                SUM(o.total_amount) as total_revenue,
-                MAX(o.delivery_date) as last_order_date,
-                AVG(u.is_active) as activity_rate
-            FROM departments d
-            LEFT JOIN companies c ON d.company_id = c.id
-            LEFT JOIN users u ON d.id = u.department_id
-            LEFT JOIN orders o ON u.user_code = o.user_code AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
-            $whereClause
-            GROUP BY d.id
-            ORDER BY c.company_name ASC, d.department_name ASC
-        ", $params);
+                COUNT(DISTINCT o.id) as order_count
+             FROM departments d
+             LEFT JOIN users u ON d.id = u.department_id
+             LEFT JOIN orders o ON u.user_code = o.user_code
+             WHERE d.id = ?", 
+            [$departmentId]
+        );
         
-        return $stmt->fetchAll();
-
-    } catch (Exception $e) {
-        error_log("Get departments error: " . $e->getMessage());
-        return [];
-    }
-}
-
-function getCompanies($db) {
-    try {
-        $stmt = $db->query("
-            SELECT id, company_name, company_code 
-            FROM companies 
-            WHERE is_active = 1 
-            ORDER BY company_name ASC
-        ");
+        $relatedData = $relatedDataCheck->fetch();
         
-        return $stmt->fetchAll();
-
-    } catch (Exception $e) {
-        error_log("Get companies error: " . $e->getMessage());
-        return [];
+        if ($relatedData['order_count'] > 0 || $relatedData['user_count'] > 0) {
+            // 論理削除
+            $db->query(
+                "UPDATE departments SET is_active = 0, updated_at = NOW() WHERE id = ?", 
+                [$departmentId]
+            );
+            $message = '部署を無効化しました（関連データがあるため論理削除）';
+        } else {
+            // 物理削除
+            $db->query("DELETE FROM departments WHERE id = ?", [$departmentId]);
+            $message = '部署を削除しました';
+        }
+        
+        echo json_encode([
+            'success' => true,
+            'message' => $message
+        ], JSON_UNESCAPED_UNICODE);
+        
+    } else {
+        throw new Exception('サポートされていないHTTPメソッドです');
     }
+    
+} catch (Exception $e) {
+    http_response_code(500);
+    error_log("Departments API Error: " . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => $e->getMessage()
+    ], JSON_UNESCAPED_UNICODE);
 }
 ?>
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏢 部署管理 - Smiley配食システム</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .main-container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-            margin: 20px auto;
-            padding: 30px;
-            max-width: 1400px;
-        }
-        .smiley-green { color: #2E8B57; }
-        .bg-smiley-green { background-color: #2E8B57; }
-        
-        .stat-card {
-            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-            border-radius: 15px;
-            padding: 25px;
-            margin-bottom: 20px;
-            border-left: 5px solid #2E8B57;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
-            transition: transform 0.3s ease;
-        }
-        .stat-card:hover {
-            transform: translateY(-5px);
-        }
-        .stat-number {
-            font-size: 2.2rem;
-            font-weight: bold;
-            color: #2E8B57;
-        }
-        
-        .department-card {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 15px;
-            border-left: 4px solid #2E8B57;
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-            transition: all 0.3s ease;
-        }
-        .department-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-        }
-        
-        .company-badge {
-            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
-        
-        .search-filters {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-        }
-        
-        .btn-smiley {
-            background-color: #2E8B57;
-            border-color: #2E8B57;
-            color: white;
-        }
-        .btn-smiley:hover {
-            background-color: #228B22;
-            border-color: #228B22;
-            color: white;
-        }
-        
-        .department-stats {
-            font-size: 0.9rem;
-        }
-        .department-stats .stat-item {
-            display: inline-block;
-            margin-right: 15px;
-            color: #6c757d;
-        }
-        
-        .activity-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 5px;
-        }
-        .activity-high { background-color: #28a745; }
-        .activity-medium { background-color: #ffc107; }
-        .activity-low { background-color: #dc3545; }
-        .activity-none { background-color: #6c757d; }
-        
-        .no-data {
-            text-align: center;
-            padding: 40px;
-            color: #6c757d;
-        }
-    </style>
-</head>
-<body>
-    <div class="main-container">
-        <!-- ヘッダー -->
-        <div class="row align-items-center mb-4">
-            <div class="col">
-                <h1 class="display-5 smiley-green mb-2">🏢 部署管理</h1>
-                <p class="lead text-muted">Smiley配食システム - 企業別部署の統合管理</p>
-            </div>
-            <div class="col-auto">
-                <a href="companies.php" class="btn btn-outline-secondary me-2">
-                    <i class="bi bi-building"></i> 企業管理
-                </a>
-                <a href="../index.php" class="btn btn-outline-secondary me-2">
-                    <i class="bi bi-arrow-left"></i> ダッシュボード
-                </a>
-                <button class="btn btn-smiley" onclick="showAddDepartmentModal()">
-                    <i class="bi bi-plus-circle"></i> 新規部署追加
-                </button>
-            </div>
-        </div>
-
-        <!-- 統計サマリー -->
-        <div class="row mb-4">
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['total_departments']) ? number_format($stats['total_departments']) : $stats['total_departments']; ?></div>
-                    <div class="text-muted">総部署数</div>
-                    <small class="text-success"><i class="bi bi-diagram-3"></i> 登録済み</small>
-                </div>
-            </div>
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['active_departments']) ? number_format($stats['active_departments']) : $stats['active_departments']; ?></div>
-                    <div class="text-muted">アクティブ部署</div>
-                    <small class="text-info"><i class="bi bi-check-circle"></i> 稼働中</small>
-                </div>
-            </div>
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['companies_with_departments']) ? number_format($stats['companies_with_departments']) : $stats['companies_with_departments']; ?></div>
-                    <div class="text-muted">対象企業数</div>
-                    <small class="text-primary"><i class="bi bi-building"></i> 部署有り</small>
-                </div>
-            </div>
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['users_in_departments']) ? number_format($stats['users_in_departments']) : $stats['users_in_departments']; ?></div>
-                    <div class="text-muted">所属利用者数</div>
-                    <small class="text-success"><i class="bi bi-people"></i> アクティブ</small>
-                </div>
-            </div>
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['departments_with_orders']) ? number_format($stats['departments_with_orders']) : $stats['departments_with_orders']; ?></div>
-                    <div class="text-muted">注文実績部署</div>
-                    <small class="text-warning"><i class="bi bi-cart"></i> 過去30日</small>
-                </div>
-            </div>
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['avg_users_per_department']) ? $stats['avg_users_per_department'] : $stats['avg_users_per_department']; ?></div>
-                    <div class="text-muted">平均利用者数</div>
-                    <small class="text-info"><i class="bi bi-person"></i> 部署あたり</small>
-                </div>
-            </div>
-        </div>
-
-        <!-- 検索・フィルター -->
-        <div class="search-filters">
-            <form method="GET" action="">
-                <div class="row">
-                    <div class="col-md-4">
-                        <div class="form-group">
-                            <label class="form-label">企業フィルター</label>
-                            <select class="form-select" name="company_id" onchange="this.form.submit()">
-                                <option value="">全ての企業</option>
-                                <?php foreach ($companies as $company): ?>
-                                    <option value="<?php echo $company['id']; ?>" 
-                                            <?php echo $companyFilter == $company['id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($company['company_name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="form-group">
-                            <label class="form-label">部署名検索</label>
-                            <input type="text" class="form-control" name="search" 
-                                   value="<?php echo htmlspecialchars($searchTerm); ?>" 
-                                   placeholder="部署名または企業名を入力...">
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="form-group">
-                            <label class="form-label">&nbsp;</label>
-                            <button type="submit" class="btn btn-smiley w-100">
-                                <i class="bi bi-search"></i> 検索
-                            </button>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="form-group">
-                            <label class="form-label">&nbsp;</label>
-                            <a href="departments.php" class="btn btn-outline-secondary w-100">
-                                <i class="bi bi-arrow-clockwise"></i> リセット
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </form>
-        </div>
-
-        <!-- 部署一覧 -->
-        <div id="departmentsContainer">
-            <?php if (empty($departments)): ?>
-                <div class="no-data">
-                    <i class="bi bi-diagram-3 fs-1 text-muted"></i>
-                    <h4 class="text-muted mt-3">
-                        <?php if ($companyFilter): ?>
-                            選択された企業に部署が登録されていません
-                        <?php else: ?>
-                            部署が登録されていません
-                        <?php endif; ?>
-                    </h4>
-                    <p class="text-muted">CSVインポートまたは手動で部署を追加してください</p>
-                    <a href="csv_import.php" class="btn btn-smiley me-2">
-                        <i class="bi bi-cloud-upload"></i> CSVインポート
-                    </a>
-                    <a href="companies.php" class="btn btn-outline-primary">
-                        <i class="bi bi-building"></i> 企業管理
-                    </a>
-                </div>
-            <?php else: ?>
-                <?php foreach ($departments as $department): ?>
-                    <div class="department-card" data-department-id="<?php echo $department['id']; ?>">
-                        <div class="row align-items-center">
-                            <div class="col-md-6">
-                                <div class="d-flex align-items-center mb-2">
-                                    <span class="company-badge me-3">
-                                        <?php echo htmlspecialchars($department['company_name']); ?>
-                                    </span>
-                                    <?php 
-                                    $activityClass = 'activity-none';
-                                    if ($department['order_count'] > 50) $activityClass = 'activity-high';
-                                    elseif ($department['order_count'] > 10) $activityClass = 'activity-medium';
-                                    elseif ($department['order_count'] > 0) $activityClass = 'activity-low';
-                                    ?>
-                                    <span class="activity-indicator <?php echo $activityClass; ?>" 
-                                          title="注文活動レベル"></span>
-                                </div>
-                                <h5 class="mb-2">
-                                    <i class="bi bi-diagram-3 text-success me-2"></i>
-                                    <?php echo htmlspecialchars($department['department_name']); ?>
-                                </h5>
-                                <div class="department-stats">
-                                    <span class="stat-item">
-                                        <i class="bi bi-people"></i> 
-                                        <?php echo number_format($department['active_user_count']); ?>/<?php echo number_format($department['user_count']); ?>名
-                                    </span>
-                                    <span class="stat-item">
-                                        <i class="bi bi-cart"></i> <?php echo number_format($department['order_count']); ?>件
-                                    </span>
-                                    <?php if ($department['last_order_date']): ?>
-                                        <span class="stat-item">
-                                            <i class="bi bi-calendar"></i> 
-                                            最終注文: <?php echo date('Y/m/d', strtotime($department['last_order_date'])); ?>
-                                        </span>
-                                    <?php endif; ?>
-                                </div>
-                                <?php if ($department['floor_building'] || $department['room_number']): ?>
-                                    <small class="text-muted">
-                                        <i class="bi bi-geo-alt"></i> 
-                                        <?php echo htmlspecialchars($department['floor_building']); ?>
-                                        <?php if ($department['room_number']): ?>
-                                            <?php echo htmlspecialchars($department['room_number']); ?>
-                                        <?php endif; ?>
-                                    </small>
-                                <?php endif; ?>
-                            </div>
-                            <div class="col-md-3 text-center">
-                                <div class="h5 text-success mb-1">¥<?php echo number_format($department['total_revenue'] ?: 0); ?></div>
-                                <small class="text-muted">過去90日売上</small>
-                                <?php if ($department['user_count'] > 0): ?>
-                                    <div class="mt-2">
-                                        <small class="text-info">
-                                            稼働率: <?php echo round(($department['active_user_count'] / $department['user_count']) * 100); ?>%
-                                        </small>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-                            <div class="col-md-3 text-end">
-                                <div class="btn-group-vertical btn-group-sm">
-                                    <a href="users.php?department_id=<?php echo $department['id']; ?>" 
-                                       class="btn btn-outline-success btn-sm">
-                                        <i class="bi bi-people"></i> 利用者 (<?php echo $department['user_count']; ?>)
-                                    </a>
-                                    <a href="company_detail.php?id=<?php echo $department['company_id']; ?>" 
-                                       class="btn btn-outline-primary btn-sm">
-                                        <i class="bi bi-building"></i> 企業詳細
-                                    </a>
-                                    <button class="btn btn-outline-secondary btn-sm" 
-                                            onclick="editDepartment(<?php echo $department['id']; ?>)">
-                                        <i class="bi bi-pencil"></i> 編集
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
-
-        <!-- クイックアクション -->
-        <div class="row mt-4">
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header bg-smiley-green text-white">
-                        <h6 class="mb-0"><i class="bi bi-lightning"></i> クイックアクション</h6>
-                    </div>
-                    <div class="card-body">
-                        <a href="companies.php" class="btn btn-outline-primary me-2 mb-2">
-                            <i class="bi bi-building"></i> 企業管理
-                        </a>
-                        <a href="users.php" class="btn btn-outline-success me-2 mb-2">
-                            <i class="bi bi-people"></i> 利用者管理
-                        </a>
-                        <a href="csv_import.php" class="btn btn-outline-info me-2 mb-2">
-                            <i class="bi bi-cloud-upload"></i> CSVインポート
-                        </a>
-                        <a href="../pages/system_health.php" class="btn btn-outline-warning mb-2">
-                            <i class="bi bi-gear"></i> システム状況
-                        </a>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header bg-info text-white">
-                        <h6 class="mb-0"><i class="bi bi-info-circle"></i> フィルター情報</h6>
-                    </div>
-                    <div class="card-body">
-                        <?php if ($companyFilter): ?>
-                            <?php 
-                            $selectedCompany = array_filter($companies, function($c) use ($companyFilter) { 
-                                return $c['id'] == $companyFilter; 
-                            });
-                            $selectedCompany = reset($selectedCompany);
-                            ?>
-                            <p class="mb-2"><strong>選択企業:</strong> <?php echo htmlspecialchars($selectedCompany['company_name']); ?></p>
-                        <?php endif; ?>
-                        <?php if ($searchTerm): ?>
-                            <p class="mb-2"><strong>検索キーワード:</strong> "<?php echo htmlspecialchars($searchTerm); ?>"</p>
-                        <?php endif; ?>
-                        <p class="mb-2"><strong>表示件数:</strong> <?php echo count($departments); ?>件</p>
-                        <p class="mb-0"><strong>最終更新:</strong> <?php echo date('Y-m-d H:i:s'); ?></p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- フッター -->
-        <div class="text-center mt-5 pt-4 border-top">
-            <p class="text-muted mb-0">
-                <strong>Smiley配食事業 請求書管理システム v1.0.0</strong><br>
-                © 2025 Smiley配食事業. All rights reserved.
-            </p>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // 部署追加モーダル（今後実装）
-        function showAddDepartmentModal() {
-            alert('部署追加機能は今後実装予定です。現在はCSVインポートをご利用ください。');
-        }
-        
-        // 部署編集（今後実装）
-        function editDepartment(departmentId) {
-            alert(`部署ID ${departmentId} の編集機能は今後実装予定です。`);
-        }
-        
-        // 初期化
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('部署管理画面が読み込まれました');
-            
-            // フィルター状況をコンソールに表示
-            const companyFilter = '<?php echo $companyFilter; ?>';
-            const searchTerm = '<?php echo $searchTerm; ?>';
-            
-            if (companyFilter) {
-                console.log('企業フィルター適用:', companyFilter);
-            }
-            if (searchTerm) {
-                console.log('検索フィルター適用:', searchTerm);
-            }
-            
-            // エラー表示（デバッグモード時）
-            <?php if (isset($stats['error']) && DEBUG_MODE): ?>
-            console.error('Department stats error:', <?php echo json_encode($stats['error']); ?>);
-            <?php endif; ?>
-        });
-    </script>
-</body>
-</html>
