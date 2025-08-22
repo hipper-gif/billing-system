@@ -476,48 +476,65 @@ class SmileyCSVImporter {
         return $this->db->lastInsertId();
     }
     
-    /**
-     * 注文データ挿入
-     */
-    private function insertOrderData($row, $batchId, $companyId, $departmentId, $userId, $productId, $supplierId) {
-        // 重複チェック
-        $sql = "SELECT id FROM orders WHERE user_id = ? AND product_id = ? AND delivery_date = ? AND delivery_time = ?";
-        $stmt = $this->db->query($sql, [
-            $userId,
-            $productId,
-            $row['delivery_date'],
-            $row['delivery_time'] ?? ''
-        ]);
-        
-        if ($stmt->fetchColumn()) {
-            return false; // 重複
-        }
-        
-        // 新規挿入
-        $sql = "INSERT INTO orders (
-                    import_batch_id, company_id, department_id, user_id, supplier_id, product_id,
-                    delivery_date, delivery_time, quantity, unit_price, total_amount, 
-                    notes, cooperation_code, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
-        
-        $this->db->query($sql, [
-            $batchId,
-            $companyId,
-            $departmentId,
-            $userId,
-            $supplierId,
-            $productId,
-            $row['delivery_date'],
-            $row['delivery_time'] ?? '',
-            $row['quantity'] ?? 1,
-            $row['unit_price'] ?? 0,
-            $row['total_amount'] ?? 0,
-            $row['notes'] ?? '',
-            $row['cooperation_code'] ?? ''
-        ]);
-        
-        return $this->db->lastInsertId();
+/**
+ * 注文データ挿入（修正版）
+ * 安全なカラムのみで重複チェック
+ */
+private function insertOrderData($row, $batchId, $companyId, $departmentId, $userId, $productId, $supplierId) {
+    // 修正：安全なカラムのみで重複チェック
+    $sql = "SELECT id FROM orders WHERE user_code = ? AND delivery_date = ? AND product_code = ?";
+    $stmt = $this->db->query($sql, [
+        $row['user_code'],
+        $row['delivery_date'],
+        $row['product_code']
+    ]);
+    
+    if ($stmt->fetchColumn()) {
+        return false; // 重複
     }
+    
+    // 新規挿入（修正：supplier_id関連を安全に処理）
+    $sql = "INSERT INTO orders (
+                import_batch_id, company_id, department_id, user_id, product_id,
+                user_code, user_name, company_code, company_name,
+                department_code, department_name, product_code, product_name,
+                category_code, category_name, supplier_code, supplier_name,
+                delivery_date, delivery_time, quantity, unit_price, total_amount, 
+                notes, cooperation_code, employee_type_code, employee_type_name,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+    
+    $this->db->query($sql, [
+        $batchId,
+        $companyId,
+        $departmentId,
+        $userId,
+        $productId,
+        $row['user_code'],
+        $row['user_name'],
+        $row['company_code'],
+        $row['company_name'],
+        $row['department_code'] ?? '',
+        $row['department_name'] ?? '',
+        $row['product_code'],
+        $row['product_name'],
+        $row['category_code'] ?? '',
+        $row['category_name'] ?? '',
+        $row['supplier_code'] ?? '',
+        $row['supplier_name'] ?? '',
+        $row['delivery_date'],
+        $row['delivery_time'] ?? '',
+        $row['quantity'] ?? 1,
+        $row['unit_price'] ?? 0,
+        $row['total_amount'] ?? 0,
+        $row['notes'] ?? '',
+        $row['cooperation_code'] ?? '',
+        $row['employee_type_code'] ?? '',
+        $row['employee_type_name'] ?? ''
+    ]);
+    
+    return $this->db->lastInsertId();
+}
     
     /**
      * インポートログ記録
