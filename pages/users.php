@@ -1,643 +1,559 @@
+<?php
+/**
+ * 利用者管理画面（修正版）
+ * Database統一対応版
+ * 
+ * 修正内容:
+ * 1. Database::getInstance() を使用（統一修正）
+ * 2. エラーハンドリング強化
+ * 3. Smiley配食事業専用UI
+ */
+
+require_once '../config/database.php';
+require_once '../classes/Database.php';
+require_once '../classes/SecurityHelper.php';
+
+// セキュリティヘッダー設定
+SecurityHelper::setSecurityHeaders();
+
+// Database::getInstance() を使用（修正箇所）
+$db = Database::getInstance();
+
+// 統計情報取得
+$stats = getUserStats($db);
+$users = getUsers($db);
+$companies = getCompanies($db);
+
+function getUserStats($db) {
+    try {
+        $stats = [
+            'total_users' => 0,
+            'active_users' => 0,
+            'total_companies' => 0,
+            'total_departments' => 0,
+            'monthly_orders' => 0,
+            'monthly_revenue' => 0
+        ];
+
+        // 総利用者数
+        $stmt = $db->query("SELECT COUNT(*) as total FROM users");
+        $result = $stmt->fetch();
+        $stats['total_users'] = $result['total'] ?? 0;
+
+        // アクティブ利用者数
+        $stmt = $db->query("SELECT COUNT(*) as active FROM users WHERE is_active = 1");
+        $result = $stmt->fetch();
+        $stats['active_users'] = $result['active'] ?? 0;
+
+        // 総企業数
+        $stmt = $db->query("SELECT COUNT(DISTINCT company_id) as total FROM users WHERE company_id IS NOT NULL");
+        $result = $stmt->fetch();
+        $stats['total_companies'] = $result['total'] ?? 0;
+
+        // 総部署数
+        $stmt = $db->query("SELECT COUNT(DISTINCT department_id) as total FROM users WHERE department_id IS NOT NULL");
+        $result = $stmt->fetch();
+        $stats['total_departments'] = $result['total'] ?? 0;
+
+        // 月間注文数
+        $stmt = $db->query("
+            SELECT COUNT(*) as orders 
+            FROM orders 
+            WHERE delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        ");
+        $result = $stmt->fetch();
+        $stats['monthly_orders'] = $result['orders'] ?? 0;
+
+        // 月間売上
+        $stmt = $db->query("
+            SELECT SUM(total_amount) as revenue 
+            FROM orders 
+            WHERE delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        ");
+        $result = $stmt->fetch();
+        $stats['monthly_revenue'] = $result['revenue'] ?? 0;
+
+        return $stats;
+
+    } catch (Exception $e) {
+        error_log("User stats error: " . $e->getMessage());
+        return [
+            'total_users' => 'エラー',
+            'active_users' => 'エラー',
+            'total_companies' => 'エラー',
+            'total_departments' => 'エラー',
+            'monthly_orders' => 'エラー',
+            'monthly_revenue' => 'エラー',
+            'error' => $e->getMessage()
+        ];
+    }
+}
+
+function getUsers($db) {
+    try {
+        $stmt = $db->query("
+            SELECT 
+                u.*,
+                c.company_name,
+                d.department_name,
+                COUNT(DISTINCT o.id) as order_count,
+                SUM(o.total_amount) as total_spent,
+                MAX(o.delivery_date) as last_order_date,
+                COALESCE(AVG(o.total_amount), 0) as avg_order_amount
+            FROM users u
+            LEFT JOIN companies c ON u.company_id = c.id
+            LEFT JOIN departments d ON u.department_id = d.id
+            LEFT JOIN orders o ON u.id = o.user_id AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+            GROUP BY u.id
+            ORDER BY u.user_name ASC
+        ");
+        
+        return $stmt->fetchAll();
+
+    } catch (Exception $e) {
+        error_log("Get users error: " . $e->getMessage());
+        return [];
+    }
+}
+
+function getCompanies($db) {
+    try {
+        $stmt = $db->query("SELECT id, company_name FROM companies WHERE is_active = 1 ORDER BY company_name ASC");
+        return $stmt->fetchAll();
+    } catch (Exception $e) {
+        error_log("Get companies error: " . $e->getMessage());
+        return [];
+    }
+}
+?>
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>利用者管理 - Smiley配食事業システム</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <title>👥 利用者管理 - Smiley配食システム</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root {
-            --smiley-green: #2E8B57;
-            --smiley-light-green: #90EE90;
-            --smiley-dark-green: #1F5F3F;
-        }
-        
-        body {
-            background-color: #f8f9fa;
+        body { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            margin: 20px auto;
+            padding: 30px;
+            max-width: 1400px;
+        }
+        .smiley-green { color: #2E8B57; }
+        .bg-smiley-green { background-color: #2E8B57; }
         
-        /* ヘッダー修正（他ページと統一） */
-        .navbar {
-            background: linear-gradient(135deg, var(--smiley-green), var(--smiley-dark-green));
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        .stat-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border-left: 5px solid #2E8B57;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            transition: transform 0.3s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .stat-number {
+            font-size: 2.2rem;
+            font-weight: bold;
+            color: #2E8B57;
         }
         
-        .navbar-brand {
-            font-weight: 700;
-            font-size: 1.4rem;
-        }
-        
-        .navbar-nav .nav-link {
-            color: rgba(255, 255, 255, 0.9);
+        .user-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #2E8B57;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
             transition: all 0.3s ease;
-            padding: 0.5rem 1rem;
         }
-        
-        .navbar-nav .nav-link:hover {
-            color: white;
-            background-color: rgba(255, 255, 255, 0.1);
-            border-radius: 4px;
-        }
-        
-        .navbar-nav .nav-link.active {
-            color: white;
-            background-color: rgba(255, 255, 255, 0.2);
-            border-radius: 4px;
-            font-weight: 600;
-        }
-        
-        .card {
-            border: none;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-            transition: all 0.3s ease;
-        }
-        
-        .card:hover {
+        .user-card:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 25px rgba(0,0,0,0.12);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
         }
         
-        .stats-card {
-            border-left: 4px solid var(--smiley-green);
+        .badge-status {
+            font-size: 0.8rem;
+            padding: 5px 10px;
+        }
+        
+        .search-filters {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
         }
         
         .btn-smiley {
-            background: linear-gradient(135deg, var(--smiley-green), var(--smiley-dark-green));
-            border: none;
+            background-color: #2E8B57;
+            border-color: #2E8B57;
             color: white;
-            border-radius: 8px;
-            transition: all 0.3s ease;
         }
-        
         .btn-smiley:hover {
-            background: linear-gradient(135deg, var(--smiley-dark-green), var(--smiley-green));
-            transform: translateY(-1px);
+            background-color: #228B22;
+            border-color: #228B22;
             color: white;
         }
         
-        .table th {
-            background-color: var(--smiley-green);
-            color: white;
-            border: none;
-            font-weight: 600;
+        .user-stats {
+            font-size: 0.9rem;
+        }
+        .user-stats .stat-item {
+            display: inline-block;
+            margin-right: 15px;
+            color: #6c757d;
         }
         
-        .table td {
-            vertical-align: middle;
-            border-color: #e9ecef;
-        }
-        
-        .badge-activity {
-            padding: 0.5rem 0.8rem;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 500;
-        }
-        
-        .badge-active { background-color: #d4edda; color: #155724; }
-        .badge-warning { background-color: #fff3cd; color: #856404; }
-        .badge-inactive { background-color: #f8d7da; color: #721c24; }
-        
-        .user-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--smiley-light-green), var(--smiley-green));
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 1.1rem;
-        }
-        
-        .loading-spinner {
-            display: block;
+        .loading {
             text-align: center;
-            padding: 2rem;
+            padding: 40px;
         }
         
-        @media (max-width: 768px) {
-            .table-responsive {
-                font-size: 0.9rem;
-            }
-            
-            .d-none-mobile {
-                display: none !important;
-            }
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
         }
     </style>
 </head>
 <body>
-    <!-- ナビゲーション（他ページと統一） -->
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container">
-            <a class="navbar-brand" href="../index.php">
-                <i class="fas fa-home me-2"></i>Smiley配食事業
-            </a>
-            <div class="collapse navbar-collapse">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="csv_import.php">CSVインポート</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="companies.php">配達先企業</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="departments.php">部署管理</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link active" href="users.php">利用者管理</a>
-                    </li>
-                </ul>
-            </div>
-        </div>
-    </nav>
-
-    <div class="container mt-4">
-        <!-- ページヘッダー -->
-        <div class="row mb-4">
+    <div class="main-container">
+        <!-- ヘッダー -->
+        <div class="row align-items-center mb-4">
             <div class="col">
-                <h2><i class="fas fa-users text-success me-2"></i>利用者管理</h2>
-                <p class="text-muted mb-0">配食サービス利用者の管理・統計確認</p>
+                <h1 class="display-5 smiley-green mb-2">👥 利用者管理</h1>
+                <p class="lead text-muted">Smiley配食システム - 利用者個人情報・注文履歴の統合管理</p>
             </div>
             <div class="col-auto">
-                <button class="btn btn-smiley" onclick="alert('利用者追加機能は開発中です')">
-                    <i class="fas fa-plus me-2"></i>利用者追加
+                <a href="../index.php" class="btn btn-outline-secondary me-2">
+                    <i class="bi bi-arrow-left"></i> ダッシュボード
+                </a>
+                <a href="companies.php" class="btn btn-outline-primary me-2">
+                    <i class="bi bi-building"></i> 企業管理
+                </a>
+                <button class="btn btn-smiley" onclick="showAddUserModal()">
+                    <i class="bi bi-plus-circle"></i> 新規利用者追加
                 </button>
             </div>
         </div>
 
         <!-- 統計サマリー -->
-        <div class="row mb-4" id="statsContainer">
-            <div class="col-lg-3 col-md-6 mb-3">
-                <div class="card stats-card">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center">
-                            <div class="flex-grow-1">
-                                <h6 class="card-title text-muted mb-1">総利用者数</h6>
-                                <h3 class="mb-0" id="totalUsers">-</h3>
-                            </div>
-                            <div class="text-success">
-                                <i class="fas fa-users fa-2x"></i>
-                            </div>
-                        </div>
-                    </div>
+        <div class="row mb-4">
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['total_users']) ? number_format($stats['total_users']) : $stats['total_users']; ?></div>
+                    <div class="text-muted">総利用者数</div>
+                    <small class="text-success"><i class="bi bi-people"></i> 登録済み</small>
                 </div>
             </div>
-            <div class="col-lg-3 col-md-6 mb-3">
-                <div class="card stats-card">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center">
-                            <div class="flex-grow-1">
-                                <h6 class="card-title text-muted mb-1">アクティブ利用者</h6>
-                                <h3 class="mb-0" id="activeUsers">-</h3>
-                            </div>
-                            <div class="text-success">
-                                <i class="fas fa-user-check fa-2x"></i>
-                            </div>
-                        </div>
-                    </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['active_users']) ? number_format($stats['active_users']) : $stats['active_users']; ?></div>
+                    <div class="text-muted">アクティブ利用者</div>
+                    <small class="text-info"><i class="bi bi-check-circle"></i> 稼働中</small>
                 </div>
             </div>
-            <div class="col-lg-3 col-md-6 mb-3">
-                <div class="card stats-card">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center">
-                            <div class="flex-grow-1">
-                                <h6 class="card-title text-muted mb-1">30日以内注文</h6>
-                                <h3 class="mb-0" id="recentActiveUsers">-</h3>
-                            </div>
-                            <div class="text-success">
-                                <i class="fas fa-shopping-cart fa-2x"></i>
-                            </div>
-                        </div>
-                    </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['total_companies']) ? number_format($stats['total_companies']) : $stats['total_companies']; ?></div>
+                    <div class="text-muted">配達先企業</div>
+                    <small class="text-primary"><i class="bi bi-building"></i> 企業数</small>
                 </div>
             </div>
-            <div class="col-lg-3 col-md-6 mb-3">
-                <div class="card stats-card">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center">
-                            <div class="flex-grow-1">
-                                <h6 class="card-title text-muted mb-1">総売上</h6>
-                                <h3 class="mb-0" id="totalSales">-</h3>
-                            </div>
-                            <div class="text-success">
-                                <i class="fas fa-yen-sign fa-2x"></i>
-                            </div>
-                        </div>
-                    </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['total_departments']) ? number_format($stats['total_departments']) : $stats['total_departments']; ?></div>
+                    <div class="text-muted">配達先部署</div>
+                    <small class="text-success"><i class="bi bi-diagram-3"></i> 部署数</small>
+                </div>
+            </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['monthly_orders']) ? number_format($stats['monthly_orders']) : $stats['monthly_orders']; ?></div>
+                    <div class="text-muted">月間注文数</div>
+                    <small class="text-warning"><i class="bi bi-cart"></i> 過去30日</small>
+                </div>
+            </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number">¥<?php echo is_numeric($stats['monthly_revenue']) ? number_format($stats['monthly_revenue']) : $stats['monthly_revenue']; ?></div>
+                    <div class="text-muted">月間売上</div>
+                    <small class="text-info"><i class="bi bi-currency-yen"></i> 過去30日</small>
                 </div>
             </div>
         </div>
 
-        <!-- フィルター -->
-        <div class="card mb-4">
-            <div class="card-header bg-white">
-                <h6 class="mb-0"><i class="fas fa-filter text-success me-2"></i>検索・フィルター</h6>
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-lg-3 col-md-6 mb-3">
-                        <label for="companyFilter" class="form-label">企業フィルター</label>
-                        <select class="form-select" id="companyFilter">
-                            <option value="">すべての企業</option>
+        <!-- 検索・フィルター -->
+        <div class="search-filters">
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label class="form-label">利用者名検索</label>
+                        <input type="text" class="form-control" id="searchUser" placeholder="利用者名を入力...">
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label class="form-label">企業フィルター</label>
+                        <select class="form-select" id="filterCompany">
+                            <option value="">全企業</option>
+                            <?php foreach ($companies as $company): ?>
+                                <option value="<?php echo $company['id']; ?>"><?php echo htmlspecialchars($company['company_name']); ?></option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
-                    <div class="col-lg-3 col-md-6 mb-3">
-                        <label for="departmentFilter" class="form-label">部署フィルター</label>
-                        <select class="form-select" id="departmentFilter">
-                            <option value="">すべての部署</option>
+                </div>
+                <div class="col-md-2">
+                    <div class="form-group">
+                        <label class="form-label">ステータス</label>
+                        <select class="form-select" id="filterStatus">
+                            <option value="">全て</option>
+                            <option value="active">アクティブ</option>
+                            <option value="inactive">非アクティブ</option>
                         </select>
                     </div>
-                    <div class="col-lg-3 col-md-6 mb-3">
-                        <label for="statusFilter" class="form-label">活動状況</label>
-                        <select class="form-select" id="statusFilter">
-                            <option value="all">すべて</option>
-                            <option value="active">活動中 (30日以内)</option>
-                            <option value="warning">注意 (30-90日前)</option>
-                            <option value="inactive">非活動 (90日以上)</option>
+                </div>
+                <div class="col-md-2">
+                    <div class="form-group">
+                        <label class="form-label">並び順</label>
+                        <select class="form-select" id="sortOrder">
+                            <option value="name_asc">名前（昇順）</option>
+                            <option value="name_desc">名前（降順）</option>
+                            <option value="orders_desc">注文数（降順）</option>
+                            <option value="spent_desc">総購入額（降順）</option>
                         </select>
                     </div>
-                    <div class="col-lg-3 col-md-6 mb-3">
-                        <label for="searchInput" class="form-label">検索</label>
-                        <div class="input-group">
-                            <input type="text" class="form-control" id="searchInput" placeholder="名前・メール・電話">
-                            <button class="btn btn-outline-secondary" type="button" id="searchBtn">
-                                <i class="fas fa-search"></i>
-                            </button>
-                        </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="form-group">
+                        <label class="form-label">&nbsp;</label>
+                        <button class="btn btn-smiley w-100" onclick="applyFilters()">
+                            <i class="bi bi-search"></i> 検索
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- 利用者一覧 -->
-        <div class="card">
-            <div class="card-header bg-white">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">利用者一覧</h5>
-                    <div class="d-flex align-items-center">
-                        <span class="text-muted me-3" id="resultCount">-</span>
-                        <select class="form-select form-select-sm" id="perPageSelect" style="width: auto;">
-                            <option value="20">20件/ページ</option>
-                            <option value="50">50件/ページ</option>
-                            <option value="100">100件/ページ</option>
-                        </select>
+        <div id="usersContainer">
+            <?php if (empty($users)): ?>
+                <div class="no-data">
+                    <i class="bi bi-people fs-1 text-muted"></i>
+                    <h4 class="text-muted mt-3">利用者が登録されていません</h4>
+                    <p class="text-muted">CSVインポートまたは手動で利用者を追加してください</p>
+                    <a href="csv_import.php" class="btn btn-smiley">
+                        <i class="bi bi-cloud-upload"></i> CSVインポート
+                    </a>
+                </div>
+            <?php else: ?>
+                <?php foreach ($users as $user): ?>
+                    <div class="user-card" data-user-id="<?php echo $user['id']; ?>">
+                        <div class="row align-items-center">
+                            <div class="col-md-6">
+                                <h5 class="mb-2">
+                                    <i class="bi bi-person text-success me-2"></i>
+                                    <?php echo htmlspecialchars($user['user_name'] ?: 'Unknown User'); ?>
+                                    <?php if ($user['is_active']): ?>
+                                        <span class="badge bg-success badge-status ms-2">アクティブ</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary badge-status ms-2">非アクティブ</span>
+                                    <?php endif; ?>
+                                    <?php if ($user['user_code']): ?>
+                                        <small class="text-muted ms-2">
+                                            <i class="bi bi-tag"></i> <?php echo htmlspecialchars($user['user_code']); ?>
+                                        </small>
+                                    <?php endif; ?>
+                                </h5>
+                                <div class="user-stats">
+                                    <?php if ($user['company_name']): ?>
+                                        <span class="stat-item">
+                                            <i class="bi bi-building"></i> <?php echo htmlspecialchars($user['company_name']); ?>
+                                        </span>
+                                    <?php endif; ?>
+                                    <?php if ($user['department_name']): ?>
+                                        <span class="stat-item">
+                                            <i class="bi bi-diagram-3"></i> <?php echo htmlspecialchars($user['department_name']); ?>
+                                        </span>
+                                    <?php endif; ?>
+                                    <span class="stat-item">
+                                        <i class="bi bi-cart"></i> <?php echo number_format($user['order_count']); ?>件の注文
+                                    </span>
+                                    <?php if ($user['last_order_date']): ?>
+                                        <span class="stat-item">
+                                            <i class="bi bi-calendar"></i> 最終注文: <?php echo date('Y/m/d', strtotime($user['last_order_date'])); ?>
+                                        </span>
+                                    <?php endif; ?>
+                                </div>
+                                <?php if ($user['employee_type_name']): ?>
+                                    <small class="text-muted">
+                                        <i class="bi bi-briefcase"></i> <?php echo htmlspecialchars($user['employee_type_name']); ?>
+                                    </small>
+                                <?php endif; ?>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <div class="h5 text-success mb-1">¥<?php echo number_format($user['total_spent'] ?: 0); ?></div>
+                                <small class="text-muted">総購入額（過去90日）</small>
+                                <?php if ($user['avg_order_amount'] > 0): ?>
+                                    <br><small class="text-info">平均: ¥<?php echo number_format($user['avg_order_amount']); ?>/回</small>
+                                <?php endif; ?>
+                            </div>
+                            <div class="col-md-3 text-end">
+                                <div class="btn-group">
+                                    <a href="user_detail.php?id=<?php echo $user['id']; ?>" class="btn btn-outline-primary btn-sm">
+                                        <i class="bi bi-eye"></i> 詳細
+                                    </a>
+                                    <?php if ($user['company_id']): ?>
+                                        <a href="company_detail.php?id=<?php echo $user['company_id']; ?>" class="btn btn-outline-info btn-sm">
+                                            <i class="bi bi-building"></i> 企業
+                                        </a>
+                                    <?php endif; ?>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="editUser(<?php echo $user['id']; ?>)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+
+        <!-- クイックアクション -->
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-smiley-green text-white">
+                        <h6 class="mb-0"><i class="bi bi-lightning"></i> クイックアクション</h6>
+                    </div>
+                    <div class="card-body">
+                        <a href="csv_import.php" class="btn btn-outline-primary me-2 mb-2">
+                            <i class="bi bi-cloud-upload"></i> CSVインポート
+                        </a>
+                        <a href="companies.php" class="btn btn-outline-success me-2 mb-2">
+                            <i class="bi bi-building"></i> 企業管理
+                        </a>
+                        <a href="departments.php" class="btn btn-outline-info me-2 mb-2">
+                            <i class="bi bi-diagram-3"></i> 部署管理
+                        </a>
+                        <a href="../pages/orders.php" class="btn btn-outline-warning mb-2">
+                            <i class="bi bi-cart"></i> 注文管理
+                        </a>
                     </div>
                 </div>
             </div>
-            <div class="card-body p-0">
-                <div class="loading-spinner" id="loadingSpinner">
-                    <div class="spinner-border text-success" role="status">
-                        <span class="visually-hidden">読み込み中...</span>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h6 class="mb-0"><i class="bi bi-info-circle"></i> システム情報</h6>
                     </div>
-                    <p class="mt-2 text-muted">利用者データを読み込んでいます...</p>
-                </div>
-
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead>
-                            <tr>
-                                <th>利用者</th>
-                                <th>企業・部署</th>
-                                <th class="d-none-mobile">連絡先</th>
-                                <th>活動状況</th>
-                                <th class="d-none-mobile">注文統計</th>
-                                <th class="d-none-mobile">最終注文</th>
-                                <th>操作</th>
-                            </tr>
-                        </thead>
-                        <tbody id="usersTableBody">
-                            <!-- 動的に生成 -->
-                        </tbody>
-                    </table>
+                    <div class="card-body">
+                        <p class="mb-2"><strong>データベース:</strong> <?php echo DB_NAME; ?></p>
+                        <p class="mb-2"><strong>環境:</strong> <?php echo ENVIRONMENT; ?></p>
+                        <p class="mb-0"><strong>最終更新:</strong> <?php echo date('Y-m-d H:i:s'); ?></p>
+                        <?php if (isset($stats['error'])): ?>
+                            <div class="alert alert-warning mt-2 mb-0">
+                                <small>統計取得エラー: <?php echo htmlspecialchars($stats['error']); ?></small>
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </div>
         </div>
+
+        <!-- フッター -->
+        <div class="text-center mt-5 pt-4 border-top">
+            <p class="text-muted mb-0">
+                <strong>Smiley配食事業 請求書管理システム v1.0.0</strong><br>
+                © 2025 Smiley配食事業. All rights reserved.
+            </p>
+        </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        console.log('🚀 利用者管理システム開始');
-        
-        // グローバル変数
-        let currentUsers = [];
-        let filteredUsers = [];
-        
-        // ページ読み込み完了後に実行
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('📄 DOM読み込み完了');
-            initializeUserManagement();
-        });
-        
-        async function initializeUserManagement() {
-            console.log('🔧 利用者管理初期化開始');
+        // 検索・フィルター機能
+        function applyFilters() {
+            const searchTerm = document.getElementById('searchUser').value.toLowerCase();
+            const companyFilter = document.getElementById('filterCompany').value;
+            const statusFilter = document.getElementById('filterStatus').value;
+            const sortOrder = document.getElementById('sortOrder').value;
             
-            try {
-                // 1. 利用者データ読み込み
-                await loadUsers();
-                
-                // 2. 企業データ読み込み
-                await loadCompanies();
-                
-                // 3. イベントリスナー設定
-                setupEventListeners();
-                
-                console.log('✅ 利用者管理初期化完了');
-                
-            } catch (error) {
-                console.error('❌ 初期化エラー:', error);
-                showError('システムの初期化に失敗しました: ' + error.message);
-            }
-        }
-        
-        async function loadUsers() {
-            console.log('📥 利用者データ読み込み開始');
+            const users = document.querySelectorAll('.user-card');
+            let visibleUsers = [];
             
-            try {
-                showLoading(true);
+            users.forEach(user => {
+                const userName = user.querySelector('h5').textContent.toLowerCase();
+                const isActive = user.querySelector('.badge-success') !== null;
+                const userCompanyId = user.dataset.companyId || '';
                 
-                const response = await fetch('../api/users.php');
-                console.log('📡 API Response Status:', response.status);
+                let show = true;
                 
-                if (!response.ok) {
-                    throw new Error(`API Error: ${response.status} ${response.statusText}`);
-                }
-                
-                const data = await response.json();
-                console.log('📊 取得データ:', data);
-                
-                if (!data.users) {
-                    throw new Error('利用者データが見つかりません');
-                }
-                
-                currentUsers = data.users;
-                filteredUsers = [...currentUsers];
-                
-                // 統計情報表示
-                updateStats(data.stats);
-                
-                // 利用者一覧表示
-                displayUsers(filteredUsers);
-                
-                console.log(`✅ ${currentUsers.length}件の利用者データを読み込みました`);
-                
-            } catch (error) {
-                console.error('❌ 利用者データ読み込みエラー:', error);
-                showError('利用者データの読み込みに失敗しました: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
-        
-        async function loadCompanies() {
-            console.log('🏢 企業データ読み込み開始');
-            
-            try {
-                const response = await fetch('../api/companies.php');
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('🏢 企業データ取得:', data.companies?.length || 0, '件');
-                    
-                    if (data.companies) {
-                        populateCompanyFilter(data.companies);
-                    }
-                }
-            } catch (error) {
-                console.error('⚠️ 企業データ読み込みエラー:', error);
-                // エラーでも処理を続行
-            }
-        }
-        
-        function populateCompanyFilter(companies) {
-            const select = document.getElementById('companyFilter');
-            select.innerHTML = '<option value="">すべての企業</option>';
-            
-            companies.forEach(company => {
-                const option = document.createElement('option');
-                option.value = company.id;
-                option.textContent = company.company_name;
-                select.appendChild(option);
-            });
-        }
-        
-        function updateStats(stats) {
-            if (!stats) return;
-            
-            console.log('📈 統計情報更新:', stats);
-            
-            document.getElementById('totalUsers').textContent = parseInt(stats.total_users || 0).toLocaleString();
-            document.getElementById('activeUsers').textContent = parseInt(stats.active_users || 0).toLocaleString();
-            document.getElementById('recentActiveUsers').textContent = parseInt(stats.recent_active_users || 0).toLocaleString();
-            document.getElementById('totalSales').textContent = `¥${parseInt(stats.total_sales || 0).toLocaleString()}`;
-        }
-        
-        function displayUsers(users) {
-            console.log('👥 利用者表示開始:', users.length, '件');
-            
-            const tbody = document.getElementById('usersTableBody');
-            tbody.innerHTML = '';
-            
-            if (users.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="7" class="text-center py-4">
-                            <i class="fas fa-info-circle text-muted me-2"></i>
-                            表示する利用者がありません
-                        </td>
-                    </tr>
-                `;
-                document.getElementById('resultCount').textContent = '0件';
-                return;
-            }
-            
-            users.forEach((user, index) => {
-                const row = document.createElement('tr');
-                
-                // 企業名・部署名の表示
-                const companyName = user.company_name_display || user.company_name_from_table || user.company_name || '-';
-                const departmentName = user.department_name_display || user.department_name || user.department || '-';
-                
-                // 活動状況バッジ
-                const activityBadge = getActivityBadge(user.activity_status);
-                
-                // 支払い方法
-                const paymentMethod = getPaymentMethodText(user.payment_method);
-                
-                // 最終注文日
-                const lastOrderDate = user.last_order_date ? formatDate(user.last_order_date) : '-';
-                
-                row.innerHTML = `
-                    <td>
-                        <div class="d-flex align-items-center">
-                            <div class="user-avatar me-3">
-                                ${escapeHtml(user.user_name).charAt(0)}
-                            </div>
-                            <div>
-                                <div class="fw-semibold">${escapeHtml(user.user_name)}</div>
-                                <small class="text-muted">${user.email || '-'}</small>
-                            </div>
-                        </div>
-                    </td>
-                    <td>
-                        <div class="fw-semibold">${escapeHtml(companyName)}</div>
-                        <small class="text-muted">${escapeHtml(departmentName)}</small>
-                    </td>
-                    <td class="d-none-mobile">
-                        <div>${user.phone || '-'}</div>
-                        <small class="text-muted">${paymentMethod}</small>
-                    </td>
-                    <td>
-                        ${activityBadge}
-                    </td>
-                    <td class="d-none-mobile">
-                        <div>注文: ${parseInt(user.total_orders || 0).toLocaleString()}回</div>
-                        <small class="text-muted">金額: ¥${parseInt(user.total_amount || 0).toLocaleString()}</small>
-                    </td>
-                    <td class="d-none-mobile">
-                        ${lastOrderDate}
-                    </td>
-                    <td>
-                        <div class="dropdown">
-                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
-                                操作
-                            </button>
-                            <ul class="dropdown-menu">
-                                <li><a class="dropdown-item" href="user_detail.php?id=${user.id}">
-                                    <i class="fas fa-eye me-2"></i>詳細
-                                </a></li>
-                                <li><a class="dropdown-item" href="#" onclick="editUser(${user.id})">
-                                    <i class="fas fa-edit me-2"></i>編集
-                                </a></li>
-                            </ul>
-                        </div>
-                    </td>
-                `;
-                
-                tbody.appendChild(row);
-            });
-            
-            document.getElementById('resultCount').textContent = `${users.length}件`;
-            console.log(`✅ ${users.length}件の利用者を表示しました`);
-        }
-        
-        function setupEventListeners() {
-            console.log('🎯 イベントリスナー設定');
-            
-            // 検索ボタン
-            document.getElementById('searchBtn').addEventListener('click', performSearch);
-            
-            // 検索入力でEnterキー
-            document.getElementById('searchInput').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    performSearch();
-                }
-            });
-            
-            // フィルター変更
-            document.getElementById('companyFilter').addEventListener('change', performSearch);
-            document.getElementById('departmentFilter').addEventListener('change', performSearch);
-            document.getElementById('statusFilter').addEventListener('change', performSearch);
-        }
-        
-        function performSearch() {
-            console.log('🔍 検索実行');
-            
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const companyId = document.getElementById('companyFilter').value;
-            const departmentId = document.getElementById('departmentFilter').value;
-            const status = document.getElementById('statusFilter').value;
-            
-            filteredUsers = currentUsers.filter(user => {
-                // 検索条件チェック
-                if (searchTerm && !user.user_name.toLowerCase().includes(searchTerm) && 
-                    !user.email?.toLowerCase().includes(searchTerm) &&
-                    !user.phone?.includes(searchTerm)) {
-                    return false;
+                // 名前検索
+                if (searchTerm && !userName.includes(searchTerm)) {
+                    show = false;
                 }
                 
                 // 企業フィルター
-                if (companyId && user.company_id != companyId) {
-                    return false;
+                if (companyFilter && userCompanyId !== companyFilter) {
+                    show = false;
                 }
                 
                 // ステータスフィルター
-                if (status !== 'all' && user.activity_status !== status) {
-                    return false;
+                if (statusFilter === 'active' && !isActive) {
+                    show = false;
+                } else if (statusFilter === 'inactive' && isActive) {
+                    show = false;
                 }
                 
-                return true;
+                user.style.display = show ? 'block' : 'none';
+                if (show) visibleUsers.push(user);
             });
             
-            console.log(`🔍 検索結果: ${filteredUsers.length}件`);
-            displayUsers(filteredUsers);
+            // ソート（簡易実装）
+            if (sortOrder !== 'name_asc') {
+                console.log('ソート機能は今後実装予定');
+            }
         }
         
-        function showLoading(show) {
-            document.getElementById('loadingSpinner').style.display = show ? 'block' : 'none';
+        // リアルタイム検索
+        document.getElementById('searchUser').addEventListener('input', applyFilters);
+        document.getElementById('filterCompany').addEventListener('change', applyFilters);
+        document.getElementById('filterStatus').addEventListener('change', applyFilters);
+        document.getElementById('sortOrder').addEventListener('change', applyFilters);
+        
+        // 利用者追加モーダル（今後実装）
+        function showAddUserModal() {
+            alert('利用者追加機能は今後実装予定です。現在はCSVインポートをご利用ください。');
         }
         
-        function showError(message) {
-            console.error('❌', message);
-            const tbody = document.getElementById('usersTableBody');
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="text-center py-4">
-                        <i class="fas fa-exclamation-circle text-danger me-2"></i>
-                        ${message}
-                    </td>
-                </tr>
-            `;
-        }
-        
-        // ユーティリティ関数
-        function getActivityBadge(status) {
-            const statusMap = {
-                'active': { class: 'badge-active', text: '活動中' },
-                'warning': { class: 'badge-warning', text: '注意' },
-                'inactive': { class: 'badge-inactive', text: '非活動' }
-            };
-            
-            const statusInfo = statusMap[status] || statusMap['inactive'];
-            return `<span class="badge badge-activity ${statusInfo.class}">${statusInfo.text}</span>`;
-        }
-        
-        function getPaymentMethodText(method) {
-            const methodMap = {
-                'cash': '現金',
-                'bank_transfer': '銀行振込',
-                'account_debit': '口座振替',
-                'mixed': '混合'
-            };
-            return methodMap[method] || '不明';
-        }
-        
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('ja-JP', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-            });
-        }
-        
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text || '';
-            return div.innerHTML;
-        }
-        
+        // 利用者編集（今後実装）
         function editUser(userId) {
-            alert('利用者編集機能は開発中です。利用者ID: ' + userId);
+            alert(`利用者ID ${userId} の編集機能は今後実装予定です。`);
         }
         
-        console.log('✅ JavaScript読み込み完了');
+        // 初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('利用者管理画面が読み込まれました');
+            
+            // エラー表示（デバッグモード時）
+            <?php if (isset($stats['error']) && DEBUG_MODE): ?>
+            console.error('User stats error:', <?php echo json_encode($stats['error']); ?>);
+            <?php endif; ?>
+        });
     </script>
 </body>
 </html>
