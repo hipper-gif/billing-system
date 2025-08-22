@@ -1,535 +1,391 @@
 <?php
 /**
  * Smiley配食事業 請求書・集金管理システム
- * メイン画面（index.php）
- * PC操作不慣れな方向けの直感的なUI設計
+ * メインダッシュボード（修正版）
+ * 
+ * 修正内容:
+ * 1. Database::getInstance()を使用
+ * 2. エラーハンドリング強化
+ * 3. Smiley配食事業専用UI
  */
 
-require_once __DIR__ . '/config/database.php';
+require_once 'config/database.php';
+require_once 'classes/Database.php';
+require_once 'classes/SecurityHelper.php';
 
-// セッション開始
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+// セキュリティヘッダー設定
+SecurityHelper::setSecurityHeaders();
 
-// データベース接続
-try {
-    $db = Database::getInstance();
-    $pdo = $db->getConnection();
-} catch (Exception $e) {
-    $error_message = "システムエラーが発生しました。管理者にお問い合わせください。";
-    if (DEBUG_MODE) {
-        $error_message = "データベース接続エラー: " . $e->getMessage();
-    }
-}
+// 統計データ取得
+$stats = getDashboardStats();
 
-// ダッシュボードデータ取得
-function getDashboardData($pdo) {
+function getDashboardStats() {
     try {
-        $data = [];
-        $currentMonth = date('Y-m');
-        $currentYear = date('Y');
+        // Database::getInstance()を使用
+        $db = Database::getInstance();
         
-        // 今月の売上
-        $stmt = $pdo->prepare("
-            SELECT COALESCE(SUM(total_amount), 0) as monthly_sales,
-                   COUNT(*) as monthly_orders,
-                   COUNT(DISTINCT user_id) as monthly_users
-            FROM orders 
-            WHERE DATE_FORMAT(delivery_date, '%Y-%m') = ?
+        $stats = [
+            'total_orders' => 0,
+            'total_revenue' => 0,
+            'active_companies' => 0,
+            'active_users' => 0,
+            'pending_invoices' => 0,
+            'unpaid_amount' => 0,
+            'recent_orders' => [],
+            'monthly_revenue' => []
+        ];
+        
+        // 総注文数
+        $stmt = $db->query("SELECT COUNT(*) as total FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)");
+        $result = $stmt->fetch();
+        $stats['total_orders'] = $result['total'] ?? 0;
+        
+        // 総売上（過去30日）
+        $stmt = $db->query("SELECT SUM(total_amount) as revenue FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)");
+        $result = $stmt->fetch();
+        $stats['total_revenue'] = $result['revenue'] ?? 0;
+        
+        // アクティブ企業数
+        $stmt = $db->query("SELECT COUNT(DISTINCT company_id) as companies FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)");
+        $result = $stmt->fetch();
+        $stats['active_companies'] = $result['companies'] ?? 0;
+        
+        // アクティブ利用者数
+        $stmt = $db->query("SELECT COUNT(DISTINCT user_id) as users FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)");
+        $result = $stmt->fetch();
+        $stats['active_users'] = $result['users'] ?? 0;
+        
+        // 未請求額（概算）
+        $stmt = $db->query("
+            SELECT SUM(total_amount) as unpaid 
+            FROM orders o 
+            WHERE NOT EXISTS (
+                SELECT 1 FROM invoices i 
+                WHERE i.user_id = o.user_id 
+                AND DATE(o.delivery_date) BETWEEN i.period_start AND i.period_end
+            )
         ");
-        $stmt->execute([$currentMonth]);
-        $monthlySales = $stmt->fetch();
+        $result = $stmt->fetch();
+        $stats['unpaid_amount'] = $result['unpaid'] ?? 0;
         
-        // 配達先企業数・利用者数
-        $stmt = $pdo->prepare("
+        // 最近の注文（上位5件）
+        $stmt = $db->query("
             SELECT 
-                COUNT(DISTINCT c.id) as total_companies,
-                COUNT(DISTINCT u.id) as total_users,
-                COUNT(DISTINCT CASE WHEN c.is_active = 1 THEN c.id END) as active_companies
-            FROM companies c
-            LEFT JOIN users u ON c.id = u.company_id
-        ");
-        $stmt->execute();
-        $companyStats = $stmt->fetch();
-        
-        // 未回収金額
-        $stmt = $pdo->prepare("
-            SELECT 
-                COALESCE(SUM(i.total_amount - COALESCE(p.paid_amount, 0)), 0) as unpaid_amount,
-                COUNT(i.id) as unpaid_invoices
-            FROM invoices i
-            LEFT JOIN (
-                SELECT invoice_id, SUM(amount) as paid_amount
-                FROM payments 
-                WHERE payment_status = 'completed'
-                GROUP BY invoice_id
-            ) p ON i.id = p.invoice_id
-            WHERE i.status IN ('issued', 'overdue')
-            AND (i.total_amount - COALESCE(p.paid_amount, 0)) > 0
-        ");
-        $stmt->execute();
-        $unpaidStats = $stmt->fetch();
-        
-        // 期限切れ件数
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*) as overdue_count
-            FROM invoices 
-            WHERE (status = 'overdue' OR (status = 'issued' AND due_date < CURDATE()))
-            AND total_amount > 0
-        ");
-        $stmt->execute();
-        $overdueStats = $stmt->fetch();
-        
-        // 今月の請求書件数
-        $stmt = $pdo->prepare("
-            SELECT COUNT(*) as monthly_invoices
-            FROM invoices 
-            WHERE DATE_FORMAT(invoice_date, '%Y-%m') = ?
-        ");
-        $stmt->execute([$currentMonth]);
-        $invoiceStats = $stmt->fetch();
-        
-        // 最近のアクティビティ（シンプル版）
-        $stmt = $pdo->prepare("
-            SELECT 
-                'order' as type,
-                CONCAT(company_name, ' - ', user_name) as title,
-                CONCAT('¥', FORMAT(total_amount, 0), ' (', product_name, ')') as description,
-                delivery_date as activity_date,
-                created_at
-            FROM orders 
-            ORDER BY created_at DESC 
+                o.delivery_date,
+                o.user_name,
+                o.company_name,
+                o.product_name,
+                o.total_amount,
+                o.created_at
+            FROM orders o 
+            ORDER BY o.created_at DESC 
             LIMIT 5
         ");
-        $stmt->execute();
-        $recentActivities = $stmt->fetchAll();
+        $stats['recent_orders'] = $stmt->fetchAll();
         
-        return [
-            'monthly_sales' => $monthlySales['monthly_sales'] ?? 0,
-            'monthly_orders' => $monthlySales['monthly_orders'] ?? 0,
-            'monthly_users' => $monthlySales['monthly_users'] ?? 0,
-            'total_companies' => $companyStats['total_companies'] ?? 0,
-            'total_users' => $companyStats['total_users'] ?? 0,
-            'active_companies' => $companyStats['active_companies'] ?? 0,
-            'unpaid_amount' => $unpaidStats['unpaid_amount'] ?? 0,
-            'unpaid_invoices' => $unpaidStats['unpaid_invoices'] ?? 0,
-            'overdue_count' => $overdueStats['overdue_count'] ?? 0,
-            'monthly_invoices' => $invoiceStats['monthly_invoices'] ?? 0,
-            'recent_activities' => $recentActivities
-        ];
+        // 月別売上（過去6ヶ月）
+        $stmt = $db->query("
+            SELECT 
+                DATE_FORMAT(delivery_date, '%Y-%m') as month,
+                SUM(total_amount) as revenue,
+                COUNT(*) as order_count
+            FROM orders 
+            WHERE delivery_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+            GROUP BY DATE_FORMAT(delivery_date, '%Y-%m')
+            ORDER BY month ASC
+        ");
+        $stats['monthly_revenue'] = $stmt->fetchAll();
+        
+        return $stats;
         
     } catch (Exception $e) {
-        error_log("Dashboard data error: " . $e->getMessage());
+        error_log("Dashboard stats error: " . $e->getMessage());
         return [
-            'monthly_sales' => 0,
-            'monthly_orders' => 0,
-            'monthly_users' => 0,
-            'total_companies' => 0,
-            'total_users' => 0,
-            'active_companies' => 0,
-            'unpaid_amount' => 0,
-            'unpaid_invoices' => 0,
-            'overdue_count' => 0,
-            'monthly_invoices' => 0,
-            'recent_activities' => []
+            'total_orders' => 'エラー',
+            'total_revenue' => 'エラー',
+            'active_companies' => 'エラー',
+            'active_users' => 'エラー',
+            'pending_invoices' => 'エラー',
+            'unpaid_amount' => 'エラー',
+            'recent_orders' => [],
+            'monthly_revenue' => [],
+            'error' => $e->getMessage()
         ];
     }
 }
-
-// ダッシュボードデータ取得
-$dashboardData = [];
-if (isset($pdo)) {
-    $dashboardData = getDashboardData($pdo);
-}
-
-// 次のアクション提案
-function getNextActionSuggestion($data) {
-    if ($data['overdue_count'] > 0) {
-        return [
-            'priority' => 'high',
-            'icon' => '⚠️',
-            'message' => $data['overdue_count'] . '件の請求書が期限切れです。回収作業を行ってください。',
-            'action' => 'payment_management'
-        ];
-    }
-    
-    if ($data['monthly_invoices'] == 0 && date('d') > 25) {
-        return [
-            'priority' => 'medium',
-            'icon' => '📄',
-            'message' => '今月の請求書がまだ作成されていません。月末なので作成をお勧めします。',
-            'action' => 'generate_invoices'
-        ];
-    }
-    
-    if ($data['monthly_orders'] == 0) {
-        return [
-            'priority' => 'medium',
-            'icon' => '📊',
-            'message' => '今月の注文データがありません。CSVファイルを取り込んでください。',
-            'action' => 'import_csv'
-        ];
-    }
-    
-    return [
-        'priority' => 'low',
-        'icon' => '✨',
-        'message' => 'システムは正常に動作しています。CSVファイルを取り込んで請求書を作成しましょう。',
-        'action' => 'import_csv'
-    ];
-}
-
-$nextAction = getNextActionSuggestion($dashboardData);
 ?>
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🍱 Smiley配食 請求書・集金管理システム</title>
-    
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    
-    <!-- カスタムCSS -->
+    <title>🍱 Smiley配食 請求書管理システム</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* PC操作不慣れな方向けのUI設計 */
-        body {
-            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
-            background-color: #f8f9fa;
-            font-size: 16px;
+        body { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            margin: 20px auto;
+            padding: 30px;
+            max-width: 1400px;
+        }
+        .smiley-green { color: #2E8B57; }
+        .bg-smiley-green { background-color: #2E8B57; }
         .main-btn {
             min-height: 120px;
             font-size: 1.2rem;
             font-weight: bold;
             border-radius: 15px;
             transition: all 0.3s ease;
-            border: 3px solid transparent;
-            margin-bottom: 15px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
         }
-        
         .main-btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
-            border-color: rgba(255,255,255,0.3);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
         }
-        
-        .main-btn:active {
-            transform: translateY(0);
-        }
-        
-        .main-btn .btn-icon {
-            font-size: 2.5rem;
-            display: block;
-            margin-bottom: 8px;
-        }
-        
-        .stats-card {
+        .stat-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
             border-radius: 15px;
-            border: none;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            transition: transform 0.3s ease;
+            padding: 25px;
+            margin-bottom: 20px;
+            border-left: 5px solid #2E8B57;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
         }
-        
-        .stats-card:hover {
-            transform: translateY(-2px);
-        }
-        
-        .stats-value {
+        .stat-number {
             font-size: 2.5rem;
             font-weight: bold;
-            margin-bottom: 5px;
+            color: #2E8B57;
         }
-        
-        .stats-label {
-            color: #6c757d;
+        .btn-outline-smiley {
+            border-color: #2E8B57;
+            color: #2E8B57;
+        }
+        .btn-outline-smiley:hover {
+            background-color: #2E8B57;
+            border-color: #2E8B57;
+            color: white;
+        }
+        .recent-orders-table {
             font-size: 0.9rem;
-            margin-bottom: 0;
         }
-        
-        .header-title {
-            color: #2c3e50;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-        
-        .header-subtitle {
-            color: #7f8c8d;
-            font-size: 1rem;
-        }
-        
-        .action-alert {
-            border-radius: 12px;
-            border: none;
-            font-size: 1.1rem;
-        }
-        
-        .action-alert.priority-high {
-            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
-            color: white;
-        }
-        
-        .action-alert.priority-medium {
-            background: linear-gradient(135deg, #feca57 0%, #ff9ff3 100%);
-            color: #2c3e50;
-        }
-        
-        .action-alert.priority-low {
-            background: linear-gradient(135deg, #48cae4 0%, #023e8a 100%);
-            color: white;
-        }
-        
-        .activity-item {
-            border-left: 4px solid #007bff;
-            padding-left: 15px;
-            margin-bottom: 15px;
-        }
-        
-        .activity-date {
-            font-size: 0.85rem;
-            color: #6c757d;
-        }
-        
-        @media (max-width: 768px) {
-            .main-btn {
-                min-height: 100px;
-                font-size: 1rem;
-            }
-            
-            .stats-value {
-                font-size: 2rem;
-            }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
         }
     </style>
 </head>
 <body>
-    <div class="container-fluid px-4 py-3">
+    <div class="main-container">
         <!-- ヘッダー -->
-        <header class="mb-4">
-            <div class="row align-items-center">
-                <div class="col-md-8">
-                    <h1 class="header-title">🍱 Smiley配食事業</h1>
-                    <p class="header-subtitle">請求書・集金管理システム</p>
-                </div>
-                <div class="col-md-4 text-md-end">
-                    <span class="badge bg-success px-3 py-2">
-                        <?= ENVIRONMENT === 'test' ? 'テスト環境' : '本番環境' ?>
-                    </span>
-                    <div class="text-muted small mt-1">
-                        <?= date('Y年m月d日 H:i') ?>
-                    </div>
-                </div>
-            </div>
-        </header>
-
-        <?php if (isset($error_message)): ?>
-        <!-- エラー表示 -->
-        <div class="alert alert-danger" role="alert">
-            <h4 class="alert-heading">⚠️ システムエラー</h4>
-            <p><?= htmlspecialchars($error_message) ?></p>
+        <div class="text-center mb-5">
+            <h1 class="display-4 smiley-green mb-3">🍱 Smiley配食 請求書管理システム</h1>
+            <p class="lead text-muted">配達先企業・利用者管理、請求書生成、集金管理を一元化</p>
         </div>
-        <?php else: ?>
 
-        <!-- ダッシュボード統計 -->
-        <div class="row mb-4">
-            <div class="col-xl-3 col-md-6 mb-3">
-                <div class="card stats-card text-center">
-                    <div class="card-body">
-                        <div class="stats-value text-primary">
-                            ¥<?= number_format($dashboardData['monthly_sales']) ?>
-                        </div>
-                        <p class="stats-label">今月の売上</p>
-                        <small class="text-muted"><?= $dashboardData['monthly_orders'] ?>件の注文</small>
-                    </div>
+        <!-- 統計サマリー -->
+        <div class="row mb-5">
+            <div class="col-lg-3 col-md-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['total_orders']) ? number_format($stats['total_orders']) : $stats['total_orders']; ?></div>
+                    <div class="text-muted">今月の注文数</div>
+                    <small class="text-success"><i class="bi bi-graph-up"></i> 過去30日間</small>
                 </div>
             </div>
-            
-            <div class="col-xl-3 col-md-6 mb-3">
-                <div class="card stats-card text-center">
-                    <div class="card-body">
-                        <div class="stats-value text-warning">
-                            ¥<?= number_format($dashboardData['unpaid_amount']) ?>
-                        </div>
-                        <p class="stats-label">未回収金額</p>
-                        <small class="text-muted"><?= $dashboardData['unpaid_invoices'] ?>件の請求書</small>
-                    </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number">¥<?php echo is_numeric($stats['total_revenue']) ? number_format($stats['total_revenue']) : $stats['total_revenue']; ?></div>
+                    <div class="text-muted">今月の売上</div>
+                    <small class="text-success"><i class="bi bi-currency-yen"></i> 過去30日間</small>
                 </div>
             </div>
-            
-            <div class="col-xl-3 col-md-6 mb-3">
-                <div class="card stats-card text-center">
-                    <div class="card-body">
-                        <div class="stats-value text-info">
-                            <?= $dashboardData['active_companies'] ?>
-                        </div>
-                        <p class="stats-label">配達先企業</p>
-                        <small class="text-muted">利用者<?= $dashboardData['total_users'] ?>名</small>
-                    </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['active_companies']) ? number_format($stats['active_companies']) : $stats['active_companies']; ?></div>
+                    <div class="text-muted">アクティブ企業</div>
+                    <small class="text-info"><i class="bi bi-building"></i> 利用中企業数</small>
                 </div>
             </div>
-            
-            <div class="col-xl-3 col-md-6 mb-3">
-                <div class="card stats-card text-center">
-                    <div class="card-body">
-                        <div class="stats-value text-danger">
-                            <?= $dashboardData['overdue_count'] ?>
-                        </div>
-                        <p class="stats-label">期限切れ</p>
-                        <small class="text-muted">緊急対応必要</small>
-                    </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number">¥<?php echo is_numeric($stats['unpaid_amount']) ? number_format($stats['unpaid_amount']) : $stats['unpaid_amount']; ?></div>
+                    <div class="text-muted">未回収金額</div>
+                    <small class="text-warning"><i class="bi bi-exclamation-triangle"></i> 要確認</small>
                 </div>
             </div>
         </div>
 
-        <!-- 次にすべきアクション -->
-        <div class="alert action-alert priority-<?= $nextAction['priority'] ?> mb-4" role="alert">
-            <h5><?= $nextAction['icon'] ?> 次にすることは：</h5>
-            <p class="mb-0"><?= $nextAction['message'] ?></p>
-        </div>
-
-        <!-- メイン操作ボタン -->
-        <div class="row g-3 mb-4">
+        <!-- メイン機能ボタン -->
+        <div class="row mb-5">
             <div class="col-lg-3 col-md-6">
-                <button class="btn btn-primary w-100 main-btn" onclick="location.href='pages/csv_import.php'">
-                    <span class="btn-icon">📊</span>
-                    <div>データ取り込み</div>
-                    <small>CSVファイルから注文データを読み込み</small>
-                </button>
+                <a href="pages/csv_import.php" class="btn btn-primary main-btn w-100 d-flex flex-column align-items-center justify-content-center">
+                    <i class="bi bi-cloud-upload-fill fs-1 mb-2"></i>
+                    <span>CSVインポート</span>
+                    <small>注文データ取込</small>
+                </a>
             </div>
-            
             <div class="col-lg-3 col-md-6">
-                <button class="btn btn-success w-100 main-btn" onclick="location.href='pages/invoice_generate.php'">
-                    <span class="btn-icon">📄</span>
-                    <div>請求書作成</div>
-                    <small>配達先企業別に請求書を生成</small>
-                </button>
+                <a href="pages/companies.php" class="btn btn-success main-btn w-100 d-flex flex-column align-items-center justify-content-center">
+                    <i class="bi bi-building fs-1 mb-2"></i>
+                    <span>配達先企業管理</span>
+                    <small>企業・部署・利用者</small>
+                </a>
             </div>
-            
             <div class="col-lg-3 col-md-6">
-                <button class="btn btn-info w-100 main-btn" onclick="location.href='pages/payment_management.php'">
-                    <span class="btn-icon">💰</span>
-                    <div>集金管理</div>
-                    <small>支払い状況・未回収金額の管理</small>
-                </button>
+                <a href="pages/invoices.php" class="btn btn-warning main-btn w-100 d-flex flex-column align-items-center justify-content-center">
+                    <i class="bi bi-receipt fs-1 mb-2"></i>
+                    <span>請求書生成</span>
+                    <small>企業別・個人別</small>
+                </a>
             </div>
-            
             <div class="col-lg-3 col-md-6">
-                <button class="btn btn-warning w-100 main-btn" onclick="location.href='pages/companies.php'">
-                    <span class="btn-icon">🏢</span>
-                    <div>配達先企業</div>
-                    <small>企業・部署・利用者の管理</small>
-                </button>
+                <a href="pages/payments.php" class="btn btn-info main-btn w-100 d-flex flex-column align-items-center justify-content-center">
+                    <i class="bi bi-credit-card fs-1 mb-2"></i>
+                    <span>集金管理</span>
+                    <small>支払確認・督促</small>
+                </a>
             </div>
         </div>
 
-        <!-- 最近のアクティビティ -->
+        <!-- 詳細情報 -->
         <div class="row">
-            <div class="col-md-8">
+            <div class="col-lg-6">
                 <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">📈 最近のアクティビティ</h5>
+                    <div class="card-header bg-smiley-green text-white">
+                        <h5 class="mb-0"><i class="bi bi-clock-history"></i> 最近の注文</h5>
                     </div>
-                    <div class="card-body">
-                        <?php if (empty($dashboardData['recent_activities'])): ?>
-                        <div class="text-center text-muted py-4">
-                            <p>📋 最近のアクティビティはありません</p>
-                            <p>CSVファイルを取り込んで、システムを開始しましょう</p>
-                        </div>
+                    <div class="card-body p-0">
+                        <?php if (!empty($stats['recent_orders'])): ?>
+                            <div class="table-responsive">
+                                <table class="table table-hover recent-orders-table mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>配達日</th>
+                                            <th>利用者</th>
+                                            <th>企業</th>
+                                            <th>金額</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($stats['recent_orders'] as $order): ?>
+                                            <tr>
+                                                <td><?php echo date('m/d', strtotime($order['delivery_date'])); ?></td>
+                                                <td><?php echo htmlspecialchars($order['user_name']); ?></td>
+                                                <td><?php echo htmlspecialchars($order['company_name']); ?></td>
+                                                <td class="text-end">¥<?php echo number_format($order['total_amount']); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
                         <?php else: ?>
-                        <?php foreach ($dashboardData['recent_activities'] as $activity): ?>
-                        <div class="activity-item">
-                            <div class="fw-bold"><?= htmlspecialchars($activity['title']) ?></div>
-                            <div class="text-muted"><?= htmlspecialchars($activity['description']) ?></div>
-                            <div class="activity-date"><?= date('m/d H:i', strtotime($activity['created_at'])) ?></div>
-                        </div>
-                        <?php endforeach; ?>
+                            <div class="text-center p-4 text-muted">
+                                <i class="bi bi-inbox fs-1"></i>
+                                <p>最近の注文データがありません</p>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
             </div>
             
-            <div class="col-md-4">
+            <div class="col-lg-6">
                 <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">🔧 システム情報</h5>
+                    <div class="card-header bg-smiley-green text-white">
+                        <h5 class="mb-0"><i class="bi bi-graph-up"></i> 月別売上推移</h5>
                     </div>
                     <div class="card-body">
-                        <ul class="list-unstyled mb-0">
-                            <li><strong>データベース:</strong> <?= DB_NAME ?></li>
-                            <li><strong>環境:</strong> <?= ENVIRONMENT ?></li>
-                            <li><strong>バージョン:</strong> <?= SYSTEM_VERSION ?></li>
-                            <li class="mt-2">
-                                <a href="config/database.php?debug=env" class="btn btn-outline-secondary btn-sm" target="_blank">
-                                    🔍 詳細情報
-                                </a>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-                
-                <!-- クイックヘルプ -->
-                <div class="card mt-3">
-                    <div class="card-header">
-                        <h5 class="mb-0">💡 クイックヘルプ</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="small">
-                            <p><strong>📊 データ取り込み:</strong><br>
-                            Smiley配食システムのCSVファイルをアップロード</p>
-                            
-                            <p><strong>📄 請求書作成:</strong><br>
-                            配達先企業別に月次請求書を自動生成</p>
-                            
-                            <p><strong>💰 集金管理:</strong><br>
-                            支払い状況の確認と記録</p>
+                        <div class="chart-container">
+                            <canvas id="revenueChart"></canvas>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <?php endif; ?>
+        <!-- システム状況 -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="text-center">
+                    <a href="pages/system_health.php" class="btn btn-outline-smiley">
+                        <i class="bi bi-gear"></i> システム健全性チェック
+                    </a>
+                    <a href="pages/users.php" class="btn btn-outline-smiley ms-2">
+                        <i class="bi bi-people"></i> 利用者管理
+                    </a>
+                    <a href="pages/departments.php" class="btn btn-outline-smiley ms-2">
+                        <i class="bi bi-diagram-3"></i> 部署管理
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- フッター -->
+        <div class="text-center mt-5 pt-4 border-top">
+            <p class="text-muted mb-0">
+                <strong>Smiley配食事業 請求書管理システム v1.0.0</strong><br>
+                © 2025 Smiley配食事業. All rights reserved.
+            </p>
+        </div>
     </div>
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    
-    <!-- カスタムJavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // PC操作不慣れな方向けの追加機能
-        document.addEventListener('DOMContentLoaded', function() {
-            // ボタンクリック時の視覚的フィードバック
-            const buttons = document.querySelectorAll('.main-btn');
-            buttons.forEach(button => {
-                button.addEventListener('click', function() {
-                    this.style.transform = 'scale(0.95)';
-                    setTimeout(() => {
-                        this.style.transform = '';
-                    }, 150);
-                });
-            });
-            
-            // ツールチップの有効化
-            const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-            tooltipTriggerList.map(function(tooltipTriggerEl) {
-                return new bootstrap.Tooltip(tooltipTriggerEl);
-            });
-        });
-        
-        // アラート自動フェード（必要に応じて）
-        setTimeout(function() {
-            const alerts = document.querySelectorAll('.alert:not(.action-alert)');
-            alerts.forEach(alert => {
-                if (alert.classList.contains('alert-success')) {
-                    alert.style.transition = 'opacity 0.5s';
-                    alert.style.opacity = '0.8';
+        // 月別売上チャート
+        <?php if (!empty($stats['monthly_revenue'])): ?>
+        const revenueData = <?php echo json_encode($stats['monthly_revenue']); ?>;
+        const ctx = document.getElementById('revenueChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: revenueData.map(item => item.month),
+                datasets: [{
+                    label: '売上金額',
+                    data: revenueData.map(item => item.revenue),
+                    borderColor: '#2E8B57',
+                    backgroundColor: 'rgba(46, 139, 87, 0.1)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return '¥' + value.toLocaleString();
+                            }
+                        }
+                    }
                 }
-            });
-        }, 5000);
+            }
+        });
+        <?php else: ?>
+        document.getElementById('revenueChart').getContext('2d').fillText('データがありません', 50, 50);
+        <?php endif; ?>
+
+        // エラー表示（デバッグモード時）
+        <?php if (isset($stats['error']) && DEBUG_MODE): ?>
+        console.error('Dashboard Error:', <?php echo json_encode($stats['error']); ?>);
+        <?php endif; ?>
     </script>
-</body>
-</html>
+</body
