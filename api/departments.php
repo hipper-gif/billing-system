@@ -59,14 +59,14 @@ try {
                 $usersSample = $db->query("SELECT user_code, user_name, department_id FROM users LIMIT 5");
                 $diagnosis['users_sample'] = $usersSample->fetchAll();
                 
-                // 5. user_code の一致確認
+                // 5. user_code の一致確認（MariaDB対応版）
                 $matchCheck = $db->query("
                     SELECT 
-                        COUNT(DISTINCT u.user_code) as users_with_code,
-                        COUNT(DISTINCT o.user_code) as orders_with_code,
-                        COUNT(DISTINCT CASE WHEN u.user_code = o.user_code THEN u.user_code END) as matching_codes
+                        (SELECT COUNT(DISTINCT user_code) FROM users) as users_with_code,
+                        (SELECT COUNT(DISTINCT user_code) FROM orders) as orders_with_code,
+                        COUNT(DISTINCT u.user_code) as matching_codes
                     FROM users u
-                    FULL OUTER JOIN orders o ON u.user_code = o.user_code
+                    INNER JOIN orders o ON u.user_code = o.user_code
                 ");
                 $diagnosis['user_code_match'] = $matchCheck->fetch();
                 
@@ -155,7 +155,7 @@ try {
                         END), 0) as recent_revenue
                         
                     FROM departments d
-                    LEFT JOIN companies c ON d.id = c.id
+                    LEFT JOIN companies c ON d.company_id = c.id
                     LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
                     
                     -- パターン1: user_code での関連付け（推奨）
