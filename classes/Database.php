@@ -1,47 +1,30 @@
 <?php
-/**
- * データベース接続クラス（Singleton + 完全対応版）
- * SmileyCSVImporter.php対応
- */
-
-// 重複宣言防止
-if (!class_exists('Database')) {
-
 require_once __DIR__ . '/../config/database.php';
 
+/**
+ * データベース接続クラス（完全版）
+ * CSVインポート機能対応
+ */
 class Database {
-    private static $instance = null;
     private $pdo;
     private $connected = false;
     private $lastError = '';
     
-    /**
-     * プライベートコンストラクタ（Singletonパターン）
-     */
-    private function __construct() {
+    public function __construct() {
+        // データベース設定が定義されているかチェック
+        if (!defined('DB_HOST') || !defined('DB_NAME') || !defined('DB_USER')) {
+            $this->lastError = 'データベース設定が不完全です';
+            return;
+        }
+        
         $this->connect();
     }
     
     /**
-     * Singletonインスタンス取得
-     */
-    public static function getInstance() {
-        if (self::$instance === null) {
-            self::$instance = new self();
-        }
-        return self::$instance;
-    }
-    
-    /**
-     * データベース接続
+     * データベースに接続
      */
     private function connect() {
         try {
-            // データベース設定確認
-            if (!defined('DB_HOST') || !defined('DB_NAME') || !defined('DB_USER')) {
-                throw new Exception('データベース設定が不完全です');
-            }
-            
             $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4";
             $options = [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -53,54 +36,60 @@ class Database {
             $this->pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
             $this->connected = true;
             
-            // デバッグログ
             if (defined('DEBUG_MODE') && DEBUG_MODE) {
-                error_log("Database connected successfully to " . DB_NAME);
+                error_log("Database connected successfully");
             }
             
         } catch (PDOException $e) {
             $this->connected = false;
             $this->lastError = $e->getMessage();
             
-            error_log("Database connection failed: " . $e->getMessage());
+            if (defined('DEBUG_MODE') && DEBUG_MODE) {
+                error_log("Database connection failed: " . $e->getMessage());
+            }
+            
             throw new Exception("データベース接続エラー: " . $e->getMessage());
         }
     }
     
     /**
-     * PDO接続オブジェクト取得（SmileyCSVImporter対応）
+     * 接続状態を確認
      */
-    public function getConnection() {
+    public function isConnected() {
+        return $this->connected;
+    }
+    
+    /**
+     * 最後のエラーメッセージを取得
+     */
+    public function getLastError() {
+        return $this->lastError;
+    }
+    
+    /**
+     * SQLクエリ実行
+     */
+    public function query($sql, $params = []) {
         if (!$this->connected) {
             throw new Exception("データベースに接続されていません: " . $this->lastError);
         }
-        return $this->pdo;
-    }
-    
-    /**
-     * クエリ実行（SmileyCSVImporter対応）
-     */
-    public function query($sql, $params = []) {
+        
         try {
-            if (!$this->connected) {
-                throw new Exception("データベースに接続されていません");
-            }
-            
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($params);
-            
             return $stmt;
-            
         } catch (PDOException $e) {
-            error_log("Query error: " . $e->getMessage() . " SQL: " . $sql);
-            throw new Exception("クエリ実行エラー: " . $e->getMessage());
+            throw new Exception("SQL実行エラー: " . $e->getMessage() . " | SQL: " . $sql);
         }
     }
     
     /**
-     * 最後のInsert ID取得
+     * 最後に挿入されたIDを取得
      */
     public function lastInsertId() {
+        if (!$this->connected) {
+            throw new Exception("データベースに接続されていません");
+        }
         return $this->pdo->lastInsertId();
     }
     
@@ -108,39 +97,44 @@ class Database {
      * トランザクション開始
      */
     public function beginTransaction() {
+        if (!$this->connected) {
+            throw new Exception("データベースに接続されていません");
+        }
         return $this->pdo->beginTransaction();
     }
     
     /**
-     * コミット
+     * トランザクションコミット
      */
     public function commit() {
+        if (!$this->connected) {
+            throw new Exception("データベースに接続されていません");
+        }
         return $this->pdo->commit();
     }
     
     /**
-     * ロールバック
+     * トランザクションロールバック
      */
     public function rollback() {
+        if (!$this->connected) {
+            throw new Exception("データベースに接続されていません");
+        }
         return $this->pdo->rollback();
     }
     
     /**
-     * 接続状態確認
+     * PDOオブジェクトを直接取得（緊急時用）
      */
-    public function isConnected() {
-        return $this->connected;
+    public function getConnection() {
+        if (!$this->connected) {
+            throw new Exception("データベースに接続されていません");
+        }
+        return $this->pdo;
     }
     
     /**
-     * 最後のエラー取得
-     */
-    public function getLastError() {
-        return $this->lastError;
-    }
-    
-    /**
-     * データベース存在・接続確認
+     * データベース存在チェック
      */
     public function checkDatabase() {
         try {
@@ -152,35 +146,18 @@ class Database {
                 ];
             }
             
-            $stmt = $this->query("SELECT DATABASE() as current_db, NOW() as current_time");
-            $result = $stmt->fetch();
-            
+            $result = $this->pdo->query("SELECT DATABASE() as current_db")->fetch();
             return [
                 'success' => true,
                 'database' => $result['current_db'],
-                'current_time' => $result['current_time'],
                 'message' => 'データベース接続成功'
             ];
-            
-        } catch (Exception $e) {
+        } catch (PDOException $e) {
             return [
                 'success' => false,
                 'database' => null,
                 'message' => $e->getMessage()
             ];
-        }
-    }
-    
-    /**
-     * テーブル存在確認
-     */
-    public function tableExists($tableName) {
-        try {
-            $stmt = $this->query("SHOW TABLES LIKE ?", [$tableName]);
-            return $stmt->rowCount() > 0;
-        } catch (Exception $e) {
-            error_log("Table check error: " . $e->getMessage());
-            return false;
         }
     }
     
@@ -193,176 +170,115 @@ class Database {
                 return ['error' => $this->lastError];
             }
             
-            $stmt = $this->query("SELECT VERSION() as version, @@sql_mode as sql_mode");
-            $info = $stmt->fetch();
-            
+            $version = $this->pdo->query("SELECT VERSION() as version")->fetch();
             return [
-                'mysql_version' => $info['version'],
-                'sql_mode' => $info['sql_mode'],
+                'mysql_version' => $version['version'],
                 'connection_status' => 'Connected',
-                'database_name' => DB_NAME,
                 'charset' => 'utf8mb4'
             ];
-            
-        } catch (Exception $e) {
+        } catch (PDOException $e) {
             return ['error' => $e->getMessage()];
         }
     }
     
     /**
-     * 簡易テーブル作成（開発用）
+     * テーブル存在確認
      */
-    public function createBasicTables() {
-        $tables = [
-            'companies' => "
-                CREATE TABLE IF NOT EXISTS companies (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    company_code VARCHAR(50),
-                    company_name VARCHAR(255) NOT NULL,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            ",
-            'departments' => "
-                CREATE TABLE IF NOT EXISTS departments (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    company_id INT,
-                    department_code VARCHAR(50),
-                    department_name VARCHAR(255) NOT NULL,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (company_id) REFERENCES companies(id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            ",
-            'users' => "
-                CREATE TABLE IF NOT EXISTS users (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_code VARCHAR(50) NOT NULL UNIQUE,
-                    user_name VARCHAR(255) NOT NULL,
-                    company_id INT,
-                    department_id INT,
-                    company_name VARCHAR(255),
-                    department VARCHAR(255),
-                    employee_type_code VARCHAR(50),
-                    employee_type_name VARCHAR(100),
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (company_id) REFERENCES companies(id),
-                    FOREIGN KEY (department_id) REFERENCES departments(id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            ",
-            'suppliers' => "
-                CREATE TABLE IF NOT EXISTS suppliers (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    supplier_code VARCHAR(50),
-                    supplier_name VARCHAR(255) NOT NULL,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            ",
-            'products' => "
-                CREATE TABLE IF NOT EXISTS products (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    product_code VARCHAR(50) NOT NULL UNIQUE,
-                    product_name VARCHAR(255) NOT NULL,
-                    category_code VARCHAR(50),
-                    category_name VARCHAR(100),
-                    supplier_id INT,
-                    unit_price DECIMAL(10,2),
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            ",
-            'orders' => "
-                CREATE TABLE IF NOT EXISTS orders (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    delivery_date DATE NOT NULL,
-                    user_id INT,
-                    user_code VARCHAR(50),
-                    user_name VARCHAR(255),
-                    company_id INT,
-                    company_code VARCHAR(50),
-                    company_name VARCHAR(255),
-                    department_id INT,
-                    product_id INT,
-                    product_code VARCHAR(50),
-                    product_name VARCHAR(255),
-                    category_code VARCHAR(50),
-                    category_name VARCHAR(100),
-                    supplier_id INT,
-                    quantity INT DEFAULT 1,
-                    unit_price DECIMAL(10,2),
-                    total_amount DECIMAL(10,2),
-                    supplier_code VARCHAR(50),
-                    supplier_name VARCHAR(255),
-                    corporation_code VARCHAR(50),
-                    corporation_name VARCHAR(255),
-                    employee_type_code VARCHAR(50),
-                    employee_type_name VARCHAR(100),
-                    department_code VARCHAR(50),
-                    department_name VARCHAR(255),
-                    import_batch_id VARCHAR(100),
-                    notes TEXT,
-                    delivery_time TIME,
-                    cooperation_code VARCHAR(50),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users(id),
-                    FOREIGN KEY (company_id) REFERENCES companies(id),
-                    FOREIGN KEY (product_id) REFERENCES products(id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            ",
-            'import_logs' => "
-                CREATE TABLE IF NOT EXISTS import_logs (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    batch_id VARCHAR(100) NOT NULL,
-                    file_name VARCHAR(255),
-                    total_rows INT DEFAULT 0,
-                    success_rows INT DEFAULT 0,
-                    error_rows INT DEFAULT 0,
-                    new_companies INT DEFAULT 0,
-                    new_departments INT DEFAULT 0,
-                    new_users INT DEFAULT 0,
-                    new_suppliers INT DEFAULT 0,
-                    new_products INT DEFAULT 0,
-                    duplicate_orders INT DEFAULT 0,
-                    import_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    status ENUM('success', 'partial_success', 'failed') DEFAULT 'success',
-                    notes TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            "
-        ];
-        
-        $results = [];
-        
-        foreach ($tables as $tableName => $sql) {
-            try {
-                $this->pdo->exec($sql);
-                $results[$tableName] = 'created';
-            } catch (PDOException $e) {
-                $results[$tableName] = 'error: ' . $e->getMessage();
-                error_log("Table creation error ({$tableName}): " . $e->getMessage());
+    public function tableExists($tableName) {
+        try {
+            if (!$this->connected) {
+                return false;
             }
+            
+            $stmt = $this->pdo->prepare("SHOW TABLES LIKE ?");
+            $stmt->execute([$tableName]);
+            return $stmt->rowCount() > 0;
+        } catch (PDOException $e) {
+            return false;
+        }
+    }
+    
+    /**
+     * カラム存在確認
+     */
+    public function columnExists($tableName, $columnName) {
+        try {
+            if (!$this->connected) {
+                return false;
+            }
+            
+            $stmt = $this->pdo->prepare("SHOW COLUMNS FROM `{$tableName}` LIKE ?");
+            $stmt->execute([$columnName]);
+            return $stmt->rowCount() > 0;
+        } catch (PDOException $e) {
+            return false;
+        }
+    }
+    
+    /**
+     * バックアップSQLの実行（大きなSQL文対応）
+     */
+    public function executeBulkSQL($sql) {
+        if (!$this->connected) {
+            throw new Exception("データベースに接続されていません");
         }
         
-        return $results;
+        try {
+            // SQLファイルを分割して実行
+            $statements = explode(';', $sql);
+            $successCount = 0;
+            
+            foreach ($statements as $statement) {
+                $statement = trim($statement);
+                if (empty($statement)) continue;
+                
+                $this->pdo->exec($statement);
+                $successCount++;
+            }
+            
+            return [
+                'success' => true,
+                'executed' => $successCount,
+                'message' => "{$successCount}個のSQL文を実行しました"
+            ];
+            
+        } catch (PDOException $e) {
+            throw new Exception("バルクSQL実行エラー: " . $e->getMessage());
+        }
     }
     
     /**
-     * クローン防止
+     * 簡単なテストクエリ実行
      */
-    private function __clone() {}
-    
-    /**
-     * アンシリアライズ防止
-     */
-    public function __wakeup() {
-        throw new Exception("Cannot unserialize singleton");
+    public function testConnection() {
+        try {
+            if (!$this->connected) {
+                return [
+                    'success' => false,
+                    'message' => 'データベース未接続: ' . $this->lastError
+                ];
+            }
+            
+            $result = $this->pdo->query("SELECT 1 as test")->fetch();
+            
+            if ($result['test'] == 1) {
+                return [
+                    'success' => true,
+                    'message' => 'データベース接続テスト成功'
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'message' => 'テストクエリ実行失敗'
+                ];
+            }
+            
+        } catch (PDOException $e) {
+            return [
+                'success' => false,
+                'message' => 'テストクエリエラー: ' . $e->getMessage()
+            ];
+        }
     }
 }
-
-} // class_exists check end
 ?>
