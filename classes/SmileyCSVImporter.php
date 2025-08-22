@@ -1,12 +1,14 @@
 <?php
 /**
- * Smiley配食事業専用CSVインポーター
- * 23フィールドCSV対応・階層データ自動生成
+ * Smiley配食事業専用CSVインポーター（完全修正版）
+ * エンコーディングエラー完全修正済み
  */
 class SmileyCSVImporter {
     private $db;
-    private $allowedEncodings = ['SJIS-win', 'UTF-8', 'UTF-8-BOM'];
     private $batchSize = 1000;
+    
+    // 修正：有効なエンコーディング名のみ使用
+    private $allowedEncodings = ['SJIS-win', 'UTF-8', 'SJIS', 'Shift_JIS', 'CP932'];
     
     // CSVフィールドマッピング（Smiley配食事業仕様）
     private $fieldMapping = [
@@ -47,11 +49,11 @@ class SmileyCSVImporter {
         $batchId = 'BATCH_' . date('YmdHis') . '_' . uniqid();
         
         try {
-            // 1. エンコーディング検出
-            $encoding = $this->detectEncoding($filePath);
+            // 1. エンコーディング検出（修正版）
+            $encoding = $this->detectEncodingFixed($filePath);
             
-            // 2. CSV読み込み
-            $rawData = $this->readCsv($filePath, $encoding);
+            // 2. CSV読み込み（修正版）
+            $rawData = $this->readCsvFixed($filePath, $encoding);
             
             // 3. データ変換・正規化
             $normalizedData = $this->normalizeData($rawData);
@@ -85,37 +87,47 @@ class SmileyCSVImporter {
     }
     
     /**
-     * エンコーディング検出
+     * エンコーディング検出（完全修正版）
      */
-    private function detectEncoding($filePath) {
+    private function detectEncodingFixed($filePath) {
         $data = file_get_contents($filePath, false, null, 0, 8192);
         
         // BOMチェック
         if (substr($data, 0, 3) === "\xEF\xBB\xBF") {
-            return 'UTF-8-BOM';
+            return 'UTF-8';
         }
         
-        // エンコーディング検出
-        $encoding = mb_detect_encoding($data, $this->allowedEncodings, true);
+        // 有効なエンコーディング名のみ使用
+        $validEncodings = ['SJIS-win', 'UTF-8', 'SJIS', 'Shift_JIS', 'CP932'];
         
+        // エンコーディング検出
+        $encoding = mb_detect_encoding($data, $validEncodings, true);
+        
+        // デフォルトはSJIS-win（日本のCSV一般的）
         return $encoding ?: 'SJIS-win';
     }
     
     /**
-     * CSV読み込み（修正版）
+     * CSV読み込み（完全修正版）
      */
-    private function readCsv($filePath, $encoding) {
+    private function readCsvFixed($filePath, $encoding) {
         $data = file_get_contents($filePath);
         
-        // UTF-8 BOM処理を修正
+        // BOM処理
         if (substr($data, 0, 3) === "\xEF\xBB\xBF") {
             $data = substr($data, 3); // BOM除去
-            $encoding = 'UTF-8'; // エンコーディングを修正
+            $encoding = 'UTF-8';
         }
         
         // UTF-8に変換
         if ($encoding !== 'UTF-8') {
-            $data = mb_convert_encoding($data, 'UTF-8', $encoding);
+            $convertedData = mb_convert_encoding($data, 'UTF-8', $encoding);
+            if ($convertedData !== false) {
+                $data = $convertedData;
+            } else {
+                // 変換失敗時の代替処理
+                $data = iconv($encoding, 'UTF-8//IGNORE', $data);
+            }
         }
         
         // CSVパース
@@ -123,8 +135,13 @@ class SmileyCSVImporter {
         $csvData = [];
         
         foreach ($lines as $line) {
-            if (trim($line) === '') continue;
-            $csvData[] = str_getcsv($line);
+            $trimmedLine = trim($line);
+            if ($trimmedLine === '') continue;
+            
+            $row = str_getcsv($trimmedLine);
+            if (!empty($row)) {
+                $csvData[] = $row;
+            }
         }
         
         return $csvData;
@@ -186,30 +203,42 @@ class SmileyCSVImporter {
                 }
             }
             
-            // Smiley配食事業チェック
-            if (!empty($row['corporation_name']) && $row['corporation_name'] !== '株式会社Smiley') {
-                $rowErrors[] = "法人名が 'Smiley' 以外です: " . $row['corporation_name'];
+            // Smiley配食事業チェック（緩和版）
+            if (!empty($row['corporation_name'])) {
+                $corpName = trim($row['corporation_name']);
+                if (strpos($corpName, 'Smiley') === false && strpos($corpName, 'smiley') === false) {
+                    $rowErrors[] = "法人名に 'Smiley' が含まれていません: " . $corpName;
+                }
             }
             
             // 日付フォーマットチェック
             if (!empty($row['delivery_date'])) {
-                $date = DateTime::createFromFormat('Y-m-d', $row['delivery_date']);
-                if (!$date || $date->format('Y-m-d') !== $row['delivery_date']) {
-                    $rowErrors[] = "配達日の形式が不正です: " . $row['delivery_date'];
+                $dateStr = $row['delivery_date'];
+                
+                // 複数の日付フォーマットに対応
+                $dateFormats = ['Y-m-d', 'Y/m/d', 'Y.m.d', 'm/d/Y', 'd/m/Y'];
+                $validDate = false;
+                
+                foreach ($dateFormats as $format) {
+                    $date = DateTime::createFromFormat($format, $dateStr);
+                    if ($date && $date->format($format) === $dateStr) {
+                        $validDate = true;
+                        $row['delivery_date'] = $date->format('Y-m-d'); // 正規化
+                        break;
+                    }
+                }
+                
+                if (!$validDate) {
+                    $rowErrors[] = "配達日の形式が不正です: " . $dateStr;
                 }
             }
             
             // 数値フィールドチェック
-            if (!empty($row['quantity']) && !is_numeric($row['quantity'])) {
-                $rowErrors[] = "数量が数値ではありません: " . $row['quantity'];
-            }
-            
-            if (!empty($row['unit_price']) && !is_numeric($row['unit_price'])) {
-                $rowErrors[] = "単価が数値ではありません: " . $row['unit_price'];
-            }
-            
-            if (!empty($row['total_amount']) && !is_numeric($row['total_amount'])) {
-                $rowErrors[] = "金額が数値ではありません: " . $row['total_amount'];
+            $numericFields = ['quantity', 'unit_price', 'total_amount'];
+            foreach ($numericFields as $field) {
+                if (!empty($row[$field]) && !is_numeric($row[$field])) {
+                    $rowErrors[] = "{$field}が数値ではありません: " . $row[$field];
+                }
             }
             
             if (!empty($rowErrors)) {
@@ -466,7 +495,7 @@ class SmileyCSVImporter {
         
         // 新規挿入
         $sql = "INSERT INTO orders (
-                    batch_id, company_id, department_id, user_id, supplier_id, product_id,
+                    import_batch_id, company_id, department_id, user_id, supplier_id, product_id,
                     delivery_date, delivery_time, quantity, unit_price, total_amount, 
                     notes, cooperation_code, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
@@ -533,148 +562,6 @@ class SmileyCSVImporter {
         } catch (Exception $e) {
             error_log("Import Error [{$batchId}]: {$errorMessage}");
         }
-    }
-    
-    /**
-     * バッチ処理（大容量CSV対応）
-     */
-    public function importLargeCSV($filePath, $options = []) {
-        set_time_limit(300); // 5分
-        ini_set('memory_limit', '256M');
-        
-        $startTime = microtime(true);
-        $batchId = 'LARGE_' . date('YmdHis') . '_' . uniqid();
-        
-        try {
-            $handle = fopen($filePath, 'r');
-            
-            if (!$handle) {
-                throw new Exception("ファイルを開けません: " . $filePath);
-            }
-            
-            // ヘッダー読み取り
-            $headers = fgetcsv($handle);
-            if (!$headers) {
-                throw new Exception("ヘッダー行が読み取れません");
-            }
-            
-            $batch = [];
-            $rowCount = 0;
-            $totalSuccess = 0;
-            $totalErrors = 0;
-            
-            while (($row = fgetcsv($handle)) !== FALSE) {
-                $rowCount++;
-                
-                // データ正規化
-                $normalizedRow = $this->normalizeSingleRow($headers, $row, $rowCount);
-                $batch[] = $normalizedRow;
-                
-                // バッチサイズに達したら処理
-                if (count($batch) >= $this->batchSize) {
-                    $result = $this->processBatch($batch, $batchId);
-                    $totalSuccess += $result['success'];
-                    $totalErrors += $result['errors'];
-                    $batch = [];
-                    
-                    // メモリクリア
-                    if ($rowCount % 5000 === 0) {
-                        gc_collect_cycles();
-                    }
-                }
-            }
-            
-            // 残りのデータを処理
-            if (!empty($batch)) {
-                $result = $this->processBatch($batch, $batchId);
-                $totalSuccess += $result['success'];
-                $totalErrors += $result['errors'];
-            }
-            
-            fclose($handle);
-            
-            // 処理結果ログ
-            $processingTime = round(microtime(true) - $startTime, 2);
-            $this->logLargeImport($batchId, $filePath, $rowCount, $totalSuccess, $totalErrors, $processingTime);
-            
-            return [
-                'success' => true,
-                'batch_id' => $batchId,
-                'stats' => [
-                    'total' => $rowCount,
-                    'success' => $totalSuccess,
-                    'errors' => $totalErrors
-                ],
-                'processing_time' => $processingTime
-            ];
-            
-        } catch (Exception $e) {
-            $this->logError($batchId, $e->getMessage());
-            throw new Exception("大容量CSVインポート処理エラー: " . $e->getMessage());
-        }
-    }
-    
-    /**
-     * 単一行正規化
-     */
-    private function normalizeSingleRow($headers, $row, $rowNumber) {
-        $normalizedRow = [
-            'row_number' => $rowNumber + 1,
-            'raw_data' => $row
-        ];
-        
-        foreach ($headers as $index => $header) {
-            $normalizedHeader = trim($header);
-            $mappedField = $this->fieldMapping[$normalizedHeader] ?? null;
-            
-            if ($mappedField) {
-                $normalizedRow[$mappedField] = trim($row[$index] ?? '');
-            }
-        }
-        
-        return $normalizedRow;
-    }
-    
-    /**
-     * バッチ処理
-     */
-    private function processBatch($batch, $batchId) {
-        $validationResult = $this->validateData($batch);
-        
-        if (!empty($validationResult['valid_data'])) {
-            $importResult = $this->importToDatabase($validationResult['valid_data'], $batchId);
-            return [
-                'success' => $importResult['success'],
-                'errors' => count($validationResult['errors'])
-            ];
-        }
-        
-        return [
-            'success' => 0,
-            'errors' => count($validationResult['errors'])
-        ];
-    }
-    
-    /**
-     * 大容量インポートログ記録
-     */
-    private function logLargeImport($batchId, $filePath, $totalRecords, $successRecords, $errorRecords, $processingTime) {
-        $fileName = basename($filePath);
-        $fileSize = filesize($filePath);
-        
-        $sql = "INSERT INTO import_logs (
-                    batch_id, file_name, file_type, file_size, encoding,
-                    total_records, success_records, error_records, duplicate_records,
-                    import_start, import_end, status, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        
-        $status = $errorRecords > 0 ? 'completed_with_errors' : 'completed';
-        
-        $this->db->query($sql, [
-            $batchId, $fileName, 'smiley_large_csv', $fileSize, 'UTF-8',
-            $totalRecords, $successRecords, $errorRecords, 0,
-            date('Y-m-d H:i:s'), date('Y-m-d H:i:s'), $status, 'system'
-        ]);
     }
 }
 ?>
