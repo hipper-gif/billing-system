@@ -1,16 +1,17 @@
 <?php
 /**
- * Smiley配食事業専用CSVインポーター（完全修正版）
- * 注文データ未反映問題対応
+ * Smiley配食事業専用CSVインポーター
+ * 23フィールドCSV対応・階層データ自動生成
  */
 class SmileyCSVImporter {
     private $db;
     private $allowedEncodings = ['SJIS-win', 'UTF-8', 'UTF-8-BOM'];
+    private $batchSize = 1000;
     
     // CSVフィールドマッピング（Smiley配食事業仕様）
     private $fieldMapping = [
         '法人CD' => 'corporation_code',
-        '法人名' => 'corporation_name',
+        '法人名' => 'corporation_name', 
         '事業所CD' => 'company_code',      // 実際：配達先企業コード
         '事業所名' => 'company_name',      // 実際：配達先企業名
         '給食業者CD' => 'supplier_code',
@@ -34,12 +35,8 @@ class SmileyCSVImporter {
         '連携CD' => 'cooperation_code'
     ];
     
-    public function __construct($db = null) {
-        if ($db instanceof Database) {
-            $this->db = $db;
-        } else {
-            $this->db = Database::getInstance();
-        }
+    public function __construct(Database $db) {
+        $this->db = $db;
     }
     
     /**
@@ -50,14 +47,13 @@ class SmileyCSVImporter {
         $batchId = 'BATCH_' . date('YmdHis') . '_' . uniqid();
         
         try {
-            // 1. エンコーディング検出・変換
+            // 1. エンコーディング検出
             $encoding = $this->detectEncoding($filePath);
-            $convertedData = $this->convertEncoding($filePath, $encoding);
             
-            // 2. CSV解析
-            $rawData = $this->parseCsv($convertedData);
+            // 2. CSV読み込み
+            $rawData = $this->readCsv($filePath, $encoding);
             
-            // 3. データ正規化
+            // 3. データ変換・正規化
             $normalizedData = $this->normalizeData($rawData);
             
             // 4. データ検証
@@ -66,17 +62,17 @@ class SmileyCSVImporter {
             // 5. データベース登録
             $importResult = $this->importToDatabase($validationResult['valid_data'], $batchId);
             
-            // 6. ログ記録
+            // 6. インポートログ記録
             $this->logImport($batchId, $filePath, $importResult, $validationResult, $startTime);
             
             return [
                 'success' => true,
                 'batch_id' => $batchId,
-                'summary' => [
-                    'total_records' => $importResult['total'],
-                    'success_records' => $importResult['success'],
-                    'error_records' => count($validationResult['errors']),
-                    'duplicate_records' => $importResult['duplicate']
+                'stats' => [
+                    'total' => count($normalizedData),
+                    'success' => $importResult['success'],
+                    'duplicate' => $importResult['duplicate'],
+                    'errors' => count($validationResult['errors'])
                 ],
                 'errors' => $validationResult['errors'],
                 'processing_time' => round(microtime(true) - $startTime, 2)
@@ -84,7 +80,7 @@ class SmileyCSVImporter {
             
         } catch (Exception $e) {
             $this->logError($batchId, $e->getMessage());
-            throw new Exception("CSVインポートエラー: " . $e->getMessage());
+            throw new Exception("CSVインポート処理エラー: " . $e->getMessage());
         }
     }
     
@@ -92,55 +88,42 @@ class SmileyCSVImporter {
      * エンコーディング検出
      */
     private function detectEncoding($filePath) {
-        $content = file_get_contents($filePath);
+        $data = file_get_contents($filePath, false, null, 0, 8192);
         
-        // BOM検出
-        if (substr($content, 0, 3) === "\xEF\xBB\xBF") {
+        // BOMチェック
+        if (substr($data, 0, 3) === "\xEF\xBB\xBF") {
             return 'UTF-8-BOM';
         }
         
-        // 文字エンコーディング検出
-        $detected = mb_detect_encoding($content, ['UTF-8', 'SJIS-win', 'EUC-JP'], true);
+        // エンコーディング検出
+        $encoding = mb_detect_encoding($data, $this->allowedEncodings, true);
         
-        return $detected ?: 'SJIS-win'; // デフォルトはSJIS-win
+        return $encoding ?: 'SJIS-win';
     }
     
     /**
-     * エンコーディング変換
+     * CSV読み込み
      */
-    private function convertEncoding($filePath, $encoding) {
-        $content = file_get_contents($filePath);
-        
-        // BOM除去
-        if ($encoding === 'UTF-8-BOM') {
-            $content = substr($content, 3);
-            $encoding = 'UTF-8';
-        }
+    private function readCsv($filePath, $encoding) {
+        $data = file_get_contents($filePath);
         
         // UTF-8に変換
-        if ($encoding !== 'UTF-8') {
-            $content = mb_convert_encoding($content, 'UTF-8', $encoding);
+        if ($encoding === 'UTF-8-BOM') {
+            $data = substr($data, 3); // BOM除去
+        } elseif ($encoding !== 'UTF-8') {
+            $data = mb_convert_encoding($data, 'UTF-8', $encoding);
         }
         
-        return $content;
-    }
-    
-    /**
-     * CSV解析
-     */
-    private function parseCsv($content) {
-        $lines = explode("\n", $content);
-        $data = [];
+        // CSVパース
+        $lines = explode("\n", $data);
+        $csvData = [];
         
         foreach ($lines as $line) {
-            $line = trim($line);
-            if (empty($line)) continue;
-            
-            $row = str_getcsv($line);
-            $data[] = $row;
+            if (trim($line) === '') continue;
+            $csvData[] = str_getcsv($line);
         }
         
-        return $data;
+        return $csvData;
     }
     
     /**
@@ -148,25 +131,34 @@ class SmileyCSVImporter {
      */
     private function normalizeData($rawData) {
         if (empty($rawData)) {
-            throw new Exception('CSVデータが空です');
+            throw new Exception("CSVデータが空です");
         }
         
         $headers = array_shift($rawData);
         $normalizedData = [];
         
         foreach ($rawData as $rowIndex => $row) {
-            $normalizedRow = [];
-            
-            foreach ($headers as $colIndex => $header) {
-                $value = isset($row[$colIndex]) ? trim($row[$colIndex]) : '';
-                $fieldName = $this->fieldMapping[$header] ?? $header;
-                $normalizedRow[$fieldName] = $value;
+            if (count($row) < count($headers)) {
+                // 足りない列を空文字で補完
+                $row = array_pad($row, count($headers), '');
             }
             
-            // 必須フィールドチェック
-            if (!empty($normalizedRow['user_code']) && !empty($normalizedRow['product_code'])) {
-                $normalizedData[] = $normalizedRow;
+            $normalizedRow = [
+                'row_number' => $rowIndex + 2, // ヘッダー行+1
+                'raw_data' => $row
+            ];
+            
+            // フィールドマッピング
+            foreach ($headers as $index => $header) {
+                $normalizedHeader = trim($header);
+                $mappedField = $this->fieldMapping[$normalizedHeader] ?? null;
+                
+                if ($mappedField) {
+                    $normalizedRow[$mappedField] = trim($row[$index] ?? '');
+                }
             }
+            
+            $normalizedData[] = $normalizedRow;
         }
         
         return $normalizedData;
@@ -179,56 +171,51 @@ class SmileyCSVImporter {
         $validData = [];
         $errors = [];
         
-        foreach ($data as $index => $row) {
+        foreach ($data as $row) {
             $rowErrors = [];
             
-            // 必須フィールド検証
-            if (empty($row['user_code'])) {
-                $rowErrors[] = '利用者コードが空です';
-            }
-            
-            if (empty($row['product_code'])) {
-                $rowErrors[] = '商品コードが空です';
-            }
-            
-            if (empty($row['delivery_date'])) {
-                $rowErrors[] = '配達日が空です';
-            }
-            
-            // 日付フォーマット検証
-            if (!empty($row['delivery_date'])) {
-                $date = DateTime::createFromFormat('Y-m-d', $row['delivery_date']);
-                if (!$date) {
-                    $date = DateTime::createFromFormat('Y/m/d', $row['delivery_date']);
-                    if ($date) {
-                        $row['delivery_date'] = $date->format('Y-m-d');
-                    } else {
-                        $rowErrors[] = '配達日の形式が正しくありません';
-                    }
+            // 必須フィールドチェック
+            $requiredFields = ['corporation_name', 'company_name', 'delivery_date', 'user_name', 'product_name'];
+            foreach ($requiredFields as $field) {
+                if (empty($row[$field])) {
+                    $rowErrors[] = "必須フィールド '{$field}' が空です";
                 }
             }
             
-            // 数値検証
+            // Smiley配食事業チェック
+            if (!empty($row['corporation_name']) && $row['corporation_name'] !== '株式会社Smiley') {
+                $rowErrors[] = "法人名が 'Smiley' 以外です: " . $row['corporation_name'];
+            }
+            
+            // 日付フォーマットチェック
+            if (!empty($row['delivery_date'])) {
+                $date = DateTime::createFromFormat('Y-m-d', $row['delivery_date']);
+                if (!$date || $date->format('Y-m-d') !== $row['delivery_date']) {
+                    $rowErrors[] = "配達日の形式が不正です: " . $row['delivery_date'];
+                }
+            }
+            
+            // 数値フィールドチェック
             if (!empty($row['quantity']) && !is_numeric($row['quantity'])) {
-                $rowErrors[] = '数量は数値である必要があります';
+                $rowErrors[] = "数量が数値ではありません: " . $row['quantity'];
             }
             
             if (!empty($row['unit_price']) && !is_numeric($row['unit_price'])) {
-                $rowErrors[] = '単価は数値である必要があります';
+                $rowErrors[] = "単価が数値ではありません: " . $row['unit_price'];
             }
             
             if (!empty($row['total_amount']) && !is_numeric($row['total_amount'])) {
-                $rowErrors[] = '金額は数値である必要があります';
+                $rowErrors[] = "金額が数値ではありません: " . $row['total_amount'];
             }
             
-            if (empty($rowErrors)) {
-                $validData[] = $row;
-            } else {
+            if (!empty($rowErrors)) {
                 $errors[] = [
-                    'row' => $index + 2, // ヘッダー行を考慮
+                    'row' => $row['row_number'],
                     'errors' => $rowErrors,
-                    'data' => $row
+                    'data' => $row['raw_data']
                 ];
+            } else {
+                $validData[] = $row;
             }
         }
         
@@ -239,327 +226,427 @@ class SmileyCSVImporter {
     }
     
     /**
-     * データベースへのインポート
+     * データベースインポート
      */
     private function importToDatabase($validData, $batchId) {
-        $total = count($validData);
-        $success = 0;
-        $duplicate = 0;
+        $this->db->beginTransaction();
         
-        foreach ($validData as $row) {
-            try {
-                // マスタデータ作成/取得
-                $this->ensureMasterData($row);
+        try {
+            $successCount = 0;
+            $duplicateCount = 0;
+            
+            foreach ($validData as $row) {
+                // 1. 配達先企業確保
+                $companyId = $this->ensureCompany($row);
                 
-                // 注文データ挿入
-                $this->insertOrderData($row, $batchId);
-                $success++;
+                // 2. 部署確保
+                $departmentId = $this->ensureDepartment($row, $companyId);
                 
-            } catch (Exception $e) {
-                // 重複エラーの場合
-                if (strpos($e->getMessage(), 'Duplicate') !== false) {
-                    $duplicate++;
+                // 3. 給食業者確保
+                $supplierId = $this->ensureSupplier($row);
+                
+                // 4. 商品確保
+                $productId = $this->ensureProduct($row, $supplierId);
+                
+                // 5. 利用者確保
+                $userId = $this->ensureUser($row, $companyId, $departmentId);
+                
+                // 6. 注文データ挿入
+                $orderId = $this->insertOrderData($row, $batchId, $companyId, $departmentId, $userId, $productId, $supplierId);
+                
+                if ($orderId) {
+                    $successCount++;
                 } else {
-                    error_log("Order insert error: " . $e->getMessage());
+                    $duplicateCount++;
                 }
             }
-        }
-        
-        return [
-            'total' => $total,
-            'success' => $success,
-            'duplicate' => $duplicate
-        ];
-    }
-    
-    /**
-     * マスタデータ確保
-     */
-    private function ensureMasterData($row) {
-        // 企業データ確保
-        if (!empty($row['company_code'])) {
-            $this->ensureCompany($row);
-        }
-        
-        // 部署データ確保
-        if (!empty($row['department_code']) && !empty($row['company_code'])) {
-            $this->ensureDepartment($row);
-        }
-        
-        // 利用者データ確保
-        if (!empty($row['user_code'])) {
-            $this->ensureUser($row);
-        }
-        
-        // 商品データ確保
-        if (!empty($row['product_code'])) {
-            $this->ensureProduct($row);
-        }
-        
-        // 業者データ確保
-        if (!empty($row['supplier_code'])) {
-            $this->ensureSupplier($row);
+            
+            $this->db->commit();
+            
+            return [
+                'success' => $successCount,
+                'duplicate' => $duplicateCount
+            ];
+            
+        } catch (Exception $e) {
+            $this->db->rollback();
+            throw $e;
         }
     }
     
     /**
-     * 企業データ確保
+     * 配達先企業確保
      */
     private function ensureCompany($row) {
-        $sql = "INSERT IGNORE INTO companies (company_code, company_name, created_at, updated_at) 
-                VALUES (?, ?, NOW(), NOW())";
+        $companyCode = $row['company_code'] ?? '';
+        $companyName = $row['company_name'] ?? '';
         
-        $this->db->query($sql, [
-            $row['company_code'],
-            $row['company_name'] ?? $row['company_code']
-        ]);
-    }
-    
-    /**
-     * 部署データ確保
-     */
-    private function ensureDepartment($row) {
-        $companyId = $this->getCompanyId($row['company_code']);
-        
-        if ($companyId) {
-            $sql = "INSERT IGNORE INTO departments (company_id, department_code, department_name, created_at, updated_at) 
-                    VALUES (?, ?, ?, NOW(), NOW())";
-            
-            $this->db->query($sql, [
-                $companyId,
-                $row['department_code'],
-                $row['department_name'] ?? $row['department_code']
-            ]);
-        }
-    }
-    
-    /**
-     * 利用者データ確保
-     */
-    private function ensureUser($row) {
-        $companyId = null;
-        $departmentId = null;
-        
-        if (!empty($row['company_code'])) {
-            $companyId = $this->getCompanyId($row['company_code']);
+        if (empty($companyCode) || empty($companyName)) {
+            throw new Exception("企業コードまたは企業名が空です");
         }
         
-        if (!empty($row['department_code']) && $companyId) {
-            $departmentId = $this->getDepartmentId($companyId, $row['department_code']);
-        }
-        
-        $sql = "INSERT INTO users (user_code, user_name, company_id, department_id, employee_type_code, employee_type_name, created_at, updated_at) 
-                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
-                ON DUPLICATE KEY UPDATE 
-                user_name = VALUES(user_name),
-                company_id = VALUES(company_id),
-                department_id = VALUES(department_id),
-                employee_type_code = VALUES(employee_type_code),
-                employee_type_name = VALUES(employee_type_name),
-                updated_at = NOW()";
-        
-        $this->db->query($sql, [
-            $row['user_code'],
-            $row['user_name'] ?? $row['user_code'],
-            $companyId,
-            $departmentId,
-            $row['employee_type_code'] ?? null,
-            $row['employee_type_name'] ?? null
-        ]);
-    }
-    
-    /**
-     * 商品データ確保
-     */
-    private function ensureProduct($row) {
-        $sql = "INSERT IGNORE INTO products (product_code, product_name, category, created_at, updated_at) 
-                VALUES (?, ?, ?, NOW(), NOW())";
-        
-        $this->db->query($sql, [
-            $row['product_code'],
-            $row['product_name'] ?? $row['product_code'],
-            $row['category_name'] ?? null
-        ]);
-    }
-    
-    /**
-     * 業者データ確保
-     */
-    private function ensureSupplier($row) {
-        $sql = "INSERT IGNORE INTO suppliers (supplier_code, supplier_name, created_at, updated_at) 
-                VALUES (?, ?, NOW(), NOW())";
-        
-        $this->db->query($sql, [
-            $row['supplier_code'],
-            $row['supplier_name'] ?? $row['supplier_code']
-        ]);
-    }
-    
-    /**
-     * 注文データ挿入 - 修正版
-     */
-    private function insertOrderData($row, $batchId) {
-        // 関連IDを取得
-        $userId = $this->getUserId($row['user_code']);
-        $companyId = !empty($row['company_code']) ? $this->getCompanyId($row['company_code']) : null;
-        $departmentId = (!empty($row['department_code']) && $companyId) ? $this->getDepartmentId($companyId, $row['department_code']) : null;
-        $productId = !empty($row['product_code']) ? $this->getProductId($row['product_code']) : null;
-        $supplierId = !empty($row['supplier_code']) ? $this->getSupplierId($row['supplier_code']) : null;
-        
-        // order_dateのデフォルト値設定
-        $orderDate = !empty($row['order_date']) ? $row['order_date'] : $row['delivery_date'];
-        
-        // デフォルト値設定
-        $quantity = !empty($row['quantity']) ? intval($row['quantity']) : 1;
-        $unitPrice = !empty($row['unit_price']) ? floatval($row['unit_price']) : 0.00;
-        $totalAmount = !empty($row['total_amount']) ? floatval($row['total_amount']) : ($quantity * $unitPrice);
-        
-        // 重複チェック用ユニークキー
-        $uniqueKey = $row['user_code'] . '|' . $row['delivery_date'] . '|' . $row['product_code'] . '|' . ($row['cooperation_code'] ?? '');
-        
-        $sql = "INSERT INTO orders (
-                    order_date, delivery_date, delivery_time,
-                    user_id, user_code, user_name,
-                    company_id, company_code, company_name,
-                    department_id, department_code, department_name,
-                    product_id, product_code, product_name,
-                    category_code, category_name,
-                    supplier_id, supplier_code, supplier_name,
-                    corporation_code, corporation_name,
-                    employee_type_code, employee_type_name,
-                    quantity, unit_price, total_amount,
-                    notes, cooperation_code, import_batch_id,
-                    created_at, updated_at
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()
-                )";
-        
-        $params = [
-            $orderDate,
-            $row['delivery_date'],
-            $row['delivery_time'] ?? null,
-            $userId,
-            $row['user_code'],
-            $row['user_name'] ?? '',
-            $companyId,
-            $row['company_code'] ?? null,
-            $row['company_name'] ?? null,
-            $departmentId,
-            $row['department_code'] ?? null,
-            $row['department_name'] ?? null,
-            $productId,
-            $row['product_code'],
-            $row['product_name'] ?? '',
-            $row['category_code'] ?? null,
-            $row['category_name'] ?? null,
-            $supplierId,
-            $row['supplier_code'] ?? null,
-            $row['supplier_name'] ?? null,
-            $row['corporation_code'] ?? null,
-            $row['corporation_name'] ?? null,
-            $row['employee_type_code'] ?? null,
-            $row['employee_type_name'] ?? null,
-            $quantity,
-            $unitPrice,
-            $totalAmount,
-            $row['notes'] ?? null,
-            $row['cooperation_code'] ?? null,
-            $batchId
-        ];
-        
-        $this->db->query($sql, $params);
-    }
-    
-    /**
-     * 企業ID取得
-     */
-    private function getCompanyId($companyCode) {
+        // 既存チェック
         $sql = "SELECT id FROM companies WHERE company_code = ?";
         $stmt = $this->db->query($sql, [$companyCode]);
-        $result = $stmt->fetch();
-        return $result ? $result['id'] : null;
+        $existingId = $stmt->fetchColumn();
+        
+        if ($existingId) {
+            return $existingId;
+        }
+        
+        // 新規作成
+        $sql = "INSERT INTO companies (company_code, company_name, created_at, updated_at) 
+                VALUES (?, ?, NOW(), NOW())";
+        
+        $this->db->query($sql, [$companyCode, $companyName]);
+        return $this->db->lastInsertId();
     }
     
     /**
-     * 部署ID取得
+     * 部署確保
      */
-    private function getDepartmentId($companyId, $departmentCode) {
-        $sql = "SELECT id FROM departments WHERE company_id = ? AND department_code = ?";
-        $stmt = $this->db->query($sql, [$companyId, $departmentCode]);
-        $result = $stmt->fetch();
-        return $result ? $result['id'] : null;
+    private function ensureDepartment($row, $companyId) {
+        $departmentCode = $row['department_code'] ?? '';
+        $departmentName = $row['department_name'] ?? '';
+        
+        if (empty($departmentCode) || empty($departmentName)) {
+            throw new Exception("部署コードまたは部署名が空です");
+        }
+        
+        // 既存チェック
+        $sql = "SELECT id FROM departments WHERE department_code = ? AND company_id = ?";
+        $stmt = $this->db->query($sql, [$departmentCode, $companyId]);
+        $existingId = $stmt->fetchColumn();
+        
+        if ($existingId) {
+            return $existingId;
+        }
+        
+        // 新規作成
+        $sql = "INSERT INTO departments (company_id, department_code, department_name, created_at, updated_at) 
+                VALUES (?, ?, ?, NOW(), NOW())";
+        
+        $this->db->query($sql, [$companyId, $departmentCode, $departmentName]);
+        return $this->db->lastInsertId();
     }
     
     /**
-     * 利用者ID取得
+     * 給食業者確保
      */
-    private function getUserId($userCode) {
-        $sql = "SELECT id FROM users WHERE user_code = ?";
-        $stmt = $this->db->query($sql, [$userCode]);
-        $result = $stmt->fetch();
-        return $result ? $result['id'] : null;
-    }
-    
-    /**
-     * 商品ID取得
-     */
-    private function getProductId($productCode) {
-        $sql = "SELECT id FROM products WHERE product_code = ?";
-        $stmt = $this->db->query($sql, [$productCode]);
-        $result = $stmt->fetch();
-        return $result ? $result['id'] : null;
-    }
-    
-    /**
-     * 業者ID取得
-     */
-    private function getSupplierId($supplierCode) {
+    private function ensureSupplier($row) {
+        $supplierCode = $row['supplier_code'] ?? '';
+        $supplierName = $row['supplier_name'] ?? '';
+        
+        if (empty($supplierCode) || empty($supplierName)) {
+            throw new Exception("給食業者コードまたは給食業者名が空です");
+        }
+        
+        // 既存チェック
         $sql = "SELECT id FROM suppliers WHERE supplier_code = ?";
         $stmt = $this->db->query($sql, [$supplierCode]);
-        $result = $stmt->fetch();
-        return $result ? $result['id'] : null;
+        $existingId = $stmt->fetchColumn();
+        
+        if ($existingId) {
+            return $existingId;
+        }
+        
+        // 新規作成
+        $sql = "INSERT INTO suppliers (supplier_code, supplier_name, created_at, updated_at) 
+                VALUES (?, ?, NOW(), NOW())";
+        
+        $this->db->query($sql, [$supplierCode, $supplierName]);
+        return $this->db->lastInsertId();
+    }
+    
+    /**
+     * 商品確保
+     */
+    private function ensureProduct($row, $supplierId) {
+        $productCode = $row['product_code'] ?? '';
+        $productName = $row['product_name'] ?? '';
+        $categoryCode = $row['category_code'] ?? '';
+        $categoryName = $row['category_name'] ?? '';
+        $unitPrice = $row['unit_price'] ?? 0;
+        
+        if (empty($productCode) || empty($productName)) {
+            throw new Exception("商品コードまたは商品名が空です");
+        }
+        
+        // 既存チェック
+        $sql = "SELECT id FROM products WHERE product_code = ? AND supplier_id = ?";
+        $stmt = $this->db->query($sql, [$productCode, $supplierId]);
+        $existingId = $stmt->fetchColumn();
+        
+        if ($existingId) {
+            return $existingId;
+        }
+        
+        // 新規作成
+        $sql = "INSERT INTO products (supplier_id, product_code, product_name, category_code, category_name, unit_price, created_at, updated_at) 
+                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())";
+        
+        $this->db->query($sql, [$supplierId, $productCode, $productName, $categoryCode, $categoryName, $unitPrice]);
+        return $this->db->lastInsertId();
+    }
+    
+    /**
+     * 利用者確保
+     */
+    private function ensureUser($row, $companyId, $departmentId) {
+        $userCode = $row['user_code'] ?? '';
+        $userName = $row['user_name'] ?? '';
+        $employeeTypeCode = $row['employee_type_code'] ?? '';
+        $employeeTypeName = $row['employee_type_name'] ?? '';
+        
+        if (empty($userCode) || empty($userName)) {
+            throw new Exception("利用者コードまたは利用者名が空です");
+        }
+        
+        // 既存チェック
+        $sql = "SELECT id FROM users WHERE user_code = ? AND company_id = ?";
+        $stmt = $this->db->query($sql, [$userCode, $companyId]);
+        $existingId = $stmt->fetchColumn();
+        
+        if ($existingId) {
+            return $existingId;
+        }
+        
+        // 新規作成
+        $sql = "INSERT INTO users (company_id, department_id, user_code, user_name, employee_type_code, employee_type_name, created_at, updated_at) 
+                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())";
+        
+        $this->db->query($sql, [$companyId, $departmentId, $userCode, $userName, $employeeTypeCode, $employeeTypeName]);
+        return $this->db->lastInsertId();
+    }
+    
+    /**
+     * 注文データ挿入
+     */
+    private function insertOrderData($row, $batchId, $companyId, $departmentId, $userId, $productId, $supplierId) {
+        // 重複チェック
+        $sql = "SELECT id FROM orders WHERE user_id = ? AND product_id = ? AND delivery_date = ? AND delivery_time = ?";
+        $stmt = $this->db->query($sql, [
+            $userId,
+            $productId,
+            $row['delivery_date'],
+            $row['delivery_time'] ?? ''
+        ]);
+        
+        if ($stmt->fetchColumn()) {
+            return false; // 重複
+        }
+        
+        // 新規挿入
+        $sql = "INSERT INTO orders (
+                    batch_id, company_id, department_id, user_id, supplier_id, product_id,
+                    delivery_date, delivery_time, quantity, unit_price, total_amount, 
+                    notes, cooperation_code, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+        
+        $this->db->query($sql, [
+            $batchId,
+            $companyId,
+            $departmentId,
+            $userId,
+            $supplierId,
+            $productId,
+            $row['delivery_date'],
+            $row['delivery_time'] ?? '',
+            $row['quantity'] ?? 1,
+            $row['unit_price'] ?? 0,
+            $row['total_amount'] ?? 0,
+            $row['notes'] ?? '',
+            $row['cooperation_code'] ?? ''
+        ]);
+        
+        return $this->db->lastInsertId();
     }
     
     /**
      * インポートログ記録
      */
     private function logImport($batchId, $filePath, $importResult, $validationResult, $startTime) {
-        try {
-            $fileName = basename($filePath);
-            $fileSize = filesize($filePath);
-            $processingTime = round(microtime(true) - $startTime, 2);
-            
-            $sql = "INSERT INTO import_logs (
-                        batch_id, file_name, file_type, file_size, encoding,
-                        total_records, success_records, error_records, duplicate_records,
-                        import_start, import_end, status, error_details, created_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            
-            $errorDetails = !empty($validationResult['errors']) ? json_encode($validationResult['errors'], JSON_UNESCAPED_UNICODE) : null;
-            $status = empty($validationResult['errors']) ? 'completed' : 'completed_with_errors';
-            
-            $this->db->query($sql, [
-                $batchId, $fileName, 'smiley_meal_order', $fileSize, 'UTF-8',
-                $importResult['total'], $importResult['success'], count($validationResult['errors']), $importResult['duplicate'],
-                date('Y-m-d H:i:s', $startTime), date('Y-m-d H:i:s'), $status, $errorDetails, 'system'
-            ]);
-        } catch (Exception $e) {
-            error_log("Import log error: " . $e->getMessage());
-        }
+        $fileName = basename($filePath);
+        $fileSize = filesize($filePath);
+        $processingTime = round(microtime(true) - $startTime, 2);
+        
+        $sql = "INSERT INTO import_logs (
+                    batch_id, file_name, file_type, file_size, encoding,
+                    total_records, success_records, error_records, duplicate_records,
+                    import_start, import_end, status, error_details, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        
+        $errorDetails = !empty($validationResult['errors']) ? json_encode($validationResult['errors'], JSON_UNESCAPED_UNICODE) : null;
+        $status = empty($validationResult['errors']) ? 'completed' : 'completed_with_errors';
+        
+        $this->db->query($sql, [
+            $batchId, $fileName, 'smiley_meal_order', $fileSize, 'UTF-8',
+            $importResult['success'] + count($validationResult['errors']), 
+            $importResult['success'], 
+            count($validationResult['errors']), 
+            $importResult['duplicate'],
+            date('Y-m-d H:i:s', $startTime), 
+            date('Y-m-d H:i:s'), 
+            $status, 
+            $errorDetails, 
+            'system'
+        ]);
     }
     
     /**
      * エラーログ記録
      */
     private function logError($batchId, $errorMessage) {
+        $sql = "INSERT INTO import_logs (batch_id, status, error_details, created_at) 
+                VALUES (?, 'failed', ?, NOW())";
+        
         try {
-            $sql = "INSERT INTO import_logs (batch_id, status, error_details, created_at) 
-                    VALUES (?, 'failed', ?, NOW())";
-            
             $this->db->query($sql, [$batchId, $errorMessage]);
         } catch (Exception $e) {
             error_log("Import Error [{$batchId}]: {$errorMessage}");
         }
+    }
+    
+    /**
+     * バッチ処理（大容量CSV対応）
+     */
+    public function importLargeCSV($filePath, $options = []) {
+        set_time_limit(300); // 5分
+        ini_set('memory_limit', '256M');
+        
+        $startTime = microtime(true);
+        $batchId = 'LARGE_' . date('YmdHis') . '_' . uniqid();
+        
+        try {
+            $handle = fopen($filePath, 'r');
+            
+            if (!$handle) {
+                throw new Exception("ファイルを開けません: " . $filePath);
+            }
+            
+            // ヘッダー読み取り
+            $headers = fgetcsv($handle);
+            if (!$headers) {
+                throw new Exception("ヘッダー行が読み取れません");
+            }
+            
+            $batch = [];
+            $rowCount = 0;
+            $totalSuccess = 0;
+            $totalErrors = 0;
+            
+            while (($row = fgetcsv($handle)) !== FALSE) {
+                $rowCount++;
+                
+                // データ正規化
+                $normalizedRow = $this->normalizeSingleRow($headers, $row, $rowCount);
+                $batch[] = $normalizedRow;
+                
+                // バッチサイズに達したら処理
+                if (count($batch) >= $this->batchSize) {
+                    $result = $this->processBatch($batch, $batchId);
+                    $totalSuccess += $result['success'];
+                    $totalErrors += $result['errors'];
+                    $batch = [];
+                    
+                    // メモリクリア
+                    if ($rowCount % 5000 === 0) {
+                        gc_collect_cycles();
+                    }
+                }
+            }
+            
+            // 残りのデータを処理
+            if (!empty($batch)) {
+                $result = $this->processBatch($batch, $batchId);
+                $totalSuccess += $result['success'];
+                $totalErrors += $result['errors'];
+            }
+            
+            fclose($handle);
+            
+            // 処理結果ログ
+            $processingTime = round(microtime(true) - $startTime, 2);
+            $this->logLargeImport($batchId, $filePath, $rowCount, $totalSuccess, $totalErrors, $processingTime);
+            
+            return [
+                'success' => true,
+                'batch_id' => $batchId,
+                'stats' => [
+                    'total' => $rowCount,
+                    'success' => $totalSuccess,
+                    'errors' => $totalErrors
+                ],
+                'processing_time' => $processingTime
+            ];
+            
+        } catch (Exception $e) {
+            $this->logError($batchId, $e->getMessage());
+            throw new Exception("大容量CSVインポート処理エラー: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * 単一行正規化
+     */
+    private function normalizeSingleRow($headers, $row, $rowNumber) {
+        $normalizedRow = [
+            'row_number' => $rowNumber + 1,
+            'raw_data' => $row
+        ];
+        
+        foreach ($headers as $index => $header) {
+            $normalizedHeader = trim($header);
+            $mappedField = $this->fieldMapping[$normalizedHeader] ?? null;
+            
+            if ($mappedField) {
+                $normalizedRow[$mappedField] = trim($row[$index] ?? '');
+            }
+        }
+        
+        return $normalizedRow;
+    }
+    
+    /**
+     * バッチ処理
+     */
+    private function processBatch($batch, $batchId) {
+        $validationResult = $this->validateData($batch);
+        
+        if (!empty($validationResult['valid_data'])) {
+            $importResult = $this->importToDatabase($validationResult['valid_data'], $batchId);
+            return [
+                'success' => $importResult['success'],
+                'errors' => count($validationResult['errors'])
+            ];
+        }
+        
+        return [
+            'success' => 0,
+            'errors' => count($validationResult['errors'])
+        ];
+    }
+    
+    /**
+     * 大容量インポートログ記録
+     */
+    private function logLargeImport($batchId, $filePath, $totalRecords, $successRecords, $errorRecords, $processingTime) {
+        $fileName = basename($filePath);
+        $fileSize = filesize($filePath);
+        
+        $sql = "INSERT INTO import_logs (
+                    batch_id, file_name, file_type, file_size, encoding,
+                    total_records, success_records, error_records, duplicate_records,
+                    import_start, import_end, status, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        
+        $status = $errorRecords > 0 ? 'completed_with_errors' : 'completed';
+        
+        $this->db->query($sql, [
+            $batchId, $fileName, 'smiley_large_csv', $fileSize, 'UTF-8',
+            $totalRecords, $successRecords, $errorRecords, 0,
+            date('Y-m-d H:i:s'), date('Y-m-d H:i:s'), $status, 'system'
+        ]);
     }
 }
 ?>
