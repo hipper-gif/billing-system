@@ -70,7 +70,7 @@ try {
     // Step 4: データベース接続テスト
     if (class_exists('Database')) {
         try {
-            $db = new Database();
+            $db = Database::getInstance();
             $testQuery = "SELECT 1 as test";
             $stmt = $db->query($testQuery);
             $result = $stmt->fetch();
