@@ -35,15 +35,19 @@ try {
                     }
                 }
                 
-                // 2. import_logs確認（CSVインポート履歴）
-                $importLogs = $db->query("
-                    SELECT batch_id, file_name, total_records, success_records, error_records, 
-                           status, import_start, error_details 
-                    FROM import_logs 
-                    ORDER BY import_start DESC 
-                    LIMIT 5
-                ");
-                $diagnosis['import_history'] = $importLogs->fetchAll();
+                // 2. import_logs確認（CSVインポート履歴）- 実テーブル構造対応
+                try {
+                    $importLogs = $db->query("
+                        SELECT batch_id, file_name, total_records, success_records, error_records, 
+                               status, created_at, error_details 
+                        FROM import_logs 
+                        ORDER BY created_at DESC 
+                        LIMIT 5
+                    ");
+                    $diagnosis['import_history'] = $importLogs->fetchAll();
+                } catch (Exception $e) {
+                    $diagnosis['import_history'] = 'ERROR: ' . $e->getMessage();
+                }
                 
                 // 3. users と companies/departments の関連確認
                 $userRelations = $db->query("
@@ -57,18 +61,40 @@ try {
                 $diagnosis['user_relations'] = $userRelations->fetch();
                 
                 // 4. orders テーブル構造確認
-                $ordersStructure = $db->query("DESCRIBE orders");
-                $diagnosis['orders_structure'] = $ordersStructure->fetchAll();
+                try {
+                    $ordersStructure = $db->query("DESCRIBE orders");
+                    $diagnosis['orders_structure'] = $ordersStructure->fetchAll();
+                } catch (Exception $e) {
+                    $diagnosis['orders_structure'] = 'ERROR: ' . $e->getMessage();
+                    
+                    // ordersテーブルが存在しない場合の対処
+                    $diagnosis['orders_table_exists'] = false;
+                    
+                    // 代替として、SHOW TABLES でテーブル一覧を確認
+                    try {
+                        $tablesStmt = $db->query("SHOW TABLES");
+                        $tables = $tablesStmt->fetchAll();
+                        $diagnosis['existing_tables'] = array_map(function($table) {
+                            return array_values($table)[0];
+                        }, $tables);
+                    } catch (Exception $e2) {
+                        $diagnosis['existing_tables'] = 'ERROR: ' . $e2->getMessage();
+                    }
+                }
                 
-                // 5. CSVインポートでエラーがあったか確認
-                $errorLogs = $db->query("
-                    SELECT batch_id, error_details, import_start 
-                    FROM import_logs 
-                    WHERE status LIKE '%error%' OR error_records > 0
-                    ORDER BY import_start DESC 
-                    LIMIT 3
-                ");
-                $diagnosis['import_errors'] = $errorLogs->fetchAll();
+                // 5. CSVインポートでエラーがあったか確認 - 実テーブル構造対応
+                try {
+                    $errorLogs = $db->query("
+                        SELECT batch_id, error_details, created_at 
+                        FROM import_logs 
+                        WHERE status LIKE '%error%' OR error_records > 0
+                        ORDER BY created_at DESC 
+                        LIMIT 3
+                    ");
+                    $diagnosis['import_errors'] = $errorLogs->fetchAll();
+                } catch (Exception $e) {
+                    $diagnosis['import_errors'] = 'ERROR: ' . $e->getMessage();
+                }
                 
                 echo json_encode([
                     'success' => true,
