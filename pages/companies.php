@@ -1,7 +1,12 @@
 <?php
 /**
- * 配達先企業管理画面
- * Smiley配食事業専用 - 実際のインポート済みデータを活用
+ * 配達先企業管理画面（修正版）
+ * Database統一対応版
+ * 
+ * 修正内容:
+ * 1. Database::getInstance() を使用
+ * 2. エラーハンドリング強化
+ * 3. Smiley配食事業専用UI
  */
 
 require_once '../config/database.php';
@@ -11,535 +16,500 @@ require_once '../classes/SecurityHelper.php';
 // セキュリティヘッダー設定
 SecurityHelper::setSecurityHeaders();
 
-try {
-    $db = Database::getInstance();
-    $pdo = $db->getConnection();
-    
-    // 検索条件の処理
-    $search_company = $_GET['search_company'] ?? '';
-    $search_period_start = $_GET['period_start'] ?? date('Y-m-01'); // 今月の1日
-    $search_period_end = $_GET['period_end'] ?? date('Y-m-t'); // 今月の末日
-    $page = max(1, intval($_GET['page'] ?? 1));
-    $per_page = 20;
-    $offset = ($page - 1) * $per_page;
-    
-    // 配達先企業一覧を取得（統計情報付き）
-    $where_conditions = [];
-    $params = [];
-    
-    if ($search_company) {
-        $where_conditions[] = "(c.company_name LIKE :search_company OR c.company_code LIKE :search_company)";
-        $params['search_company'] = '%' . $search_company . '%';
-    }
-    
-    $where_clause = $where_conditions ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
-    
-    // 企業一覧と統計情報を取得
-    $companies_sql = "
-        SELECT 
-            c.id,
-            c.company_code,
-            c.company_name,
-            c.company_address,
-            c.contact_person,
-            c.contact_phone,
-            c.contact_email,
-            c.billing_method,
-            c.is_active,
-            c.created_at,
-            -- 部署数
-            COUNT(DISTINCT d.id) as department_count,
-            -- 利用者数
-            COUNT(DISTINCT u.id) as user_count,
-            -- 期間内注文統計
-            COALESCE(stats.order_count, 0) as period_order_count,
-            COALESCE(stats.total_amount, 0) as period_total_amount,
-            stats.last_order_date
-        FROM companies c
-        LEFT JOIN departments d ON c.id = d.company_id
-        LEFT JOIN users u ON c.id = u.company_id
-        LEFT JOIN (
-            SELECT 
-                company_id,
-                COUNT(*) as order_count,
-                SUM(total_amount) as total_amount,
-                MAX(delivery_date) as last_order_date
+// Database::getInstance() を使用（修正箇所）
+$db = Database::getInstance();
+
+// 統計情報取得
+$stats = getCompanyStats($db);
+$companies = getCompanies($db);
+
+function getCompanyStats($db) {
+    try {
+        $stats = [
+            'total_companies' => 0,
+            'active_companies' => 0,
+            'total_departments' => 0,
+            'total_users' => 0,
+            'monthly_revenue' => 0,
+            'recent_orders' => 0
+        ];
+
+        // 総企業数
+        $stmt = $db->query("SELECT COUNT(*) as total FROM companies");
+        $result = $stmt->fetch();
+        $stats['total_companies'] = $result['total'] ?? 0;
+
+        // アクティブ企業数
+        $stmt = $db->query("SELECT COUNT(*) as active FROM companies WHERE is_active = 1");
+        $result = $stmt->fetch();
+        $stats['active_companies'] = $result['active'] ?? 0;
+
+        // 総部署数
+        $stmt = $db->query("SELECT COUNT(*) as total FROM departments WHERE is_active = 1");
+        $result = $stmt->fetch();
+        $stats['total_departments'] = $result['total'] ?? 0;
+
+        // 総利用者数
+        $stmt = $db->query("SELECT COUNT(*) as total FROM users WHERE is_active = 1");
+        $result = $stmt->fetch();
+        $stats['total_users'] = $result['total'] ?? 0;
+
+        // 月間売上
+        $stmt = $db->query("
+            SELECT SUM(total_amount) as revenue 
             FROM orders 
-            WHERE delivery_date BETWEEN :period_start AND :period_end
-            GROUP BY company_id
-        ) stats ON c.id = stats.company_id
-        $where_clause
-        GROUP BY c.id
-        ORDER BY c.company_name
-        LIMIT :limit OFFSET :offset
-    ";
-    
-    $params['period_start'] = $search_period_start;
-    $params['period_end'] = $search_period_end;
-    $params['limit'] = $per_page;
-    $params['offset'] = $offset;
-    
-    $stmt = $pdo->prepare($companies_sql);
-    foreach ($params as $key => $value) {
-        $stmt->bindValue(':' . $key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
-    }
-    $stmt->execute();
-    $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // 総件数を取得
-    $count_sql = "
-        SELECT COUNT(DISTINCT c.id) as total
-        FROM companies c
-        $where_clause
-    ";
-    $count_stmt = $pdo->prepare($count_sql);
-    foreach ($params as $key => $value) {
-        if ($key !== 'limit' && $key !== 'offset' && $key !== 'period_start' && $key !== 'period_end') {
-            $count_stmt->bindValue(':' . $key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
-        }
-    }
-    $count_stmt->execute();
-    $total_companies = $count_stmt->fetch(PDO::FETCH_ASSOC)['total'];
-    $total_pages = ceil($total_companies / $per_page);
-    
-    // サマリー統計を取得
-    $summary_sql = "
-        SELECT 
-            COUNT(DISTINCT c.id) as active_companies,
-            COUNT(DISTINCT d.id) as total_departments,
-            COUNT(DISTINCT u.id) as total_users,
-            COALESCE(SUM(order_stats.order_count), 0) as period_total_orders,
-            COALESCE(SUM(order_stats.total_amount), 0) as period_total_revenue
-        FROM companies c
-        LEFT JOIN departments d ON c.id = d.company_id AND c.is_active = 1
-        LEFT JOIN users u ON c.id = u.company_id AND c.is_active = 1
-        LEFT JOIN (
-            SELECT 
-                company_id,
-                COUNT(*) as order_count,
-                SUM(total_amount) as total_amount
+            WHERE delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        ");
+        $result = $stmt->fetch();
+        $stats['monthly_revenue'] = $result['revenue'] ?? 0;
+
+        // 最近の注文数
+        $stmt = $db->query("
+            SELECT COUNT(*) as recent 
             FROM orders 
-            WHERE delivery_date BETWEEN :period_start AND :period_end
-            GROUP BY company_id
-        ) order_stats ON c.id = order_stats.company_id
-        WHERE c.is_active = 1
-    ";
-    
-    $summary_stmt = $pdo->prepare($summary_sql);
-    $summary_stmt->bindValue(':period_start', $search_period_start);
-    $summary_stmt->bindValue(':period_end', $search_period_end);
-    $summary_stmt->execute();
-    $summary = $summary_stmt->fetch(PDO::FETCH_ASSOC);
-    
-} catch (Exception $e) {
-    error_log("配達先企業管理画面エラー: " . $e->getMessage());
-    $error_message = "データの取得中にエラーが発生しました。";
-    $companies = [];
-    $summary = [
-        'active_companies' => 0,
-        'total_departments' => 0,
-        'total_users' => 0,
-        'period_total_orders' => 0,
-        'period_total_revenue' => 0
-    ];
+            WHERE delivery_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+        ");
+        $result = $stmt->fetch();
+        $stats['recent_orders'] = $result['recent'] ?? 0;
+
+        return $stats;
+
+    } catch (Exception $e) {
+        error_log("Company stats error: " . $e->getMessage());
+        return [
+            'total_companies' => 'エラー',
+            'active_companies' => 'エラー',
+            'total_departments' => 'エラー',
+            'total_users' => 'エラー',
+            'monthly_revenue' => 'エラー',
+            'recent_orders' => 'エラー',
+            'error' => $e->getMessage()
+        ];
+    }
+}
+
+function getCompanies($db) {
+    try {
+        $stmt = $db->query("
+            SELECT 
+                c.*,
+                COUNT(DISTINCT d.id) as department_count,
+                COUNT(DISTINCT u.id) as user_count,
+                COUNT(DISTINCT o.id) as order_count,
+                SUM(o.total_amount) as total_revenue,
+                MAX(o.delivery_date) as last_order_date
+            FROM companies c
+            LEFT JOIN departments d ON c.id = d.company_id AND d.is_active = 1
+            LEFT JOIN users u ON c.id = u.company_id AND u.is_active = 1
+            LEFT JOIN orders o ON c.id = o.company_id AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+            WHERE c.is_active = 1
+            GROUP BY c.id
+            ORDER BY c.company_name ASC
+        ");
+        
+        return $stmt->fetchAll();
+
+    } catch (Exception $e) {
+        error_log("Get companies error: " . $e->getMessage());
+        return [];
+    }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>配達先企業管理 - Smiley配食事業</title>
+    <title>🏢 配達先企業管理 - Smiley配食システム</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root {
-            --smiley-green: #2E8B57;
-            --smiley-light-green: #90EE90;
-            --smiley-dark-green: #006400;
+        body { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            margin: 20px auto;
+            padding: 30px;
+            max-width: 1400px;
+        }
+        .smiley-green { color: #2E8B57; }
+        .bg-smiley-green { background-color: #2E8B57; }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border-left: 5px solid #2E8B57;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            transition: transform 0.3s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .stat-number {
+            font-size: 2.2rem;
+            font-weight: bold;
+            color: #2E8B57;
         }
         
-        .navbar-brand {
-            color: var(--smiley-green) !important;
-            font-weight: bold;
+        .company-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #2E8B57;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+        .company-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+        
+        .badge-status {
+            font-size: 0.8rem;
+            padding: 5px 10px;
+        }
+        
+        .search-filters {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
         }
         
         .btn-smiley {
-            background-color: var(--smiley-green);
-            border-color: var(--smiley-green);
+            background-color: #2E8B57;
+            border-color: #2E8B57;
             color: white;
         }
-        
         .btn-smiley:hover {
-            background-color: var(--smiley-dark-green);
-            border-color: var(--smiley-dark-green);
+            background-color: #228B22;
+            border-color: #228B22;
             color: white;
         }
         
-        .card-header {
-            background-color: var(--smiley-green);
-            color: white;
+        .company-stats {
+            font-size: 0.9rem;
+        }
+        .company-stats .stat-item {
+            display: inline-block;
+            margin-right: 15px;
+            color: #6c757d;
         }
         
-        .stats-card {
-            border-left: 4px solid var(--smiley-green);
+        .loading {
+            text-align: center;
+            padding: 40px;
         }
         
-        .company-row:hover {
-            background-color: rgba(46, 139, 87, 0.1);
-        }
-        
-        .status-active {
-            color: var(--smiley-green);
-        }
-        
-        .status-inactive {
-            color: #dc3545;
-        }
-        
-        .amount-highlight {
-            font-weight: bold;
-            color: var(--smiley-dark-green);
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
         }
     </style>
 </head>
 <body>
-    <!-- ナビゲーション -->
-    <nav class="navbar navbar-expand-lg navbar-light bg-light">
-        <div class="container">
-            <a class="navbar-brand" href="../index.php">
-                <i class="bi bi-house-heart"></i> Smiley配食事業
-            </a>
-            <div class="navbar-nav ms-auto">
-                <a class="nav-link" href="../pages/csv_import.php">CSVインポート</a>
-                <a class="nav-link active" href="../pages/companies.php">配達先企業</a>
-                <a class="nav-link" href="../pages/departments.php">部署管理</a>
-                <a class="nav-link" href="../pages/users.php">利用者管理</a>
+    <div class="main-container">
+        <!-- ヘッダー -->
+        <div class="row align-items-center mb-4">
+            <div class="col">
+                <h1 class="display-5 smiley-green mb-2">🏢 配達先企業管理</h1>
+                <p class="lead text-muted">Smiley配食システム - 企業・部署・利用者の統合管理</p>
             </div>
-        </div>
-    </nav>
-
-    <div class="container mt-4">
-        <!-- ページヘッダー -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2><i class="bi bi-building"></i> 配達先企業管理</h2>
-            <div>
-                <button class="btn btn-smiley me-2" data-bs-toggle="modal" data-bs-target="#addCompanyModal">
-                    <i class="bi bi-plus"></i> 新規企業追加
-                </button>
-                <a href="../pages/csv_import.php" class="btn btn-outline-secondary">
-                    <i class="bi bi-upload"></i> CSVインポート
+            <div class="col-auto">
+                <a href="../index.php" class="btn btn-outline-secondary me-2">
+                    <i class="bi bi-arrow-left"></i> ダッシュボード
                 </a>
+                <button class="btn btn-smiley" onclick="showAddCompanyModal()">
+                    <i class="bi bi-plus-circle"></i> 新規企業追加
+                </button>
             </div>
         </div>
 
-        <?php if (isset($error_message)): ?>
-            <div class="alert alert-danger" role="alert">
-                <i class="bi bi-exclamation-triangle"></i> <?= htmlspecialchars($error_message) ?>
-            </div>
-        <?php endif; ?>
-
-        <!-- サマリー統計 -->
+        <!-- 統計サマリー -->
         <div class="row mb-4">
-            <div class="col-md-2">
-                <div class="card stats-card">
-                    <div class="card-body">
-                        <h6 class="card-title text-muted">アクティブ企業</h6>
-                        <h3 class="text-primary"><?= number_format($summary['active_companies']) ?></h3>
-                    </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['total_companies']) ? number_format($stats['total_companies']) : $stats['total_companies']; ?></div>
+                    <div class="text-muted">総企業数</div>
+                    <small class="text-success"><i class="bi bi-building"></i> 登録済み</small>
                 </div>
             </div>
-            <div class="col-md-2">
-                <div class="card stats-card">
-                    <div class="card-body">
-                        <h6 class="card-title text-muted">総部署数</h6>
-                        <h3 class="text-info"><?= number_format($summary['total_departments']) ?></h3>
-                    </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['active_companies']) ? number_format($stats['active_companies']) : $stats['active_companies']; ?></div>
+                    <div class="text-muted">アクティブ企業</div>
+                    <small class="text-info"><i class="bi bi-check-circle"></i> 稼働中</small>
                 </div>
             </div>
-            <div class="col-md-2">
-                <div class="card stats-card">
-                    <div class="card-body">
-                        <h6 class="card-title text-muted">総利用者数</h6>
-                        <h3 class="text-success"><?= number_format($summary['total_users']) ?></h3>
-                    </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['total_departments']) ? number_format($stats['total_departments']) : $stats['total_departments']; ?></div>
+                    <div class="text-muted">総部署数</div>
+                    <small class="text-primary"><i class="bi bi-diagram-3"></i> 配達先</small>
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="card stats-card">
-                    <div class="card-body">
-                        <h6 class="card-title text-muted">期間内注文数</h6>
-                        <h3 class="text-warning"><?= number_format($summary['period_total_orders']) ?></h3>
-                    </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['total_users']) ? number_format($stats['total_users']) : $stats['total_users']; ?></div>
+                    <div class="text-muted">総利用者数</div>
+                    <small class="text-success"><i class="bi bi-people"></i> 登録済み</small>
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="card stats-card">
-                    <div class="card-body">
-                        <h6 class="card-title text-muted">期間内売上</h6>
-                        <h3 class="amount-highlight">¥<?= number_format($summary['period_total_revenue']) ?></h3>
-                    </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number">¥<?php echo is_numeric($stats['monthly_revenue']) ? number_format($stats['monthly_revenue']) : $stats['monthly_revenue']; ?></div>
+                    <div class="text-muted">月間売上</div>
+                    <small class="text-warning"><i class="bi bi-currency-yen"></i> 過去30日</small>
+                </div>
+            </div>
+            <div class="col-lg-2 col-md-4 col-sm-6">
+                <div class="stat-card text-center">
+                    <div class="stat-number"><?php echo is_numeric($stats['recent_orders']) ? number_format($stats['recent_orders']) : $stats['recent_orders']; ?></div>
+                    <div class="text-muted">週間注文数</div>
+                    <small class="text-info"><i class="bi bi-cart"></i> 過去7日</small>
                 </div>
             </div>
         </div>
 
         <!-- 検索・フィルター -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <i class="bi bi-search"></i> 検索・フィルター
-            </div>
-            <div class="card-body">
-                <form method="GET" class="row g-3">
-                    <div class="col-md-4">
-                        <label class="form-label">企業名・企業コード</label>
-                        <input type="text" class="form-control" name="search_company" 
-                               value="<?= htmlspecialchars($search_company) ?>" 
-                               placeholder="企業名または企業コードで検索">
+        <div class="search-filters">
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="form-group">
+                        <label class="form-label">企業名検索</label>
+                        <input type="text" class="form-control" id="searchCompany" placeholder="企業名を入力...">
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label">集計期間（開始）</label>
-                        <input type="date" class="form-control" name="period_start" 
-                               value="<?= htmlspecialchars($search_period_start) ?>">
+                </div>
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label class="form-label">ステータス</label>
+                        <select class="form-select" id="filterStatus">
+                            <option value="">全て</option>
+                            <option value="active">アクティブ</option>
+                            <option value="inactive">非アクティブ</option>
+                        </select>
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label">集計期間（終了）</label>
-                        <input type="date" class="form-control" name="period_end" 
-                               value="<?= htmlspecialchars($search_period_end) ?>">
+                </div>
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label class="form-label">並び順</label>
+                        <select class="form-select" id="sortOrder">
+                            <option value="name_asc">企業名（昇順）</option>
+                            <option value="name_desc">企業名（降順）</option>
+                            <option value="revenue_desc">売上（降順）</option>
+                            <option value="orders_desc">注文数（降順）</option>
+                        </select>
                     </div>
-                    <div class="col-md-2">
+                </div>
+                <div class="col-md-2">
+                    <div class="form-group">
                         <label class="form-label">&nbsp;</label>
-                        <div>
-                            <button type="submit" class="btn btn-smiley">
-                                <i class="bi bi-search"></i> 検索
-                            </button>
-                        </div>
+                        <button class="btn btn-smiley w-100" onclick="applyFilters()">
+                            <i class="bi bi-search"></i> 検索
+                        </button>
                     </div>
-                </form>
+                </div>
             </div>
         </div>
 
-        <!-- 企業一覧テーブル -->
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-list"></i> 配達先企業一覧</span>
-                <span class="badge bg-light text-dark"><?= number_format($total_companies) ?>件中 <?= number_format(($page-1)*$per_page + 1) ?>-<?= number_format(min($page*$per_page, $total_companies)) ?>件表示</span>
+        <!-- 企業一覧 -->
+        <div id="companiesContainer">
+            <?php if (empty($companies)): ?>
+                <div class="no-data">
+                    <i class="bi bi-building fs-1 text-muted"></i>
+                    <h4 class="text-muted mt-3">配達先企業が登録されていません</h4>
+                    <p class="text-muted">CSVインポートまたは手動で企業を追加してください</p>
+                    <a href="csv_import.php" class="btn btn-smiley">
+                        <i class="bi bi-cloud-upload"></i> CSVインポート
+                    </a>
+                </div>
+            <?php else: ?>
+                <?php foreach ($companies as $company): ?>
+                    <div class="company-card" data-company-id="<?php echo $company['id']; ?>">
+                        <div class="row align-items-center">
+                            <div class="col-md-6">
+                                <h5 class="mb-2">
+                                    <i class="bi bi-building text-success me-2"></i>
+                                    <?php echo htmlspecialchars($company['company_name']); ?>
+                                    <?php if ($company['is_active']): ?>
+                                        <span class="badge bg-success badge-status ms-2">アクティブ</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary badge-status ms-2">非アクティブ</span>
+                                    <?php endif; ?>
+                                </h5>
+                                <div class="company-stats">
+                                    <span class="stat-item">
+                                        <i class="bi bi-diagram-3"></i> <?php echo number_format($company['department_count']); ?>部署
+                                    </span>
+                                    <span class="stat-item">
+                                        <i class="bi bi-people"></i> <?php echo number_format($company['user_count']); ?>名
+                                    </span>
+                                    <span class="stat-item">
+                                        <i class="bi bi-cart"></i> <?php echo number_format($company['order_count']); ?>件
+                                    </span>
+                                    <?php if ($company['last_order_date']): ?>
+                                        <span class="stat-item">
+                                            <i class="bi bi-calendar"></i> 最終注文: <?php echo date('Y/m/d', strtotime($company['last_order_date'])); ?>
+                                        </span>
+                                    <?php endif; ?>
+                                </div>
+                                <?php if ($company['address_detail']): ?>
+                                    <small class="text-muted">
+                                        <i class="bi bi-geo-alt"></i> <?php echo htmlspecialchars($company['address_detail']); ?>
+                                    </small>
+                                <?php endif; ?>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <div class="h5 text-success mb-1">¥<?php echo number_format($company['total_revenue'] ?: 0); ?></div>
+                                <small class="text-muted">過去90日売上</small>
+                            </div>
+                            <div class="col-md-3 text-end">
+                                <div class="btn-group">
+                                    <a href="company_detail.php?id=<?php echo $company['id']; ?>" class="btn btn-outline-primary btn-sm">
+                                        <i class="bi bi-eye"></i> 詳細
+                                    </a>
+                                    <a href="departments.php?company_id=<?php echo $company['id']; ?>" class="btn btn-outline-info btn-sm">
+                                        <i class="bi bi-diagram-3"></i> 部署
+                                    </a>
+                                    <a href="users.php?company_id=<?php echo $company['id']; ?>" class="btn btn-outline-success btn-sm">
+                                        <i class="bi bi-people"></i> 利用者
+                                    </a>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="editCompany(<?php echo $company['id']; ?>)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+
+        <!-- クイックアクション -->
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-smiley-green text-white">
+                        <h6 class="mb-0"><i class="bi bi-lightning"></i> クイックアクション</h6>
+                    </div>
+                    <div class="card-body">
+                        <a href="csv_import.php" class="btn btn-outline-primary me-2 mb-2">
+                            <i class="bi bi-cloud-upload"></i> CSVインポート
+                        </a>
+                        <a href="users.php" class="btn btn-outline-success me-2 mb-2">
+                            <i class="bi bi-people"></i> 利用者管理
+                        </a>
+                        <a href="departments.php" class="btn btn-outline-info me-2 mb-2">
+                            <i class="bi bi-diagram-3"></i> 部署管理
+                        </a>
+                        <a href="../pages/system_health.php" class="btn btn-outline-warning mb-2">
+                            <i class="bi bi-gear"></i> システム状況
+                        </a>
+                    </div>
+                </div>
             </div>
-            <div class="card-body p-0">
-                <?php if (empty($companies)): ?>
-                    <div class="p-4 text-center text-muted">
-                        <i class="bi bi-inbox" style="font-size: 3rem;"></i>
-                        <p class="mt-2">該当する配達先企業が見つかりません。</p>
-                        <a href="../pages/csv_import.php" class="btn btn-smiley">CSVインポートで企業データを追加</a>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h6 class="mb-0"><i class="bi bi-info-circle"></i> システム情報</h6>
                     </div>
-                <?php else: ?>
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>企業コード</th>
-                                    <th>企業名</th>
-                                    <th>部署数</th>
-                                    <th>利用者数</th>
-                                    <th>期間内注文数</th>
-                                    <th>期間内売上</th>
-                                    <th>最終注文日</th>
-                                    <th>状態</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($companies as $company): ?>
-                                    <tr class="company-row">
-                                        <td>
-                                            <code><?= htmlspecialchars($company['company_code']) ?></code>
-                                        </td>
-                                        <td>
-                                            <strong><?= htmlspecialchars($company['company_name']) ?></strong>
-                                            <?php if ($company['contact_person']): ?>
-                                                <br><small class="text-muted">担当: <?= htmlspecialchars($company['contact_person']) ?></small>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <span class="badge bg-info"><?= number_format($company['department_count']) ?></span>
-                                        </td>
-                                        <td>
-                                            <span class="badge bg-success"><?= number_format($company['user_count']) ?></span>
-                                        </td>
-                                        <td>
-                                            <?php if ($company['period_order_count'] > 0): ?>
-                                                <span class="badge bg-warning text-dark"><?= number_format($company['period_order_count']) ?></span>
-                                            <?php else: ?>
-                                                <span class="text-muted">-</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <?php if ($company['period_total_amount'] > 0): ?>
-                                                <span class="amount-highlight">¥<?= number_format($company['period_total_amount']) ?></span>
-                                            <?php else: ?>
-                                                <span class="text-muted">-</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <?php if ($company['last_order_date']): ?>
-                                                <?= date('m/d', strtotime($company['last_order_date'])) ?>
-                                            <?php else: ?>
-                                                <span class="text-muted">-</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <?php if ($company['is_active']): ?>
-                                                <i class="bi bi-check-circle-fill status-active" title="アクティブ"></i>
-                                            <?php else: ?>
-                                                <i class="bi bi-x-circle-fill status-inactive" title="非アクティブ"></i>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <div class="btn-group btn-group-sm">
-                                                <button class="btn btn-outline-primary" title="詳細"
-                                                        onclick="viewCompanyDetail(<?= $company['id'] ?>)">
-                                                    <i class="bi bi-eye"></i>
-                                                </button>
-                                                <button class="btn btn-outline-success" title="部署管理"
-                                                        onclick="manageDepartments(<?= $company['id'] ?>)">
-                                                    <i class="bi bi-diagram-3"></i>
-                                                </button>
-                                                <button class="btn btn-outline-info" title="利用者管理"
-                                                        onclick="manageUsers(<?= $company['id'] ?>)">
-                                                    <i class="bi bi-people"></i>
-                                                </button>
-                                                <button class="btn btn-outline-warning" title="請求書生成"
-                                                        onclick="generateInvoice(<?= $company['id'] ?>)">
-                                                    <i class="bi bi-receipt"></i>
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
+                    <div class="card-body">
+                        <p class="mb-2"><strong>データベース:</strong> <?php echo DB_NAME; ?></p>
+                        <p class="mb-2"><strong>環境:</strong> <?php echo ENVIRONMENT; ?></p>
+                        <p class="mb-0"><strong>最終更新:</strong> <?php echo date('Y-m-d H:i:s'); ?></p>
+                        <?php if (isset($stats['error'])): ?>
+                            <div class="alert alert-warning mt-2 mb-0">
+                                <small>統計取得エラー: <?php echo htmlspecialchars($stats['error']); ?></small>
+                            </div>
+                        <?php endif; ?>
                     </div>
-                <?php endif; ?>
+                </div>
             </div>
         </div>
 
-        <!-- ページネーション -->
-        <?php if ($total_pages > 1): ?>
-            <nav class="mt-4">
-                <ul class="pagination justify-content-center">
-                    <?php for ($i = 1; $i <= $total_pages; $i++): ?>
-                        <li class="page-item <?= $i === $page ? 'active' : '' ?>">
-                            <a class="page-link" href="?page=<?= $i ?>&search_company=<?= urlencode($search_company) ?>&period_start=<?= urlencode($search_period_start) ?>&period_end=<?= urlencode($search_period_end) ?>">
-                                <?= $i ?>
-                            </a>
-                        </li>
-                    <?php endfor; ?>
-                </ul>
-            </nav>
-        <?php endif; ?>
-    </div>
-
-    <!-- 新規企業追加モーダル -->
-    <div class="modal fade" id="addCompanyModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">新規配達先企業追加</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="addCompanyForm">
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">企業コード *</label>
-                                <input type="text" class="form-control" name="company_code" required>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">企業名 *</label>
-                                <input type="text" class="form-control" name="company_name" required>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">住所</label>
-                            <input type="text" class="form-control" name="company_address">
-                        </div>
-                        <div class="row">
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">担当者名</label>
-                                <input type="text" class="form-control" name="contact_person">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">電話番号</label>
-                                <input type="tel" class="form-control" name="contact_phone">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">メールアドレス</label>
-                                <input type="email" class="form-control" name="contact_email">
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">請求方法</label>
-                            <select class="form-select" name="billing_method">
-                                <option value="company">企業一括請求</option>
-                                <option value="department">部署別請求</option>
-                                <option value="individual">個人請求</option>
-                                <option value="mixed">混合請求</option>
-                            </select>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
-                    <button type="button" class="btn btn-smiley" onclick="saveCompany()">保存</button>
-                </div>
-            </div>
+        <!-- フッター -->
+        <div class="text-center mt-5 pt-4 border-top">
+            <p class="text-muted mb-0">
+                <strong>Smiley配食事業 請求書管理システム v1.0.0</strong><br>
+                © 2025 Smiley配食事業. All rights reserved.
+            </p>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // 企業詳細表示
-        function viewCompanyDetail(companyId) {
-            window.location.href = `company_detail.php?id=${companyId}`;
-        }
-
-        // 部署管理
-        function manageDepartments(companyId) {
-            window.location.href = `departments.php?company_id=${companyId}`;
-        }
-
-        // 利用者管理
-        function manageUsers(companyId) {
-            window.location.href = `users.php?company_id=${companyId}`;
-        }
-
-        // 請求書生成
-        function generateInvoice(companyId) {
-            window.location.href = `invoice_generate.php?company_id=${companyId}`;
-        }
-
-        // 新規企業保存
-        function saveCompany() {
-            const form = document.getElementById('addCompanyForm');
-            const formData = new FormData(form);
+        // 検索・フィルター機能
+        function applyFilters() {
+            const searchTerm = document.getElementById('searchCompany').value.toLowerCase();
+            const statusFilter = document.getElementById('filterStatus').value;
+            const sortOrder = document.getElementById('sortOrder').value;
             
-            fetch('../api/companies.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    location.reload();
-                } else {
-                    alert('エラー: ' + data.message);
+            const companies = document.querySelectorAll('.company-card');
+            let visibleCompanies = [];
+            
+            companies.forEach(company => {
+                const companyName = company.querySelector('h5').textContent.toLowerCase();
+                const isActive = company.querySelector('.badge-success') !== null;
+                
+                let show = true;
+                
+                // 名前検索
+                if (searchTerm && !companyName.includes(searchTerm)) {
+                    show = false;
                 }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('保存中にエラーが発生しました。');
+                
+                // ステータスフィルター
+                if (statusFilter === 'active' && !isActive) {
+                    show = false;
+                } else if (statusFilter === 'inactive' && isActive) {
+                    show = false;
+                }
+                
+                company.style.display = show ? 'block' : 'none';
+                if (show) visibleCompanies.push(company);
             });
+            
+            // ソート（簡易実装）
+            if (sortOrder !== 'name_asc') {
+                console.log('ソート機能は今後実装予定');
+            }
         }
+        
+        // リアルタイム検索
+        document.getElementById('searchCompany').addEventListener('input', applyFilters);
+        document.getElementById('filterStatus').addEventListener('change', applyFilters);
+        document.getElementById('sortOrder').addEventListener('change', applyFilters);
+        
+        // 企業追加モーダル（今後実装）
+        function showAddCompanyModal() {
+            alert('企業追加機能は今後実装予定です。現在はCSVインポートをご利用ください。');
+        }
+        
+        // 企業編集（今後実装）
+        function editCompany(companyId) {
+            alert(`企業ID ${companyId} の編集機能は今後実装予定です。`);
+        }
+        
+        // 初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('配達先企業管理画面が読み込まれました');
+            
+            // エラー表示（デバッグモード時）
+            <?php if (isset($stats['error']) && DEBUG_MODE): ?>
+            console.error('Company stats error:', <?php echo json_encode($stats['error']); ?>);
+            <?php endif; ?>
+        });
     </script>
 </body>
 </html>
