@@ -66,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo "File Type: " . $file['type'] . "\n";
         echo "Temp Name: " . $file['tmp_name'] . "\n";
         echo "Error Code: " . $file['error'] . "\n";
-        echo "Error Message: " . $this->getUploadErrorMessage($file['error']) . "\n";
+        echo "Error Message: " . getUploadErrorMessage($file['error']) . "\n";
         
         if ($file['error'] === UPLOAD_ERR_OK && file_exists($file['tmp_name'])) {
             echo "\nFile Content Analysis:\n";
