@@ -236,23 +236,19 @@ class SmileyCSVImporter {
             $duplicateCount = 0;
             
             foreach ($validData as $row) {
-                // 1. 配達先企業確保
-                $companyId = $this->ensureCompany($row);
+                // マスターデータ確保（統合メソッド使用）
+                $masterIds = $this->ensureMasterData($row);
                 
-                // 2. 部署確保
-                $departmentId = $this->ensureDepartment($row, $companyId);
-                
-                // 3. 給食業者確保
-                $supplierId = $this->ensureSupplier($row);
-                
-                // 4. 商品確保
-                $productId = $this->ensureProduct($row, $supplierId);
-                
-                // 5. 利用者確保
-                $userId = $this->ensureUser($row, $companyId, $departmentId);
-                
-                // 6. 注文データ挿入
-                $orderId = $this->insertOrderData($row, $batchId, $companyId, $departmentId, $userId, $productId, $supplierId);
+                // 注文データ挿入
+                $orderId = $this->insertOrderData(
+                    $row, 
+                    $batchId, 
+                    $masterIds['company_id'], 
+                    $masterIds['department_id'], 
+                    $masterIds['user_id'], 
+                    $masterIds['product_id'], 
+                    $masterIds['supplier_id']
+                );
                 
                 if ($orderId) {
                     $successCount++;
@@ -272,6 +268,34 @@ class SmileyCSVImporter {
             $this->db->rollback();
             throw $e;
         }
+    }
+    
+    /**
+     * マスターデータ確保（統合メソッド）
+     */
+    public function ensureMasterData($row) {
+        // 1. 配達先企業確保
+        $companyId = $this->ensureCompany($row);
+        
+        // 2. 部署確保
+        $departmentId = $this->ensureDepartment($row, $companyId);
+        
+        // 3. 給食業者確保
+        $supplierId = $this->ensureSupplier($row);
+        
+        // 4. 商品確保
+        $productId = $this->ensureProduct($row, $supplierId);
+        
+        // 5. 利用者確保
+        $userId = $this->ensureUser($row, $companyId, $departmentId);
+        
+        return [
+            'company_id' => $companyId,
+            'department_id' => $departmentId,
+            'supplier_id' => $supplierId,
+            'product_id' => $productId,
+            'user_id' => $userId
+        ];
     }
     
     /**
