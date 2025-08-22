@@ -1,408 +1,289 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSV分析ツール - Smiley配食事業</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        .analysis-container {
-            max-width: 1000px;
-            margin: 2rem auto;
-            padding: 2rem;
-        }
-        .header-card {
-            background: linear-gradient(135deg, #2E8B57 0%, #1e6b3d 100%);
-            color: white;
-            border-radius: 15px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-        }
-        .upload-area {
-            border: 3px dashed #90EE90;
-            border-radius: 15px;
-            padding: 3rem;
-            text-align: center;
-            background: white;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        .upload-area:hover {
-            border-color: #2E8B57;
-            background: #f0f8f0;
-        }
-        .results-section {
-            display: none;
-            margin-top: 2rem;
-        }
-        .analysis-card {
-            background: white;
-            border-radius: 10px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        }
-        .error-item {
-            background: #f8d7da;
-            border: 1px solid #f5c6cb;
-            border-radius: 5px;
-            padding: 0.75rem;
-            margin-bottom: 0.5rem;
-        }
-        .warning-item {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 5px;
-            padding: 0.75rem;
-            margin-bottom: 0.5rem;
-        }
-        .success-item {
-            background: #d4edda;
-            border: 1px solid #c3e6cb;
-            border-radius: 5px;
-            padding: 0.75rem;
-            margin-bottom: 0.5rem;
-        }
-        .header-match {
-            display: inline-block;
-            background: #28a745;
-            color: white;
-            padding: 0.25rem 0.5rem;
-            border-radius: 3px;
-            margin: 0.1rem;
-            font-size: 0.8rem;
-        }
-        .header-missing {
-            display: inline-block;
-            background: #dc3545;
-            color: white;
-            padding: 0.25rem 0.5rem;
-            border-radius: 3px;
-            margin: 0.1rem;
-            font-size: 0.8rem;
-        }
-        .header-extra {
-            display: inline-block;
-            background: #ffc107;
-            color: black;
-            padding: 0.25rem 0.5rem;
-            border-radius: 3px;
-            margin: 0.1rem;
-            font-size: 0.8rem;
-        }
-    </style>
-</head>
-<body>
-    <div class="analysis-container">
-        <!-- ヘッダー -->
-        <div class="header-card">
-            <h1 class="mb-2">
-                <i class="fas fa-search me-3"></i>
-                CSV分析ツール
-            </h1>
-            <p class="mb-0 fs-5">Smiley配食事業CSVファイルの詳細分析・エラー特定</p>
-        </div>
+<?php
+/**
+ * 強化版CSVインポートデバッグツール
+ * HTTP 500エラー詳細診断
+ */
 
-        <!-- アップロード -->
-        <div class="upload-area" id="uploadArea">
-            <div class="upload-content">
-                <i class="fas fa-file-csv" style="font-size: 4rem; color: #2E8B57; margin-bottom: 1rem;"></i>
-                <h3 class="text-primary mb-3">CSVファイルを分析</h3>
-                <p class="text-muted mb-4">ファイルをドラッグ&ドロップまたはクリックして選択</p>
+header('Content-Type: application/json; charset=utf-8');
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+$basePath = dirname(__FILE__);
+$results = [
+    'timestamp' => date('Y-m-d H:i:s'),
+    'base_path' => $basePath,
+    'debug_info' => []
+];
+
+try {
+    // 1. PHP環境確認
+    $results['debug_info']['php_environment'] = [
+        'php_version' => PHP_VERSION,
+        'memory_limit' => ini_get('memory_limit'),
+        'max_execution_time' => ini_get('max_execution_time'),
+        'upload_max_filesize' => ini_get('upload_max_filesize'),
+        'post_max_size' => ini_get('post_max_size'),
+        'error_reporting' => error_reporting(),
+        'display_errors' => ini_get('display_errors'),
+        'log_errors' => ini_get('log_errors')
+    ];
+    
+    // 2. 必須ファイル存在確認
+    $criticalFiles = [
+        'database_config' => '../config/database.php',
+        'database_class' => '../classes/Database.php',
+        'csv_importer' => '../classes/SmileyCSVImporter.php',
+        'security_helper' => '../classes/SecurityHelper.php',
+        'file_handler' => '../classes/FileUploadHandler.php',
+        'import_api' => '../api/import.php'
+    ];
+    
+    $results['debug_info']['file_existence'] = [];
+    foreach ($criticalFiles as $name => $path) {
+        $fullPath = $basePath . '/' . $path;
+        $exists = file_exists($fullPath);
+        
+        $results['debug_info']['file_existence'][$name] = [
+            'path' => $fullPath,
+            'exists' => $exists,
+            'readable' => $exists ? is_readable($fullPath) : false,
+            'size' => $exists ? filesize($fullPath) : 0,
+            'modified' => $exists ? date('Y-m-d H:i:s', filemtime($fullPath)) : null
+        ];
+    }
+    
+    // 3. クラス読み込みテスト
+    $results['debug_info']['class_loading'] = [];
+    
+    // Database クラス
+    try {
+        require_once $basePath . '/../config/database.php';
+        require_once $basePath . '/../classes/Database.php';
+        
+        $results['debug_info']['class_loading']['Database'] = [
+            'loaded' => true,
+            'exists' => class_exists('Database'),
+            'methods' => class_exists('Database') ? get_class_methods('Database') : []
+        ];
+        
+        // データベース接続テスト
+        if (class_exists('Database')) {
+            $db = new Database();
+            $results['debug_info']['database_connection'] = 'OK';
+            
+            // テーブル確認
+            $tables = ['orders', 'users', 'companies', 'departments', 'products', 'suppliers'];
+            foreach ($tables as $table) {
+                $stmt = $db->query("SHOW TABLES LIKE ?", [$table]);
+                $results['debug_info']['tables'][$table] = $stmt->fetch() ? 'EXISTS' : 'MISSING';
+            }
+        }
+        
+    } catch (Exception $e) {
+        $results['debug_info']['class_loading']['Database'] = [
+            'loaded' => false,
+            'error' => $e->getMessage()
+        ];
+    }
+    
+    // SmileyCSVImporter クラス
+    try {
+        if (file_exists($basePath . '/../classes/SmileyCSVImporter.php')) {
+            // ファイル内容の構文チェック
+            $importerContent = file_get_contents($basePath . '/../classes/SmileyCSVImporter.php');
+            
+            // PHP構文チェック
+            $tempFile = tempnam(sys_get_temp_dir(), 'syntax_check');
+            file_put_contents($tempFile, $importerContent);
+            
+            $output = [];
+            $returnVar = 0;
+            exec("php -l " . escapeshellarg($tempFile) . " 2>&1", $output, $returnVar);
+            
+            unlink($tempFile);
+            
+            $results['debug_info']['syntax_check'] = [
+                'valid' => $returnVar === 0,
+                'output' => implode("\n", $output)
+            ];
+            
+            if ($returnVar === 0) {
+                require_once $basePath . '/../classes/SmileyCSVImporter.php';
                 
-                <form id="analysisForm" enctype="multipart/form-data">
-                    <input type="file" id="csvFile" name="csv_file" accept=".csv" style="display: none;">
-                    <button type="button" class="btn btn-primary btn-lg" onclick="document.getElementById('csvFile').click()">
-                        <i class="fas fa-folder-open me-2"></i>
-                        ファイルを選択
-                    </button>
-                </form>
-            </div>
-        </div>
-
-        <!-- 分析結果 -->
-        <div class="results-section" id="resultsSection">
-            <!-- ファイル情報 -->
-            <div class="analysis-card">
-                <h4 class="text-primary mb-3">ファイル情報</h4>
-                <div id="fileInfo"></div>
-            </div>
-
-            <!-- ヘッダー分析 -->
-            <div class="analysis-card">
-                <h4 class="text-primary mb-3">ヘッダー分析</h4>
-                <div id="headerAnalysis"></div>
-            </div>
-
-            <!-- データサンプル -->
-            <div class="analysis-card">
-                <h4 class="text-primary mb-3">データサンプル</h4>
-                <div id="dataSample"></div>
-            </div>
-
-            <!-- 検証結果 -->
-            <div class="analysis-card">
-                <h4 class="text-primary mb-3">検証結果</h4>
-                <div id="validationResults"></div>
-            </div>
-
-            <!-- 推奨事項 -->
-            <div class="analysis-card">
-                <h4 class="text-primary mb-3">推奨事項</h4>
-                <div id="recommendations"></div>
-            </div>
-        </div>
-
-        <!-- 戻るボタン -->
-        <div class="text-center mt-4">
-            <a href="csv_import.php" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left me-2"></i>
-                CSVインポート画面に戻る
-            </a>
-        </div>
-    </div>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-    <script>
-        class CSVAnalyzer {
-            constructor() {
-                this.uploadArea = document.getElementById('uploadArea');
-                this.fileInput = document.getElementById('csvFile');
-                this.resultsSection = document.getElementById('resultsSection');
-                
-                this.initializeEventListeners();
+                $results['debug_info']['class_loading']['SmileyCSVImporter'] = [
+                    'loaded' => true,
+                    'exists' => class_exists('SmileyCSVImporter'),
+                    'methods' => class_exists('SmileyCSVImporter') ? get_class_methods('SmileyCSVImporter') : []
+                ];
+            } else {
+                $results['debug_info']['class_loading']['SmileyCSVImporter'] = [
+                    'loaded' => false,
+                    'error' => 'Syntax error in file'
+                ];
             }
-
-            initializeEventListeners() {
-                // ドラッグ&ドロップ
-                this.uploadArea.addEventListener('dragover', (e) => {
-                    e.preventDefault();
-                    this.uploadArea.style.borderColor = '#2E8B57';
-                    this.uploadArea.style.background = '#f0f8f0';
-                });
-
-                this.uploadArea.addEventListener('dragleave', (e) => {
-                    e.preventDefault();
-                    this.uploadArea.style.borderColor = '#90EE90';
-                    this.uploadArea.style.background = 'white';
-                });
-
-                this.uploadArea.addEventListener('drop', (e) => {
-                    e.preventDefault();
-                    this.uploadArea.style.borderColor = '#90EE90';
-                    this.uploadArea.style.background = 'white';
-                    
-                    const files = e.dataTransfer.files;
-                    if (files.length > 0) {
-                        this.analyzeFile(files[0]);
-                    }
-                });
-
-                // ファイル選択
-                this.fileInput.addEventListener('change', (e) => {
-                    if (e.target.files.length > 0) {
-                        this.analyzeFile(e.target.files[0]);
-                    }
-                });
-
-                // クリックでファイル選択
-                this.uploadArea.addEventListener('click', () => {
-                    this.fileInput.click();
-                });
-            }
-
-            async analyzeFile(file) {
-                try {
-                    // ファイル検証
-                    if (!file.name.toLowerCase().endsWith('.csv')) {
-                        alert('CSVファイルを選択してください。');
-                        return;
-                    }
-
-                    // FormData作成
-                    const formData = new FormData();
-                    formData.append('csv_file', file);
-
-                    // 分析実行
-                    const response = await fetch('../api/csv_error_analyzer.php', {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    const result = await response.json();
-
-                    if (result.success) {
-                        this.displayResults(result.data);
-                    } else {
-                        alert('分析エラー: ' + result.message);
-                    }
-
-                } catch (error) {
-                    console.error('Analysis error:', error);
-                    alert('分析中にエラーが発生しました: ' + error.message);
-                }
-            }
-
-            displayResults(data) {
-                // ファイル情報表示
-                this.displayFileInfo(data.analysis.file_info, data.analysis.content_analysis);
-                
-                // ヘッダー分析表示
-                this.displayHeaderAnalysis(data.analysis.header_analysis);
-                
-                // データサンプル表示
-                this.displayDataSample(data.analysis.data_sample);
-                
-                // 検証結果表示
-                this.displayValidationResults(data.analysis.validation_results);
-                
-                // 推奨事項表示
-                this.displayRecommendations(data.analysis.recommendations);
-                
-                // 結果セクション表示
-                this.resultsSection.style.display = 'block';
-                this.resultsSection.scrollIntoView({ behavior: 'smooth' });
-            }
-
-            displayFileInfo(fileInfo, contentInfo) {
-                const html = `
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h6>ファイル基本情報</h6>
-                            <ul class="list-unstyled">
-                                <li><strong>サイズ:</strong> ${fileInfo.size_mb}MB (${fileInfo.size.toLocaleString()}バイト)</li>
-                                <li><strong>総行数:</strong> ${contentInfo.total_lines}行</li>
-                                <li><strong>エンコーディング:</strong> ${contentInfo.original_encoding}</li>
-                                <li><strong>BOM:</strong> ${contentInfo.bom_detected ? 'あり' : 'なし'}</li>
-                            </ul>
-                        </div>
-                    </div>
-                `;
-                document.getElementById('fileInfo').innerHTML = html;
-            }
-
-            displayHeaderAnalysis(headerAnalysis) {
-                const matchPercentage = headerAnalysis.match_percentage;
-                const progressColor = matchPercentage >= 90 ? 'success' : matchPercentage >= 70 ? 'warning' : 'danger';
-                
-                let html = `
-                    <div class="mb-3">
-                        <h6>ヘッダー適合率: ${matchPercentage}%</h6>
-                        <div class="progress mb-3">
-                            <div class="progress-bar bg-${progressColor}" style="width: ${matchPercentage}%"></div>
-                        </div>
-                        <p><strong>フィールド数:</strong> ${headerAnalysis.header_count} / ${headerAnalysis.expected_count} (期待値)</p>
-                    </div>
-                `;
-
-                if (headerAnalysis.matching_headers.length > 0) {
-                    html += `
-                        <div class="mb-3">
-                            <h6 class="text-success">適合ヘッダー (${headerAnalysis.matching_headers.length}個)</h6>
-                            <div>
-                                ${headerAnalysis.matching_headers.map(h => `<span class="header-match">${h}</span>`).join('')}
-                            </div>
-                        </div>
-                    `;
-                }
-
-                if (headerAnalysis.missing_headers.length > 0) {
-                    html += `
-                        <div class="mb-3">
-                            <h6 class="text-danger">不足ヘッダー (${headerAnalysis.missing_headers.length}個)</h6>
-                            <div>
-                                ${headerAnalysis.missing_headers.map(h => `<span class="header-missing">${h}</span>`).join('')}
-                            </div>
-                        </div>
-                    `;
-                }
-
-                if (headerAnalysis.extra_headers.length > 0) {
-                    html += `
-                        <div class="mb-3">
-                            <h6 class="text-warning">余分なヘッダー (${headerAnalysis.extra_headers.length}個)</h6>
-                            <div>
-                                ${headerAnalysis.extra_headers.map(h => `<span class="header-extra">${h}</span>`).join('')}
-                            </div>
-                        </div>
-                    `;
-                }
-
-                html += `
-                    <details class="mt-3">
-                        <summary class="btn btn-outline-info btn-sm">実際のヘッダー一覧</summary>
-                        <div class="mt-2 p-2 bg-light rounded">
-                            <small>${headerAnalysis.headers.join(', ')}</small>
-                        </div>
-                    </details>
-                `;
-
-                document.getElementById('headerAnalysis').innerHTML = html;
-            }
-
-            displayDataSample(dataSample) {
-                if (!dataSample || dataSample.length === 0) {
-                    document.getElementById('dataSample').innerHTML = '<p class="text-muted">データサンプルがありません</p>';
-                    return;
-                }
-
-                let html = '<div class="table-responsive"><table class="table table-sm table-bordered">';
-                html += '<thead class="table-light"><tr><th>行</th><th>フィールド数</th><th>データサンプル（最初の10フィールド）</th><th>整合性</th></tr></thead><tbody>';
-
-                dataSample.forEach(sample => {
-                    const statusColor = sample.matches_header_count ? 'success' : 'warning';
-                    const statusText = sample.matches_header_count ? 'OK' : 'フィールド数不一致';
-                    
-                    html += `
-                        <tr>
-                            <td>${sample.row_number}</td>
-                            <td>${sample.field_count}</td>
-                            <td><small>${sample.data.join(', ')}</small></td>
-                            <td><span class="badge bg-${statusColor}">${statusText}</span></td>
-                        </tr>
-                    `;
-                });
-
-                html += '</tbody></table></div>';
-                document.getElementById('dataSample').innerHTML = html;
-            }
-
-            displayValidationResults(validationResults) {
-                if (!validationResults || validationResults.length === 0) {
-                    document.getElementById('validationResults').innerHTML = '<div class="success-item">検証エラーはありません</div>';
-                    return;
-                }
-
-                let html = '';
-                validationResults.forEach(result => {
-                    const itemClass = result.type === 'error' ? 'error-item' : 'warning-item';
-                    html += `<div class="${itemClass}"><strong>${result.type.toUpperCase()}:</strong> ${result.message}</div>`;
-                });
-
-                document.getElementById('validationResults').innerHTML = html;
-            }
-
-            displayRecommendations(recommendations) {
-                if (!recommendations || recommendations.length === 0) {
-                    document.getElementById('recommendations').innerHTML = '<div class="success-item">特に推奨事項はありません</div>';
-                    return;
-                }
-
-                let html = '<ol>';
-                recommendations.forEach(rec => {
-                    html += `<li class="mb-2">${rec}</li>`;
-                });
-                html += '</ol>';
-
-                document.getElementById('recommendations').innerHTML = html;
-            }
+        } else {
+            $results['debug_info']['class_loading']['SmileyCSVImporter'] = [
+                'loaded' => false,
+                'error' => 'File does not exist'
+            ];
         }
+    } catch (Exception $e) {
+        $results['debug_info']['class_loading']['SmileyCSVImporter'] = [
+            'loaded' => false,
+            'error' => $e->getMessage()
+        ];
+    }
+    
+    // 4. FileUploadHandler クラス
+    try {
+        if (file_exists($basePath . '/../classes/FileUploadHandler.php')) {
+            require_once $basePath . '/../classes/FileUploadHandler.php';
+            
+            $results['debug_info']['class_loading']['FileUploadHandler'] = [
+                'loaded' => true,
+                'exists' => class_exists('FileUploadHandler'),
+                'methods' => class_exists('FileUploadHandler') ? get_class_methods('FileUploadHandler') : []
+            ];
+        } else {
+            $results['debug_info']['class_loading']['FileUploadHandler'] = [
+                'loaded' => false,
+                'error' => 'File does not exist'
+            ];
+        }
+    } catch (Exception $e) {
+        $results['debug_info']['class_loading']['FileUploadHandler'] = [
+            'loaded' => false,
+            'error' => $e->getMessage()
+        ];
+    }
+    
+    // 5. import.php API エラーログ確認
+    if (isset($db)) {
+        try {
+            // 最新のimport_logs確認
+            $stmt = $db->query("SELECT * FROM import_logs ORDER BY created_at DESC LIMIT 5");
+            $results['debug_info']['recent_import_logs'] = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $results['debug_info']['recent_import_logs'] = [];
+        }
+        
+        // 最新の注文データ確認
+        try {
+            $stmt = $db->query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 5");
+            $results['debug_info']['recent_orders'] = $stmt->fetchAll();
+            
+            $stmt = $db->query("SELECT COUNT(*) as count FROM orders");
+            $result = $stmt->fetch();
+            $results['debug_info']['orders_count'] = $result['count'];
+        } catch (Exception $e) {
+            $results['debug_info']['orders_count'] = 'ERROR: ' . $e->getMessage();
+        }
+        
+        // 利用者統計確認
+        try {
+            $stmt = $db->query("
+                SELECT u.user_code, u.user_name, u.company_id, c.company_code, c.company_name, 
+                       COUNT(o.id) as order_count
+                FROM users u
+                LEFT JOIN companies c ON u.company_id = c.id
+                LEFT JOIN orders o ON u.id = o.user_id
+                GROUP BY u.id, u.user_code, u.user_name, u.company_id, c.company_code, c.company_name
+                ORDER BY order_count DESC
+                LIMIT 10
+            ");
+            $results['debug_info']['user_order_stats'] = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $results['debug_info']['user_order_stats'] = 'ERROR: ' . $e->getMessage();
+        }
+    }
+    
+    // 6. API直接テスト
+    try {
+        // import.php を直接includeしてテスト
+        ob_start();
+        
+        // 疑似的なPOSTリクエスト設定
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_GET['action'] = 'test';
+        
+        include $basePath . '/../api/import.php';
+        
+        $apiOutput = ob_get_clean();
+        
+        $results['debug_info']['api_direct_test'] = [
+            'output' => $apiOutput,
+            'length' => strlen($apiOutput),
+            'json_valid' => json_decode($apiOutput) !== null
+        ];
+        
+    } catch (Exception $e) {
+        $results['debug_info']['api_direct_test'] = [
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ];
+    }
+    
+    // 7. 権限・ディレクトリ確認
+    $directories = [
+        'uploads' => '../uploads',
+        'temp' => '../temp',
+        'logs' => '../logs'
+    ];
+    
+    $results['debug_info']['directory_permissions'] = [];
+    foreach ($directories as $name => $path) {
+        $fullPath = $basePath . '/' . $path;
+        
+        $results['debug_info']['directory_permissions'][$name] = [
+            'path' => $fullPath,
+            'exists' => is_dir($fullPath),
+            'writable' => is_dir($fullPath) ? is_writable($fullPath) : false,
+            'readable' => is_dir($fullPath) ? is_readable($fullPath) : false
+        ];
+    }
+    
+    // 8. エラーログファイル確認
+    $errorLogPath = ini_get('error_log');
+    if ($errorLogPath && file_exists($errorLogPath)) {
+        $results['debug_info']['error_log'] = [
+            'path' => $errorLogPath,
+            'size' => filesize($errorLogPath),
+            'last_modified' => date('Y-m-d H:i:s', filemtime($errorLogPath)),
+            'recent_errors' => array_slice(file($errorLogPath), -10)
+        ];
+    } else {
+        $results['debug_info']['error_log'] = 'No error log file found';
+    }
+    
+    // 9. 総合診断
+    $criticalIssues = [];
+    
+    if (!$results['debug_info']['class_loading']['Database']['exists']) {
+        $criticalIssues[] = 'Database クラスが読み込まれていません';
+    }
+    
+    if (!$results['debug_info']['class_loading']['SmileyCSVImporter']['exists']) {
+        $criticalIssues[] = 'SmileyCSVImporter クラスが読み込まれていません';
+    }
+    
+    if ($results['debug_info']['database_connection'] !== 'OK') {
+        $criticalIssues[] = 'データベース接続に問題があります';
+    }
+    
+    if (!empty($criticalIssues)) {
+        $results['overall_status'] = 'CRITICAL';
+        $results['critical_issues'] = $criticalIssues;
+    } else {
+        $results['overall_status'] = 'OK';
+        $results['critical_issues'] = [];
+    }
+    
+} catch (Exception $e) {
+    $results['overall_status'] = 'ERROR';
+    $results['error'] = $e->getMessage();
+    $results['trace'] = $e->getTraceAsString();
+}
 
-        // アプリケーション初期化
-        document.addEventListener('DOMContentLoaded', () => {
-            new CSVAnalyzer();
-        });
-    </script>
-</body>
-</html>
+// 最終出力
+echo json_encode($results, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+?>
