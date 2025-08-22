@@ -102,15 +102,19 @@ class SmileyCSVImporter {
     }
     
     /**
-     * CSV読み込み
+     * CSV読み込み（修正版）
      */
     private function readCsv($filePath, $encoding) {
         $data = file_get_contents($filePath);
         
-        // UTF-8に変換
-        if ($encoding === 'UTF-8-BOM') {
+        // UTF-8 BOM処理を修正
+        if (substr($data, 0, 3) === "\xEF\xBB\xBF") {
             $data = substr($data, 3); // BOM除去
-        } elseif ($encoding !== 'UTF-8') {
+            $encoding = 'UTF-8'; // エンコーディングを修正
+        }
+        
+        // UTF-8に変換
+        if ($encoding !== 'UTF-8') {
             $data = mb_convert_encoding($data, 'UTF-8', $encoding);
         }
         
