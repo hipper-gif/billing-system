@@ -388,4 +388,5 @@ function getDashboardStats() {
         console.error('Dashboard Error:', <?php echo json_encode($stats['error']); ?>);
         <?php endif; ?>
     </script>
-</body
+</body>
+</html>
