@@ -1,24 +1,22 @@
+
 <?php
 /**
  * 安全な確認・検証ツールセット
  * データベースを変更せずに現在の状況を詳細分析
  */
 
-// データベース接続設定
-$config = [
-    'host' => 'localhost',
-    'dbname' => 'twinklemark_billing',  // 実際のDB名に変更
-    'username' => 'twinklemark_bill',
-    'password' => 'Smiley2525'
-];
+// 既存のデータベース設定を読み込み
+require_once '../../config/database.php';
 
 try {
-    $pdo = new PDO("mysql:host={$config['host']};dbname={$config['dbname']};charset=utf8mb4", 
-                   $config['username'], $config['password']);
+    $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", 
+                   DB_USER, DB_PASS);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
     echo "<h1>🔍 データベース安全確認レポート</h1>\n";
     echo "<p><strong>重要:</strong> このツールはデータベースを変更しません。確認のみ実行します。</p>\n";
+    echo "<p><strong>データベース:</strong> " . DB_NAME . "</p>\n";
+    echo "<p><strong>ホスト:</strong> " . DB_HOST . "</p>\n";
     echo "<hr>\n";
     
     // 1. 基本統計情報
