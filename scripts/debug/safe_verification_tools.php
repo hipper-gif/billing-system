@@ -7,9 +7,9 @@
 // データベース接続設定
 $config = [
     'host' => 'localhost',
-    'dbname' => 'bentosystem_local',  // 実際のDB名に変更
-    'username' => 'root',
-    'password' => ''
+    'dbname' => 'twinklemark_billing',  // 実際のDB名に変更
+    'username' => 'twinklemark_bill',
+    'password' => 'Smiley2525'
 ];
 
 try {
