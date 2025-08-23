@@ -2,6 +2,7 @@
 /**
  * CSVインポート画面（HTML） - Smiley配食事業仕様対応
  * pages/csv_import.php
+ * 既存SecurityHelperクラス対応版
  */
 
 // セキュリティヘッダー
@@ -13,8 +14,12 @@ header('X-XSS-Protection: 1; mode=block');
 require_once '../config/database.php';
 require_once '../classes/SecurityHelper.php';
 
+// セッション開始（既存メソッド使用）
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 // CSRF トークン生成
-SecurityHelper::secureSessionStart();
 $csrfToken = SecurityHelper::generateCSRFToken();
 
 // ページタイトル
@@ -464,7 +469,9 @@ $pageTitle = 'CSVインポート - Smiley配食事業';
             
             if (result.success) {
                 resultContent.innerHTML = createSuccessResult(result);
-                updateImportStats(result.data.stats);
+                if (result.data && result.data.stats) {
+                    updateImportStats(result.data.stats);
+                }
             } else {
                 resultContent.innerHTML = createErrorResult(result);
             }
@@ -477,7 +484,13 @@ $pageTitle = 'CSVインポート - Smiley配食事業';
          * 成功結果HTML生成
          */
         function createSuccessResult(result) {
-            const stats = result.data.stats;
+            const stats = result.data?.stats || {
+                total_records: 0,
+                success_records: 0,
+                error_records: 0,
+                duplicate_records: 0
+            };
+            
             return `
                 <div class="alert alert-success">
                     <h5><i class="bi bi-check-circle"></i> インポート完了</h5>
@@ -487,31 +500,31 @@ $pageTitle = 'CSVインポート - Smiley配食事業';
                 <div class="row">
                     <div class="col-6 col-md-3">
                         <div class="text-center p-3 bg-primary text-white rounded">
-                            <div class="fs-4">${stats.total_records}</div>
+                            <div class="fs-4">${stats.total_records || 0}</div>
                             <small>総レコード数</small>
                         </div>
                     </div>
                     <div class="col-6 col-md-3">
                         <div class="text-center p-3 bg-success text-white rounded">
-                            <div class="fs-4">${stats.success_records}</div>
+                            <div class="fs-4">${stats.success_records || 0}</div>
                             <small>成功</small>
                         </div>
                     </div>
                     <div class="col-6 col-md-3">
                         <div class="text-center p-3 bg-danger text-white rounded">
-                            <div class="fs-4">${stats.error_records}</div>
+                            <div class="fs-4">${stats.error_records || 0}</div>
                             <small>エラー</small>
                         </div>
                     </div>
                     <div class="col-6 col-md-3">
                         <div class="text-center p-3 bg-warning text-dark rounded">
-                            <div class="fs-4">${stats.duplicate_records}</div>
+                            <div class="fs-4">${stats.duplicate_records || 0}</div>
                             <small>重複</small>
                         </div>
                     </div>
                 </div>
                 
-                ${stats.error_records > 0 ? createErrorDetails(result.data.errors) : ''}
+                ${(stats.error_records > 0 && result.data?.errors) ? createErrorDetails(result.data.errors) : ''}
             `;
         }
 
@@ -523,7 +536,7 @@ $pageTitle = 'CSVインポート - Smiley配食事業';
                 <div class="alert alert-danger">
                     <h5><i class="bi bi-exclamation-triangle"></i> インポートエラー</h5>
                     <p>${result.message}</p>
-                    ${result.data && result.data.error_message ? 
+                    ${result.data?.error_message ? 
                         `<hr><small><strong>詳細:</strong> ${result.data.error_message}</small>` : ''}
                 </div>
             `;
@@ -557,21 +570,21 @@ $pageTitle = 'CSVインポート - Smiley配食事業';
                 <div class="stats-card">
                     <div class="row text-center">
                         <div class="col-6">
-                            <div class="fs-5">${stats.total_records}</div>
+                            <div class="fs-5">${stats.total_records || 0}</div>
                             <small>総レコード</small>
                         </div>
                         <div class="col-6">
-                            <div class="fs-5">${stats.success_records}</div>
+                            <div class="fs-5">${stats.success_records || 0}</div>
                             <small>成功</small>
                         </div>
                     </div>
                     <div class="row text-center mt-2">
                         <div class="col-6">
-                            <div class="fs-6">${stats.error_records}</div>
+                            <div class="fs-6">${stats.error_records || 0}</div>
                             <small>エラー</small>
                         </div>
                         <div class="col-6">
-                            <div class="fs-6">${stats.processing_time}</div>
+                            <div class="fs-6">${stats.processing_time || '不明'}</div>
                             <small>処理時間</small>
                         </div>
                     </div>
@@ -589,17 +602,17 @@ $pageTitle = 'CSVインポート - Smiley配食事業';
                 
                 const historyContainer = document.getElementById('importHistory');
                 
-                if (result.success && result.data.length > 0) {
+                if (result.success && result.data && result.data.length > 0) {
                     let html = '';
                     result.data.forEach(item => {
                         html += `
                             <div class="border-bottom pb-2 mb-2">
                                 <div class="d-flex justify-content-between">
-                                    <small><strong>${item.filename}</strong></small>
-                                    <small class="text-muted">${item.created_at}</small>
+                                    <small><strong>${item.filename || '不明'}</strong></small>
+                                    <small class="text-muted">${item.created_at || '不明'}</small>
                                 </div>
                                 <small class="text-muted">
-                                    ${item.success_records}件成功 / ${item.total_records}件中
+                                    ${item.success_records || 0}件成功 / ${item.total_records || 0}件中
                                 </small>
                             </div>
                         `;
