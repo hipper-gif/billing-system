@@ -1,4 +1,3 @@
-
 <?php
 /**
  * 安全な確認・検証ツールセット
@@ -38,6 +37,9 @@ try {
     // 5. 請求書生成に必要なデータの確認
     echo "<h2>🧾 請求書生成必須データ確認</h2>\n";
     checkInvoiceRequiredData($pdo);
+    
+    // 最終的な推奨事項を表示
+    displayRecommendations();
     
 } catch (PDOException $e) {
     echo "<p style='color: red;'>❌ エラー: " . $e->getMessage() . "</p>\n";
@@ -152,9 +154,9 @@ function judgeDeletionSafety($table, $column, $usage) {
     
     // 請求書生成に必要なカラム
     $invoiceRequired = [
-        'companies' => ['company_code', 'company_name', 'billing_method', 'billing_contact_person', 'billing_email'],
+        'companies' => ['company_code', 'company_name', 'billing_method', 'billing_contact_person', 'billing_email', 'company_address'],
         'users' => ['user_code', 'user_name', 'company_name', 'payment_method'],
-        'orders' => ['user_name', 'company_name', 'product_name', 'quantity', 'unit_price', 'total_amount'],
+        'orders' => ['user_name', 'company_name', 'product_name', 'quantity', 'unit_price', 'total_amount', 'delivery_date'],
         'departments' => ['department_code', 'department_name']
     ];
     
@@ -380,7 +382,7 @@ function checkInvoiceRequiredData($pdo) {
         $stmt = $pdo->query("
             SELECT 
                 c.company_name,
-                c.billing_method,
+                COALESCE(c.billing_method, 'company') as billing_method,
                 COUNT(DISTINCT u.id) as user_count,
                 COUNT(o.id) as order_count,
                 SUM(o.total_amount) as total_amount,
@@ -424,7 +426,6 @@ function checkInvoiceRequiredData($pdo) {
     }
 }
 
-// 最終的な推奨事項を表示
 function displayRecommendations() {
     echo "<h2>🎯 推奨事項</h2>\n";
     
@@ -455,9 +456,6 @@ function displayRecommendations() {
     echo "</ol>\n";
     echo "</div>\n";
 }
-
-// 推奨事項を表示
-displayRecommendations();
 
 echo "<hr>\n";
 echo "<p><strong>📞 サポート:</strong> 問題や質問がある場合は、GitHub Issuesで報告してください。</p>\n";
