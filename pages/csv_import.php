@@ -366,6 +366,20 @@ require_once '../config/database.php';
                             <h6><i class="fas fa-info-circle me-2"></i>処理詳細</h6>
                             <div id="processInfo"></div>
                         </div>
+
+                        <!-- 次のアクション -->
+                        <div id="nextActions" class="mt-4 text-center" style="display: none;">
+                            <h6>次のステップ</h6>
+                            <a href="companies.php" class="btn btn-outline-primary me-2">
+                                <i class="fas fa-building me-1"></i>配達先企業管理
+                            </a>
+                            <a href="users.php" class="btn btn-outline-primary me-2">
+                                <i class="fas fa-users me-1"></i>利用者管理
+                            </a>
+                            <button type="button" class="btn btn-smiley" onclick="location.reload()">
+                                <i class="fas fa-upload me-1"></i>新しいCSVをインポート
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -502,7 +516,124 @@ require_once '../config/database.php';
             startImportBtn.disabled = true;
             resetBtn.disabled = true;
             
-            // プログレス更新
+            // プログレスバー表示
+            progressSection.style.display = 'block';
+            updateProgress(0, '処理開始中...');
+
+            try {
+                // FormData作成
+                const formData = new FormData();
+                formData.append('csv_file', selectedFile);
+                formData.append('encoding', document.getElementById('encodingSelect').value);
+                formData.append('overwrite', document.getElementById('overwriteCheck').checked ? '1' : '0');
+                formData.append('dry_run', document.getElementById('dryRunCheck').checked ? '1' : '0');
+
+                // プログレス更新
+                updateProgress(25, 'ファイルアップロード中...');
+
+                // APIリクエスト
+                const response = await fetch('../api/import.php', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                updateProgress(75, 'データ処理中...');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                updateProgress(100, '完了');
+
+                // 結果表示
+                displayResult(result);
+
+            } catch (error) {
+                console.error('Import error:', error);
+                updateProgress(0, 'エラーが発生しました');
+                showAlert(`インポート中にエラーが発生しました: ${error.message}`, 'danger');
+            } finally {
+                isUploading = false;
+                startImportBtn.disabled = false;
+                resetBtn.disabled = false;
+                
+                setTimeout(() => {
+                    progressSection.style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        // 結果表示
+        function displayResult(result) {
+            if (result.success) {
+                // 統計更新
+                if (result.data && result.data.stats) {
+                    const stats = result.data.stats;
+                    document.getElementById('totalRecords').textContent = stats.total_records || 0;
+                    document.getElementById('successRecords').textContent = stats.success_records || 0;
+                    document.getElementById('errorRecords').textContent = stats.error_records || 0;
+                    document.getElementById('duplicateRecords').textContent = stats.duplicate_records || 0;
+                }
+
+                // 成功メッセージ
+                document.getElementById('successMessage').textContent = result.message;
+                document.getElementById('successAlert').style.display = 'block';
+
+                // エラー表示（エラーがある場合）
+                if (result.data && result.data.errors && result.data.errors.length > 0) {
+                    displayErrors(result.data.errors);
+                }
+
+                // 処理詳細表示
+                if (result.data) {
+                    displayProcessDetails(result.data);
+                }
+
+                // 次のアクション表示
+                document.getElementById('nextActions').style.display = 'block';
+            } else {
+                showAlert(result.message || 'インポートに失敗しました', 'danger');
+                
+                if (result.data && result.data.errors) {
+                    displayErrors(result.data.errors);
+                }
+            }
+
+            resultSection.style.display = 'block';
+            resultSection.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // エラー表示
+        function displayErrors(errors) {
+            const errorList = document.getElementById('errorList');
+            errorList.innerHTML = errors.map(error => `
+                <div class="error-item">
+                    <strong>行 ${error.row || '?'}:</strong> ${error.message || error}
+                </div>
+            `).join('');
+            
+            document.getElementById('errorAlert').style.display = 'block';
+        }
+
+        // 処理詳細表示
+        function displayProcessDetails(data) {
+            const details = [];
+            
+            if (data.batch_id) details.push(`バッチID: ${data.batch_id}`);
+            if (data.filename) details.push(`ファイル名: ${data.filename}`);
+            if (data.stats && data.stats.processing_time) details.push(`処理時間: ${data.stats.processing_time}`);
+            if (data.import_summary && data.import_summary.encoding_detected) details.push(`エンコーディング: ${data.import_summary.encoding_detected}`);
+
+            if (details.length > 0) {
+                document.getElementById('processInfo').innerHTML = details.map(detail => `
+                    <span class="badge bg-info me-2 mb-1">${detail}</span>
+                `).join('');
+                document.getElementById('processDetails').style.display = 'block';
+            }
+        }
+
+        // プログレス更新
         function updateProgress(percent, text) {
             progressBar.style.width = percent + '%';
             progressPercent.textContent = percent + '%';
@@ -528,7 +659,7 @@ require_once '../config/database.php';
             // アップロードエリアの前に挿入
             uploadArea.parentNode.insertBefore(alertDiv, uploadArea);
             
-            // 3秒後に自動削除
+            // 5秒後に自動削除
             setTimeout(() => {
                 if (alertDiv && alertDiv.parentNode) {
                     alertDiv.remove();
@@ -604,120 +735,173 @@ require_once '../config/database.php';
             console.error('Unhandled Promise Rejection:', e.reason);
             showAlert('処理中にエラーが発生しました。再試行してください。', 'warning');
         });
-    </script>
-</body>
-</html>ログレスバー表示
-            progressSection.style.display = 'block';
-            updateProgress(0, '処理開始中...');
 
+        // デバッグ用ログ機能
+        function logDebugInfo(message, data = null) {
+            const timestamp = new Date().toLocaleTimeString('ja-JP');
+            console.log(`[${timestamp}] ${message}`, data || '');
+        }
+
+        // システム状況確認機能
+        async function checkSystemStatus() {
             try {
-                // FormData作成
-                const formData = new FormData();
-                formData.append('csv_file', selectedFile);
-                formData.append('encoding', document.getElementById('encodingSelect').value);
-                formData.append('overwrite', document.getElementById('overwriteCheck').checked ? '1' : '0');
-                formData.append('dry_run', document.getElementById('dryRunCheck').checked ? '1' : '0');
-
-                // プログレス更新
-                updateProgress(25, 'ファイルアップロード中...');
-
-                // APIリクエスト
-                const response = await fetch('../api/import.php', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                updateProgress(75, 'データ処理中...');
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
+                const response = await fetch('../api/import.php?action=status');
                 const result = await response.json();
-                updateProgress(100, '完了');
+                
+                if (result.success) {
+                    logDebugInfo('✅ システム状況確認完了', result.data);
+                    return result.data;
+                } else {
+                    logDebugInfo('⚠️ システム状況に問題があります', result.message);
+                    return null;
+                }
+            } catch (error) {
+                logDebugInfo('❌ システム状況確認エラー', error.message);
+                return null;
+            }
+        }
 
-                // 結果表示
-                displayResult(result);
+        // CSV形式事前チェック機能
+        function preCheckCSVFormat(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const content = e.target.result;
+                        const lines = content.split('\n');
+                        
+                        if (lines.length < 2) {
+                            reject(new Error('CSVファイルにヘッダー行とデータ行が必要です'));
+                            return;
+                        }
+
+                        const headerLine = lines[0].trim();
+                        if (!headerLine) {
+                            reject(new Error('CSVファイルのヘッダー行が空です'));
+                            return;
+                        }
+
+                        // フィールド数チェック
+                        const fields = headerLine.split(',');
+                        if (fields.length < 10) {
+                            reject(new Error(`フィールド数が少なすぎます（${fields.length}個）。Smiley配食事業用CSVは20個以上のフィールドが必要です`));
+                            return;
+                        }
+
+                        // Smiley配食事業必須フィールドチェック
+                        const requiredFields = ['法人名', '事業所名', '配達日', '社員名'];
+                        const missingFields = requiredFields.filter(field => 
+                            !fields.some(f => f.trim().includes(field))
+                        );
+
+                        if (missingFields.length > 0) {
+                            reject(new Error(`必須フィールドが不足しています: ${missingFields.join(', ')}`));
+                            return;
+                        }
+
+                        resolve({
+                            headerFields: fields.map(f => f.trim()),
+                            lineCount: lines.length,
+                            dataRows: lines.length - 1,
+                            encoding: 'UTF-8' // FileReader はUTF-8で読み込む
+                        });
+
+                    } catch (error) {
+                        reject(new Error(`CSVファイル形式チェックエラー: ${error.message}`));
+                    }
+                };
+                
+                reader.onerror = function() {
+                    reject(new Error('ファイル読み込みエラーが発生しました'));
+                };
+                
+                // 先頭1KBだけ読み込んでチェック
+                const blob = file.slice(0, 1024);
+                reader.readAsText(blob, 'UTF-8');
+            });
+        }
+
+        // 拡張ファイル処理（事前チェック付き）
+        async function handleFileWithValidation(file) {
+            try {
+                // 基本チェック
+                handleFile(file);
+
+                // CSV形式事前チェック
+                updateProgress(10, 'CSVファイル形式をチェック中...');
+                
+                const csvInfo = await preCheckCSVFormat(file);
+                logDebugInfo('📋 CSV事前チェック完了', csvInfo);
+
+                // ファイル詳細情報を更新
+                const enhancedDetails = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <strong>ファイル名:</strong> ${file.name}<br>
+                            <strong>サイズ:</strong> ${formatFileSize(file.size)}<br>
+                            <strong>データ行数:</strong> ${csvInfo.dataRows}行
+                        </div>
+                        <div class="col-md-6">
+                            <strong>種類:</strong> CSV (検証済み)<br>
+                            <strong>フィールド数:</strong> ${csvInfo.headerFields.length}個<br>
+                            <strong>エンコーディング:</strong> ${csvInfo.encoding}
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <strong>検出されたヘッダー:</strong><br>
+                        <div class="text-muted small">
+                            ${csvInfo.headerFields.slice(0, 5).join(', ')}${csvInfo.headerFields.length > 5 ? '...' : ''}
+                        </div>
+                    </div>
+                `;
+                
+                fileDetails.innerHTML = enhancedDetails;
+                updateProgress(0, ''); // プログレスバーをリセット
+
+                showAlert('CSVファイル形式の確認が完了しました。インポートを開始できます。', 'success');
 
             } catch (error) {
-                console.error('Import error:', error);
-                updateProgress(0, 'エラーが発生しました');
-                showAlert(`インポート中にエラーが発生しました: ${error.message}`, 'danger');
-            } finally {
-                isUploading = false;
-                startImportBtn.disabled = false;
-                resetBtn.disabled = false;
-                
+                logDebugInfo('❌ ファイル検証エラー', error.message);
+                showAlert(error.message, 'danger');
+                resetForm();
+            }
+        }
+
+        // 高度な結果表示機能
+        function displayAdvancedResult(result) {
+            displayResult(result);
+
+            // 成功時の追加情報
+            if (result.success && result.data) {
+                // インポート成功アクション
                 setTimeout(() => {
-                    progressSection.style.display = 'none';
-                }, 3000);
-            }
-        }
+                    if (result.data.stats && result.data.stats.success_records > 0) {
+                        showAlert(
+                            `🎉 ${result.data.stats.success_records}件のデータが正常にインポートされました！配達先企業管理画面で確認できます。`,
+                            'success'
+                        );
+                    }
+                }, 2000);
 
-        // 結果表示
-        function displayResult(result) {
-            if (result.success) {
-                // 統計更新
-                if (result.data && result.data.stats) {
+                // 統計情報の詳細表示
+                if (result.data.stats) {
                     const stats = result.data.stats;
-                    document.getElementById('totalRecords').textContent = stats.total_records || 0;
-                    document.getElementById('successRecords').textContent = stats.success_records || 0;
-                    document.getElementById('errorRecords').textContent = stats.error_records || 0;
-                    document.getElementById('duplicateRecords').textContent = stats.duplicate_records || 0;
-                }
-
-                // 成功メッセージ
-                document.getElementById('successMessage').textContent = result.message;
-                document.getElementById('successAlert').style.display = 'block';
-
-                // エラー表示（エラーがある場合）
-                if (result.data && result.data.errors && result.data.errors.length > 0) {
-                    displayErrors(result.data.errors);
-                }
-
-                // 処理詳細表示
-                if (result.data) {
-                    displayProcessDetails(result.data);
-                }
-            } else {
-                showAlert(result.message || 'インポートに失敗しました', 'danger');
-                
-                if (result.data && result.data.errors) {
-                    displayErrors(result.data.errors);
+                    const successRate = stats.total_records > 0 
+                        ? Math.round((stats.success_records / stats.total_records) * 100)
+                        : 0;
+                    
+                    // 成功率バッジを追加
+                    const successBadge = document.createElement('div');
+                    successBadge.className = 'text-center mt-3';
+                    successBadge.innerHTML = `
+                        <span class="badge bg-primary fs-6 px-3 py-2">
+                            成功率: ${successRate}%
+                        </span>
+                    `;
+                    document.getElementById('statsRow').appendChild(successBadge);
                 }
             }
-
-            resultSection.style.display = 'block';
-            resultSection.scrollIntoView({ behavior: 'smooth' });
         }
-
-        // エラー表示
-        function displayErrors(errors) {
-            const errorList = document.getElementById('errorList');
-            errorList.innerHTML = errors.map(error => `
-                <div class="error-item">
-                    <strong>行 ${error.row || '?'}:</strong> ${error.message || error}
-                </div>
-            `).join('');
-            
-            document.getElementById('errorAlert').style.display = 'block';
-        }
-
-        // 処理詳細表示
-        function displayProcessDetails(data) {
-            const details = [];
-            
-            if (data.batch_id) details.push(`バッチID: ${data.batch_id}`);
-            if (data.filename) details.push(`ファイル名: ${data.filename}`);
-            if (data.stats && data.stats.processing_time) details.push(`処理時間: ${data.stats.processing_time}`);
-            if (data.import_summary && data.import_summary.encoding_detected) details.push(`エンコーディング: ${data.import_summary.encoding_detected}`);
-
-            if (details.length > 0) {
-                document.getElementById('processInfo').innerHTML = details.map(detail => `
-                    <span class="badge bg-info me-2 mb-1">${detail}</span>
-                `).join('');
-                document.getElementById('processDetails').style.display = 'block';
-            }
-        }
-
-        // プ
+    </script>
+</body>
+</html>
