@@ -1,651 +1,542 @@
 <?php
 /**
- * CSVインポート画面（HTML） - Smiley配食事業仕様対応
+ * CSVインポート画面（HTMLアップロード画面）
  * pages/csv_import.php
- * 既存SecurityHelperクラス対応版
  */
-
-// セキュリティヘッダー
-header('X-Content-Type-Options: nosniff');
-header('X-Frame-Options: DENY');
-header('X-XSS-Protection: 1; mode=block');
-
-// 設定読み込み
 require_once '../config/database.php';
-require_once '../classes/SecurityHelper.php';
-
-// セッション開始（既存メソッド使用）
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-// CSRF トークン生成
-$csrfToken = SecurityHelper::generateCSRFToken();
-
-// ページタイトル
-$pageTitle = 'CSVインポート - Smiley配食事業';
 ?>
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($pageTitle) ?></title>
+    <title>CSVインポート - Smiley配食事業システム</title>
     
-    <!-- Bootstrap CSS -->
+    <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
     <style>
-        .drag-drop-zone {
-            border: 2px dashed #dee2e6;
-            border-radius: 10px;
-            padding: 40px;
+        :root {
+            --smiley-primary: #2E8B57;
+            --smiley-secondary: #20B2AA;
+            --smiley-success: #28a745;
+            --smiley-warning: #ffc107;
+            --smiley-danger: #dc3545;
+            --smiley-light: #f8f9fa;
+        }
+        
+        body {
+            background: linear-gradient(135deg, var(--smiley-light) 0%, #e8f5e8 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .navbar {
+            background: linear-gradient(135deg, var(--smiley-primary) 0%, var(--smiley-secondary) 100%);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .card {
+            border: none;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            border-radius: 15px;
+            overflow: hidden;
+        }
+        
+        .card-header {
+            background: linear-gradient(135deg, var(--smiley-primary) 0%, var(--smiley-secondary) 100%);
+            color: white;
+            border: none;
+            padding: 1.5rem;
+        }
+        
+        .upload-area {
+            border: 3px dashed #ddd;
+            border-radius: 15px;
+            padding: 3rem;
             text-align: center;
+            background: white;
             transition: all 0.3s ease;
-            background-color: #f8f9fa;
             cursor: pointer;
+            position: relative;
         }
         
-        .drag-drop-zone:hover,
-        .drag-drop-zone.dragover {
-            border-color: #198754;
-            background-color: #d1e7dd;
+        .upload-area:hover,
+        .upload-area.dragover {
+            border-color: var(--smiley-primary);
+            background: #f0f8f0;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(46, 139, 87, 0.2);
         }
         
-        .file-info {
-            background-color: #e3f2fd;
-            border: 1px solid #2196f3;
-            border-radius: 5px;
-            padding: 15px;
-            margin: 15px 0;
+        .upload-icon {
+            font-size: 4rem;
+            color: var(--smiley-primary);
+            margin-bottom: 1rem;
         }
         
-        .progress-container {
-            display: none;
-            margin: 20px 0;
+        .progress {
+            height: 25px;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
         }
         
-        .result-container {
-            display: none;
-            margin: 20px 0;
+        .progress-bar {
+            background: linear-gradient(135deg, var(--smiley-primary) 0%, var(--smiley-secondary) 100%);
+            transition: width 0.3s ease;
         }
         
-        .error-details {
-            max-height: 300px;
-            overflow-y: auto;
-            background-color: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 5px;
-            padding: 15px;
+        .btn-smiley {
+            background: linear-gradient(135deg, var(--smiley-primary) 0%, var(--smiley-secondary) 100%);
+            border: none;
+            color: white;
+            padding: 0.75rem 2rem;
+            border-radius: 25px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(46, 139, 87, 0.3);
+        }
+        
+        .btn-smiley:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(46, 139, 87, 0.4);
+            color: white;
+        }
+        
+        .alert {
+            border: none;
+            border-radius: 10px;
+            padding: 1rem 1.5rem;
         }
         
         .stats-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: white;
             border-radius: 10px;
-            padding: 20px;
-            margin: 10px 0;
+            padding: 1.5rem;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: transform 0.3s ease;
         }
         
-        .format-guide {
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 5px;
-            padding: 15px;
-            margin: 15px 0;
+        .stats-card:hover {
+            transform: translateY(-3px);
+        }
+        
+        .stats-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        
+        .file-info {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-left: 4px solid var(--smiley-primary);
+        }
+        
+        .spinner-border-sm {
+            width: 1rem;
+            height: 1rem;
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .error-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .error-item {
+            background: #fff5f5;
+            border-left: 4px solid var(--smiley-danger);
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            border-radius: 0 5px 5px 0;
         }
     </style>
 </head>
-<body class="bg-light">
+
+<body>
     <!-- ナビゲーション -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container">
-            <a class="navbar-brand" href="../index.php">
-                <i class="bi bi-building"></i> Smiley配食事業
+            <a class="navbar-brand fw-bold" href="../index.php">
+                <i class="fas fa-utensils me-2"></i>
+                Smiley配食事業システム
             </a>
-            <div class="navbar-nav ms-auto">
-                <a class="nav-link" href="../index.php">
-                    <i class="bi bi-house"></i> ダッシュボード
-                </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.php">
+                            <i class="fas fa-home me-1"></i>ダッシュボード
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="csv_import.php">
+                            <i class="fas fa-upload me-1"></i>CSVインポート
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="companies.php">
+                            <i class="fas fa-building me-1"></i>配達先企業
+                        </a>
+                    </li>
+                </ul>
             </div>
         </div>
     </nav>
 
-    <div class="container mt-4">
+    <div class="container my-5">
         <!-- ページヘッダー -->
-        <div class="row">
+        <div class="row mb-4">
             <div class="col-12">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h1 class="h3 text-primary">
-                        <i class="bi bi-file-earmark-arrow-up"></i> CSVインポート
-                    </h1>
-                    <nav aria-label="breadcrumb">
-                        <ol class="breadcrumb">
-                            <li class="breadcrumb-item"><a href="../index.php">ホーム</a></li>
-                            <li class="breadcrumb-item active">CSVインポート</li>
-                        </ol>
-                    </nav>
-                </div>
+                <h1 class="display-6 text-center mb-3">
+                    <i class="fas fa-file-csv text-primary me-3"></i>
+                    CSVファイルインポート
+                </h1>
+                <p class="text-center text-muted">
+                    Smiley配食事業の給食注文データをCSVファイルから一括取り込みします
+                </p>
             </div>
         </div>
 
-        <!-- CSVフォーマットガイド -->
-        <div class="row mb-4">
-            <div class="col-12">
-                <div class="format-guide">
-                    <h5 class="text-warning">
-                        <i class="bi bi-info-circle"></i> Smiley配食事業 CSVフォーマット仕様
-                    </h5>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <strong>必須フィールド（5項目）：</strong>
-                            <ul class="mb-2">
-                                <li>配達日</li>
-                                <li>社員CD（利用者コード）</li>
-                                <li>社員名（利用者名）</li>
-                                <li>事業所CD（配達先企業コード）</li>
-                                <li>事業所名（配達先企業名）</li>
-                            </ul>
+        <!-- アップロード画面 -->
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-cloud-upload-alt me-2"></i>
+                            ファイルアップロード
+                        </h5>
+                    </div>
+                    <div class="card-body p-4">
+                        <!-- アップロード エリア -->
+                        <div class="upload-area" id="uploadArea">
+                            <div class="upload-icon">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                            </div>
+                            <h4>CSVファイルをドラッグ&ドロップ</h4>
+                            <p class="text-muted mb-3">または、クリックしてファイルを選択</p>
+                            <button type="button" class="btn btn-smiley" id="fileSelectBtn">
+                                <i class="fas fa-folder-open me-2"></i>
+                                ファイルを選択
+                            </button>
+                            <input type="file" id="csvFileInput" accept=".csv,.txt" style="display: none;">
                         </div>
-                        <div class="col-md-6">
-                            <strong>対応フィールド：</strong>
-                            <span class="badge bg-success">全23フィールド対応</span>
-                            <br><small class="text-muted">部門、メニュー、給食業者、雇用形態等</small>
+
+                        <!-- ファイル情報 -->
+                        <div id="fileInfo" class="file-info" style="display: none;">
+                            <h6><i class="fas fa-file-csv me-2"></i>選択されたファイル</h6>
+                            <div id="fileDetails"></div>
+                        </div>
+
+                        <!-- インポート オプション -->
+                        <div id="importOptions" class="mt-4" style="display: none;">
+                            <h6><i class="fas fa-cogs me-2"></i>インポート設定</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label for="encodingSelect" class="form-label">文字エンコーディング</label>
+                                        <select id="encodingSelect" class="form-select">
+                                            <option value="auto">自動検出</option>
+                                            <option value="SJIS-win">Shift-JIS (Windows)</option>
+                                            <option value="UTF-8">UTF-8</option>
+                                            <option value="UTF-8-BOM">UTF-8 (BOM付き)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label class="form-label">処理モード</label>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="overwriteCheck">
+                                            <label class="form-check-label" for="overwriteCheck">
+                                                重複データを上書き
+                                            </label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="dryRunCheck">
+                                            <label class="form-check-label" for="dryRunCheck">
+                                                テスト実行（データベースに保存しない）
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- インポート実行ボタン -->
+                        <div id="uploadControls" class="text-center mt-4" style="display: none;">
+                            <button type="button" class="btn btn-smiley btn-lg me-3" id="startImportBtn">
+                                <i class="fas fa-play me-2"></i>
+                                インポート開始
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="resetBtn">
+                                <i class="fas fa-redo me-2"></i>
+                                リセット
+                            </button>
+                        </div>
+
+                        <!-- プログレスバー -->
+                        <div id="progressSection" class="mt-4" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span id="progressText">処理中...</span>
+                                <span id="progressPercent">0%</span>
+                            </div>
+                            <div class="progress">
+                                <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- メインコンテンツ -->
-        <div class="row">
-            <!-- アップロード画面 -->
-            <div class="col-lg-8">
-                <div class="card">
-                    <div class="card-header bg-success text-white">
+        <!-- 結果表示 -->
+        <div id="resultSection" class="row mt-4" style="display: none;">
+            <div class="col-12">
+                <div class="card fade-in">
+                    <div class="card-header">
                         <h5 class="mb-0">
-                            <i class="bi bi-cloud-upload"></i> CSVファイルアップロード
+                            <i class="fas fa-chart-bar me-2"></i>
+                            インポート結果
                         </h5>
                     </div>
                     <div class="card-body">
-                        <!-- ファイルアップロードフォーム -->
-                        <form id="csvUploadForm" enctype="multipart/form-data">
-                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
-                            
-                            <!-- ドラッグ&ドロップエリア -->
-                            <div class="drag-drop-zone" id="dropZone">
-                                <i class="bi bi-cloud-upload fs-1 text-muted"></i>
-                                <h5 class="mt-3">CSVファイルをドラッグ&ドロップ</h5>
-                                <p class="text-muted">または <strong>クリックしてファイルを選択</strong></p>
-                                <input type="file" id="csvFile" name="csv_file" accept=".csv,.txt" style="display: none;">
-                            </div>
-
-                            <!-- ファイル情報表示 -->
-                            <div id="fileInfo" class="file-info" style="display: none;">
-                                <h6><i class="bi bi-file-earmark-text"></i> 選択されたファイル</h6>
-                                <div id="fileName"></div>
-                                <div id="fileSize"></div>
-                                <div id="fileType"></div>
-                            </div>
-
-                            <!-- インポートオプション -->
-                            <div class="row mt-3">
-                                <div class="col-md-6">
-                                    <label for="encoding" class="form-label">文字エンコーディング</label>
-                                    <select name="encoding" id="encoding" class="form-select">
-                                        <option value="auto">自動検出</option>
-                                        <option value="UTF-8">UTF-8</option>
-                                        <option value="SJIS-win">Shift-JIS（Windows）</option>
-                                        <option value="EUC-JP">EUC-JP</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">オプション</label>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" name="overwrite" id="overwrite">
-                                        <label class="form-check-label" for="overwrite">
-                                            重複データを上書き
-                                        </label>
-                                    </div>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" name="dry_run" id="dryRun">
-                                        <label class="form-check-label" for="dryRun">
-                                            テスト実行（実際には保存しない）
-                                        </label>
-                                    </div>
+                        <!-- 統計表示 -->
+                        <div class="row mb-4" id="statsRow">
+                            <div class="col-md-3">
+                                <div class="stats-card text-primary">
+                                    <div class="stats-number" id="totalRecords">0</div>
+                                    <div class="text-muted">総レコード数</div>
                                 </div>
                             </div>
-
-                            <!-- アップロードボタン -->
-                            <div class="d-grid gap-2 mt-4">
-                                <button type="submit" id="uploadBtn" class="btn btn-success btn-lg" disabled>
-                                    <i class="bi bi-upload"></i> CSVインポート実行
-                                </button>
+                            <div class="col-md-3">
+                                <div class="stats-card text-success">
+                                    <div class="stats-number" id="successRecords">0</div>
+                                    <div class="text-muted">成功</div>
+                                </div>
                             </div>
-                        </form>
-
-                        <!-- プログレスバー -->
-                        <div class="progress-container" id="progressContainer">
-                            <h6>インポート進行中...</h6>
-                            <div class="progress">
-                                <div class="progress-bar progress-bar-striped progress-bar-animated" 
-                                     id="progressBar" role="progressbar" style="width: 0%"></div>
+                            <div class="col-md-3">
+                                <div class="stats-card text-danger">
+                                    <div class="stats-number" id="errorRecords">0</div>
+                                    <div class="text-muted">エラー</div>
+                                </div>
                             </div>
-                            <div class="text-center mt-2">
-                                <small id="progressText">処理中...</small>
-                            </div>
-                        </div>
-
-                        <!-- 結果表示 -->
-                        <div class="result-container" id="resultContainer">
-                            <div id="resultContent"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- サイドバー -->
-            <div class="col-lg-4">
-                <!-- 統計情報 -->
-                <div class="card">
-                    <div class="card-header bg-info text-white">
-                        <h6 class="mb-0">
-                            <i class="bi bi-graph-up"></i> インポート統計
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <div id="importStats">
-                            <div class="text-center text-muted">
-                                <i class="bi bi-hourglass-split fs-1"></i>
-                                <p>CSVをアップロードして統計を表示</p>
+                            <div class="col-md-3">
+                                <div class="stats-card text-warning">
+                                    <div class="stats-number" id="duplicateRecords">0</div>
+                                    <div class="text-muted">重複</div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </div>
 
-                <!-- インポート履歴 -->
-                <div class="card mt-3">
-                    <div class="card-header bg-secondary text-white">
-                        <h6 class="mb-0">
-                            <i class="bi bi-clock-history"></i> 最近のインポート
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <div id="importHistory">
-                            <small class="text-muted">履歴を読み込み中...</small>
+                        <!-- 成功メッセージ -->
+                        <div id="successAlert" class="alert alert-success" style="display: none;">
+                            <i class="fas fa-check-circle me-2"></i>
+                            <span id="successMessage"></span>
                         </div>
-                    </div>
-                </div>
 
-                <!-- ヘルプ -->
-                <div class="card mt-3">
-                    <div class="card-header bg-warning text-dark">
-                        <h6 class="mb-0">
-                            <i class="bi bi-question-circle"></i> ヘルプ
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <small>
-                            <strong>サポートファイル形式：</strong><br>
-                            .csv, .txt（10MB以下）<br><br>
-                            
-                            <strong>文字エンコーディング：</strong><br>
-                            UTF-8、Shift-JIS、EUC-JP<br><br>
-                            
-                            <strong>問題がある場合：</strong><br>
-                            <a href="mailto:support@smiley.co.jp">support@smiley.co.jp</a>
-                        </small>
+                        <!-- エラー表示 -->
+                        <div id="errorAlert" class="alert alert-danger" style="display: none;">
+                            <h6><i class="fas fa-exclamation-triangle me-2"></i>エラー詳細</h6>
+                            <div id="errorList" class="error-list"></div>
+                        </div>
+
+                        <!-- 処理詳細 -->
+                        <div id="processDetails" class="mt-3" style="display: none;">
+                            <h6><i class="fas fa-info-circle me-2"></i>処理詳細</h6>
+                            <div id="processInfo"></div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Bootstrap JS -->
+    <!-- Bootstrap 5 JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    
+
     <script>
-        // ページ読み込み時の処理
+        // グローバル変数
+        let selectedFile = null;
+        let isUploading = false;
+
+        // DOM要素取得
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('csvFileInput');
+        const fileSelectBtn = document.getElementById('fileSelectBtn');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileDetails = document.getElementById('fileDetails');
+        const importOptions = document.getElementById('importOptions');
+        const uploadControls = document.getElementById('uploadControls');
+        const startImportBtn = document.getElementById('startImportBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const progressSection = document.getElementById('progressSection');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const progressPercent = document.getElementById('progressPercent');
+        const resultSection = document.getElementById('resultSection');
+
+        // イベントリスナー設定
         document.addEventListener('DOMContentLoaded', function() {
-            initializeFileUpload();
-            loadImportHistory();
+            // ファイル選択ボタン
+            fileSelectBtn.addEventListener('click', () => fileInput.click());
+            
+            // ファイル入力変更
+            fileInput.addEventListener('change', handleFileSelect);
+            
+            // ドラッグ&ドロップ
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', handleDragOver);
+            uploadArea.addEventListener('dragleave', handleDragLeave);
+            uploadArea.addEventListener('drop', handleFileDrop);
+            
+            // ボタンイベント
+            startImportBtn.addEventListener('click', startImport);
+            resetBtn.addEventListener('click', resetForm);
+            
+            // フォーム送信防止
+            document.addEventListener('submit', e => e.preventDefault());
         });
 
-        /**
-         * ファイルアップロード機能初期化
-         */
-        function initializeFileUpload() {
-            const dropZone = document.getElementById('dropZone');
-            const fileInput = document.getElementById('csvFile');
-            const uploadForm = document.getElementById('csvUploadForm');
-            const uploadBtn = document.getElementById('uploadBtn');
-
-            // ドラッグ&ドロップイベント
-            dropZone.addEventListener('click', () => fileInput.click());
-            
-            dropZone.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                dropZone.classList.add('dragover');
-            });
-            
-            dropZone.addEventListener('dragleave', () => {
-                dropZone.classList.remove('dragover');
-            });
-            
-            dropZone.addEventListener('drop', (e) => {
-                e.preventDefault();
-                dropZone.classList.remove('dragover');
-                
-                const files = e.dataTransfer.files;
-                if (files.length > 0) {
-                    fileInput.files = files;
-                    handleFileSelect(files[0]);
-                }
-            });
-
-            // ファイル選択イベント
-            fileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    handleFileSelect(e.target.files[0]);
-                }
-            });
-
-            // フォーム送信イベント
-            uploadForm.addEventListener('submit', handleFormSubmit);
+        // ドラッグオーバー処理
+        function handleDragOver(e) {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
         }
 
-        /**
-         * ファイル選択処理
-         */
-        function handleFileSelect(file) {
-            const fileInfo = document.getElementById('fileInfo');
-            const fileName = document.getElementById('fileName');
-            const fileSize = document.getElementById('fileSize');
-            const fileType = document.getElementById('fileType');
-            const uploadBtn = document.getElementById('uploadBtn');
+        // ドラッグ離脱処理
+        function handleDragLeave(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        }
 
-            // ファイル検証
-            if (!validateFile(file)) {
+        // ファイルドロップ処理
+        function handleFileDrop(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        }
+
+        // ファイル選択処理
+        function handleFileSelect(e) {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        }
+
+        // ファイル処理
+        function handleFile(file) {
+            // ファイル形式チェック
+            if (!file.name.toLowerCase().endsWith('.csv') && !file.name.toLowerCase().endsWith('.txt')) {
+                showAlert('CSVファイルまたはTXTファイルを選択してください。', 'danger');
                 return;
             }
 
-            // ファイル情報表示
-            fileName.innerHTML = `<strong>ファイル名:</strong> ${file.name}`;
-            fileSize.innerHTML = `<strong>サイズ:</strong> ${formatFileSize(file.size)}`;
-            fileType.innerHTML = `<strong>形式:</strong> ${file.type || 'text/csv'}`;
+            // ファイルサイズチェック（10MB制限）
+            if (file.size > 10 * 1024 * 1024) {
+                showAlert('ファイルサイズが10MBを超えています。', 'danger');
+                return;
+            }
+
+            selectedFile = file;
+            displayFileInfo(file);
+            showImportOptions();
+        }
+
+        // ファイル情報表示
+        function displayFileInfo(file) {
+            const sizeText = formatFileSize(file.size);
+            const lastModified = new Date(file.lastModified).toLocaleString('ja-JP');
+            
+            fileDetails.innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong>ファイル名:</strong> ${file.name}<br>
+                        <strong>サイズ:</strong> ${sizeText}
+                    </div>
+                    <div class="col-md-6">
+                        <strong>種類:</strong> ${file.type || 'text/csv'}<br>
+                        <strong>更新日:</strong> ${lastModified}
+                    </div>
+                </div>
+            `;
             
             fileInfo.style.display = 'block';
-            uploadBtn.disabled = false;
         }
 
-        /**
-         * ファイル検証
-         */
-        function validateFile(file) {
-            const allowedTypes = ['text/csv', 'application/csv', 'text/plain'];
-            const allowedExtensions = ['csv', 'txt'];
-            const maxSize = 10 * 1024 * 1024; // 10MB
-
-            // 拡張子チェック
-            const extension = file.name.split('.').pop().toLowerCase();
-            if (!allowedExtensions.includes(extension)) {
-                showError('CSV またはTXT ファイルを選択してください');
-                return false;
-            }
-
-            // サイズチェック
-            if (file.size > maxSize) {
-                showError('ファイルサイズは10MB以下にしてください');
-                return false;
-            }
-
-            return true;
+        // インポートオプション表示
+        function showImportOptions() {
+            importOptions.style.display = 'block';
+            uploadControls.style.display = 'block';
         }
 
-        /**
-         * フォーム送信処理
-         */
-        async function handleFormSubmit(e) {
-            e.preventDefault();
+        // インポート開始
+        async function startImport() {
+            if (!selectedFile || isUploading) return;
+
+            isUploading = true;
+            startImportBtn.disabled = true;
+            resetBtn.disabled = true;
             
-            const formData = new FormData(e.target);
-            const progressContainer = document.getElementById('progressContainer');
-            const resultContainer = document.getElementById('resultContainer');
-            const uploadBtn = document.getElementById('uploadBtn');
-
-            try {
-                // UI更新
-                uploadBtn.disabled = true;
-                progressContainer.style.display = 'block';
-                resultContainer.style.display = 'none';
-                
-                updateProgress(0, 'アップロード開始...');
-
-                // APIリクエスト
-                const response = await fetch('../api/import.php', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                updateProgress(50, 'サーバー処理中...');
-
-                const result = await response.json();
-                
-                updateProgress(100, '完了');
-
-                // 結果表示
-                setTimeout(() => {
-                    displayResult(result);
-                    progressContainer.style.display = 'none';
-                }, 1000);
-
-            } catch (error) {
-                console.error('アップロードエラー:', error);
-                showError('アップロード中にエラーが発生しました: ' + error.message);
-                progressContainer.style.display = 'none';
-            } finally {
-                uploadBtn.disabled = false;
-            }
-        }
-
-        /**
-         * プログレス更新
-         */
+            // プログレス更新
         function updateProgress(percent, text) {
-            const progressBar = document.getElementById('progressBar');
-            const progressText = document.getElementById('progressText');
-            
             progressBar.style.width = percent + '%';
+            progressPercent.textContent = percent + '%';
             progressText.textContent = text;
         }
 
-        /**
-         * 結果表示
-         */
-        function displayResult(result) {
-            const resultContainer = document.getElementById('resultContainer');
-            const resultContent = document.getElementById('resultContent');
-            
-            if (result.success) {
-                resultContent.innerHTML = createSuccessResult(result);
-                if (result.data && result.data.stats) {
-                    updateImportStats(result.data.stats);
-                }
-            } else {
-                resultContent.innerHTML = createErrorResult(result);
+        // アラート表示
+        function showAlert(message, type = 'info') {
+            // 既存のアラートを削除
+            const existingAlert = document.querySelector('.alert-custom');
+            if (existingAlert) {
+                existingAlert.remove();
             }
-            
-            resultContainer.style.display = 'block';
-            loadImportHistory(); // 履歴更新
-        }
 
-        /**
-         * 成功結果HTML生成
-         */
-        function createSuccessResult(result) {
-            const stats = result.data?.stats || {
-                total_records: 0,
-                success_records: 0,
-                error_records: 0,
-                duplicate_records: 0
-            };
-            
-            return `
-                <div class="alert alert-success">
-                    <h5><i class="bi bi-check-circle"></i> インポート完了</h5>
-                    <p>${result.message}</p>
-                </div>
-                
-                <div class="row">
-                    <div class="col-6 col-md-3">
-                        <div class="text-center p-3 bg-primary text-white rounded">
-                            <div class="fs-4">${stats.total_records || 0}</div>
-                            <small>総レコード数</small>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <div class="text-center p-3 bg-success text-white rounded">
-                            <div class="fs-4">${stats.success_records || 0}</div>
-                            <small>成功</small>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <div class="text-center p-3 bg-danger text-white rounded">
-                            <div class="fs-4">${stats.error_records || 0}</div>
-                            <small>エラー</small>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <div class="text-center p-3 bg-warning text-dark rounded">
-                            <div class="fs-4">${stats.duplicate_records || 0}</div>
-                            <small>重複</small>
-                        </div>
-                    </div>
-                </div>
-                
-                ${(stats.error_records > 0 && result.data?.errors) ? createErrorDetails(result.data.errors) : ''}
+            // 新しいアラート作成
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show alert-custom`;
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             `;
-        }
 
-        /**
-         * エラー結果HTML生成
-         */
-        function createErrorResult(result) {
-            return `
-                <div class="alert alert-danger">
-                    <h5><i class="bi bi-exclamation-triangle"></i> インポートエラー</h5>
-                    <p>${result.message}</p>
-                    ${result.data?.error_message ? 
-                        `<hr><small><strong>詳細:</strong> ${result.data.error_message}</small>` : ''}
-                </div>
-            `;
-        }
-
-        /**
-         * エラー詳細HTML生成
-         */
-        function createErrorDetails(errors) {
-            if (!errors || errors.length === 0) return '';
+            // アップロードエリアの前に挿入
+            uploadArea.parentNode.insertBefore(alertDiv, uploadArea);
             
-            let html = '<div class="mt-3"><h6>エラー詳細:</h6><div class="error-details">';
-            
-            errors.forEach((error, index) => {
-                html += `<div class="mb-2">
-                    <strong>行 ${error.row || (index + 1)}:</strong> ${error.message || error}
-                </div>`;
-            });
-            
-            html += '</div></div>';
-            return html;
-        }
-
-        /**
-         * 統計情報更新
-         */
-        function updateImportStats(stats) {
-            const statsContainer = document.getElementById('importStats');
-            
-            statsContainer.innerHTML = `
-                <div class="stats-card">
-                    <div class="row text-center">
-                        <div class="col-6">
-                            <div class="fs-5">${stats.total_records || 0}</div>
-                            <small>総レコード</small>
-                        </div>
-                        <div class="col-6">
-                            <div class="fs-5">${stats.success_records || 0}</div>
-                            <small>成功</small>
-                        </div>
-                    </div>
-                    <div class="row text-center mt-2">
-                        <div class="col-6">
-                            <div class="fs-6">${stats.error_records || 0}</div>
-                            <small>エラー</small>
-                        </div>
-                        <div class="col-6">
-                            <div class="fs-6">${stats.processing_time || '不明'}</div>
-                            <small>処理時間</small>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        /**
-         * インポート履歴読み込み
-         */
-        async function loadImportHistory() {
-            try {
-                const response = await fetch('../api/import.php?action=history&limit=5');
-                const result = await response.json();
-                
-                const historyContainer = document.getElementById('importHistory');
-                
-                if (result.success && result.data && result.data.length > 0) {
-                    let html = '';
-                    result.data.forEach(item => {
-                        html += `
-                            <div class="border-bottom pb-2 mb-2">
-                                <div class="d-flex justify-content-between">
-                                    <small><strong>${item.filename || '不明'}</strong></small>
-                                    <small class="text-muted">${item.created_at || '不明'}</small>
-                                </div>
-                                <small class="text-muted">
-                                    ${item.success_records || 0}件成功 / ${item.total_records || 0}件中
-                                </small>
-                            </div>
-                        `;
-                    });
-                    historyContainer.innerHTML = html;
-                } else {
-                    historyContainer.innerHTML = '<small class="text-muted">履歴なし</small>';
+            // 3秒後に自動削除
+            setTimeout(() => {
+                if (alertDiv && alertDiv.parentNode) {
+                    alertDiv.remove();
                 }
-            } catch (error) {
-                document.getElementById('importHistory').innerHTML = 
-                    '<small class="text-muted">履歴読み込みエラー</small>';
-            }
+            }, 5000);
         }
 
-        /**
-         * エラー表示
-         */
-        function showError(message) {
-            const resultContainer = document.getElementById('resultContainer');
-            const resultContent = document.getElementById('resultContent');
-            
-            resultContent.innerHTML = `
-                <div class="alert alert-warning">
-                    <i class="bi bi-exclamation-triangle"></i> ${message}
-                </div>
-            `;
-            
-            resultContainer.style.display = 'block';
-        }
-
-        /**
-         * ファイルサイズフォーマット
-         */
+        // ファイルサイズフォーマット
         function formatFileSize(bytes) {
             if (bytes === 0) return '0 Bytes';
             
@@ -655,6 +546,178 @@ $pageTitle = 'CSVインポート - Smiley配食事業';
             
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
+
+        // フォームリセット
+        function resetForm() {
+            selectedFile = null;
+            fileInput.value = '';
+            
+            // 表示要素をリセット
+            fileInfo.style.display = 'none';
+            importOptions.style.display = 'none';
+            uploadControls.style.display = 'none';
+            progressSection.style.display = 'none';
+            resultSection.style.display = 'none';
+            
+            // フォーム値をリセット
+            document.getElementById('encodingSelect').value = 'auto';
+            document.getElementById('overwriteCheck').checked = false;
+            document.getElementById('dryRunCheck').checked = false;
+            
+            // 既存のアラートを削除
+            const existingAlert = document.querySelector('.alert-custom');
+            if (existingAlert) {
+                existingAlert.remove();
+            }
+            
+            showAlert('フォームがリセットされました。', 'info');
+        }
+
+        // ページ読み込み時の初期化
+        window.addEventListener('load', function() {
+            // API接続テスト
+            fetch('../api/import.php?action=test')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log('✅ CSVインポートAPI接続確認:', data.message);
+                        console.log('📊 システム情報:', data.data);
+                    } else {
+                        console.warn('⚠️ API接続警告:', data.message);
+                        showAlert('API接続に問題があります。管理者に連絡してください。', 'warning');
+                    }
+                })
+                .catch(error => {
+                    console.error('❌ API接続エラー:', error);
+                    showAlert('APIとの接続に失敗しました。ネットワーク接続を確認してください。', 'danger');
+                });
+        });
+
+        // エラーハンドリング
+        window.addEventListener('error', function(e) {
+            console.error('JavaScript Error:', e.error);
+            showAlert('予期しないエラーが発生しました。ページを再読み込みしてください。', 'danger');
+        });
+
+        // 未処理の Promise エラーをキャッチ
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('Unhandled Promise Rejection:', e.reason);
+            showAlert('処理中にエラーが発生しました。再試行してください。', 'warning');
+        });
     </script>
 </body>
-</html>
+</html>ログレスバー表示
+            progressSection.style.display = 'block';
+            updateProgress(0, '処理開始中...');
+
+            try {
+                // FormData作成
+                const formData = new FormData();
+                formData.append('csv_file', selectedFile);
+                formData.append('encoding', document.getElementById('encodingSelect').value);
+                formData.append('overwrite', document.getElementById('overwriteCheck').checked ? '1' : '0');
+                formData.append('dry_run', document.getElementById('dryRunCheck').checked ? '1' : '0');
+
+                // プログレス更新
+                updateProgress(25, 'ファイルアップロード中...');
+
+                // APIリクエスト
+                const response = await fetch('../api/import.php', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                updateProgress(75, 'データ処理中...');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                updateProgress(100, '完了');
+
+                // 結果表示
+                displayResult(result);
+
+            } catch (error) {
+                console.error('Import error:', error);
+                updateProgress(0, 'エラーが発生しました');
+                showAlert(`インポート中にエラーが発生しました: ${error.message}`, 'danger');
+            } finally {
+                isUploading = false;
+                startImportBtn.disabled = false;
+                resetBtn.disabled = false;
+                
+                setTimeout(() => {
+                    progressSection.style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        // 結果表示
+        function displayResult(result) {
+            if (result.success) {
+                // 統計更新
+                if (result.data && result.data.stats) {
+                    const stats = result.data.stats;
+                    document.getElementById('totalRecords').textContent = stats.total_records || 0;
+                    document.getElementById('successRecords').textContent = stats.success_records || 0;
+                    document.getElementById('errorRecords').textContent = stats.error_records || 0;
+                    document.getElementById('duplicateRecords').textContent = stats.duplicate_records || 0;
+                }
+
+                // 成功メッセージ
+                document.getElementById('successMessage').textContent = result.message;
+                document.getElementById('successAlert').style.display = 'block';
+
+                // エラー表示（エラーがある場合）
+                if (result.data && result.data.errors && result.data.errors.length > 0) {
+                    displayErrors(result.data.errors);
+                }
+
+                // 処理詳細表示
+                if (result.data) {
+                    displayProcessDetails(result.data);
+                }
+            } else {
+                showAlert(result.message || 'インポートに失敗しました', 'danger');
+                
+                if (result.data && result.data.errors) {
+                    displayErrors(result.data.errors);
+                }
+            }
+
+            resultSection.style.display = 'block';
+            resultSection.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // エラー表示
+        function displayErrors(errors) {
+            const errorList = document.getElementById('errorList');
+            errorList.innerHTML = errors.map(error => `
+                <div class="error-item">
+                    <strong>行 ${error.row || '?'}:</strong> ${error.message || error}
+                </div>
+            `).join('');
+            
+            document.getElementById('errorAlert').style.display = 'block';
+        }
+
+        // 処理詳細表示
+        function displayProcessDetails(data) {
+            const details = [];
+            
+            if (data.batch_id) details.push(`バッチID: ${data.batch_id}`);
+            if (data.filename) details.push(`ファイル名: ${data.filename}`);
+            if (data.stats && data.stats.processing_time) details.push(`処理時間: ${data.stats.processing_time}`);
+            if (data.import_summary && data.import_summary.encoding_detected) details.push(`エンコーディング: ${data.import_summary.encoding_detected}`);
+
+            if (details.length > 0) {
+                document.getElementById('processInfo').innerHTML = details.map(detail => `
+                    <span class="badge bg-info me-2 mb-1">${detail}</span>
+                `).join('');
+                document.getElementById('processDetails').style.display = 'block';
+            }
+        }
+
+        // プ
