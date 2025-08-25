@@ -171,21 +171,26 @@ class SmileyCSVImporter {
         // データ行解析
         for ($i = 1; $i < count($lines); $i++) {
             $row = str_getcsv($lines[$i]);
-            
+
             // 空行スキップ
             if (empty(array_filter($row))) {
                 continue;
             }
-            
+
             // ヘッダーとデータ結合
             $rowData = [];
-            for ($j = 0; $j < count($headers); $j++) {
-                $value = isset($row[$j]) ? trim($row[$j]) : '';
-                $rowData[$headers[$j]] = $value;
+            foreach ($row as $j => $value) {
+                // ヘッダーが存在し、かつヘッダー名が空でない場合のみ処理
+                if (isset($headers[$j]) && trim($headers[$j]) !== '') {
+                    $rowData[trim($headers[$j])] = trim($value);
+                }
             }
             
-            $rowData['_row_number'] = $i + 1;
-            $data[] = $rowData;
+            // データが空でなければ追加
+            if (!empty($rowData)) {
+                $rowData['_row_number'] = $i + 1;
+                $data[] = $rowData;
+            }
         }
         
         return $data;
