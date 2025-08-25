@@ -1,6 +1,6 @@
 <?php
 /**
- * Smiley配食事業専用CSVインポーター（根本修正版）
+ * Smiley配食事業専用CSVインポーター（完全修正版）
  * 「結果が全て0」問題の完全解決
  */
 class SmileyCSVImporter {
@@ -552,4 +552,104 @@ class SmileyCSVImporter {
         $sql = "SELECT id FROM products WHERE product_code = ?";
         $result = $this->db->fetchOne($sql, [$row['product_code']]);
         
-        if
+        if ($result) {
+            return $result['id'];
+        }
+        
+        // 商品作成
+        $sql = "INSERT INTO products (product_code, product_name, created_at) VALUES (?, ?, NOW())";
+        $this->db->execute($sql, [$row['product_code'], $row['product_name']]);
+        
+        return $this->db->lastInsertId();
+    }
+    
+    /**
+     * 注文データ挿入
+     */
+    private function insertOrderData($row, $masterIds, $batchId) {
+        $sql = "INSERT INTO orders (
+            user_id, company_id, department_id, supplier_id, product_id,
+            corporation_code, corporation_name, company_code, company_name,
+            supplier_code, supplier_name, category_code, category_name,
+            delivery_date, department_code, department_name,
+            user_code, user_name, employee_type_code, employee_type_name,
+            product_code, product_name, quantity, unit_price, total_amount,
+            notes, delivery_time, cooperation_code, import_batch_id,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+        
+        $this->db->execute($sql, [
+            $masterIds['user_id'],
+            $masterIds['company_id'],
+            $masterIds['department_id'],
+            $masterIds['supplier_id'],
+            $masterIds['product_id'],
+            $row['corporation_code'],
+            $row['corporation_name'],
+            $row['company_code'],
+            $row['company_name'],
+            $row['supplier_code'],
+            $row['supplier_name'],
+            $row['category_code'],
+            $row['category_name'],
+            $row['delivery_date'],
+            $row['department_code'],
+            $row['department_name'],
+            $row['user_code'],
+            $row['user_name'],
+            $row['employee_type_code'],
+            $row['employee_type_name'],
+            $row['product_code'],
+            $row['product_name'],
+            $row['quantity'],
+            $row['unit_price'],
+            $row['total_amount'],
+            $row['notes'],
+            $row['delivery_time'],
+            $row['cooperation_code'],
+            $batchId
+        ]);
+    }
+    
+    /**
+     * インポートログ記録
+     */
+    private function logImport($batchId, $filePath, $stats, $errors, $startTime) {
+        $processingTime = round(microtime(true) - $startTime, 2);
+        
+        $sql = "INSERT INTO import_logs (
+            batch_id, file_path, total_records, success_records, 
+            error_records, duplicate_records, processing_time_seconds,
+            error_details, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+        
+        $this->db->execute($sql, [
+            $batchId,
+            basename($filePath),
+            $stats['total'],
+            $stats['success'],
+            $stats['error'],
+            $stats['duplicate'],
+            $processingTime,
+            json_encode($errors, JSON_UNESCAPED_UNICODE)
+        ]);
+    }
+    
+    /**
+     * エラーログ記録
+     */
+    private function logError($batchId, $message, $filePath = '') {
+        $sql = "INSERT INTO import_logs (
+            batch_id, file_path, total_records, success_records, 
+            error_records, duplicate_records, processing_time_seconds,
+            error_details, created_at
+        ) VALUES (?, ?, 0, 0, 1, 0, 0, ?, NOW())";
+        
+        $this->db->execute($sql, [
+            $batchId,
+            basename($filePath),
+            json_encode([['message' => $message, 'line' => 0]], JSON_UNESCAPED_UNICODE)
+        ]);
+    }
+}
+?>
