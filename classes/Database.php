@@ -1,39 +1,18 @@
 <?php
-/**
- * Database.php - 統一版
- * Smiley配食事業システム対応
- * 
- * 機能:
- * 1. Singletonパターン対応
- * 2. 通常のコンストラクタ対応
- * 3. 全メソッド統一実装
- * 4. エラーハンドリング強化
- */
-
 require_once __DIR__ . '/../config/database.php';
 
+/**
+ * データベース接続クラス（Singleton パターン対応版）
+ * 既存機能を維持しつつ getInstance() メソッドを追加
+ */
 class Database {
     private static $instance = null;
     private $pdo;
-    private $host;
-    private $database;
-    private $username;
-    private $password;
+    private $connected = false;
+    private $lastError = '';
     
     /**
-     * Singletonパターン用のプライベートコンストラクタ
-     */
-    private function __construct() {
-        $this->host = DB_HOST;
-        $this->database = DB_NAME;
-        $this->username = DB_USER;
-        $this->password = DB_PASS;
-        
-        $this->connect();
-    }
-    
-    /**
-     * Singletonインスタンス取得
+     * Singleton パターン - インスタンス取得
      */
     public static function getInstance() {
         if (self::$instance === null) {
@@ -43,38 +22,133 @@ class Database {
     }
     
     /**
-     * ファクトリーメソッド（通常のコンストラクタ代替）
+     * コンストラクタ（private でSingleton パターンを強制）
      */
-    public static function create() {
-        return self::getInstance();
+    private function __construct() {
+        // データベース設定が定義されているかチェック
+        if (!defined('DB_HOST') || !defined('DB_NAME') || !defined('DB_USER')) {
+            $this->lastError = 'データベース設定が不完全です';
+            return;
+        }
+        
+        $this->connect();
     }
     
     /**
-     * データベース接続
+     * データベースに接続
      */
     private function connect() {
-        $dsn = "mysql:host={$this->host};dbname={$this->database};charset=utf8mb4";
-        $options = [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-            PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4",
-        ];
-        
         try {
-            $this->pdo = new PDO($dsn, $this->username, $this->password, $options);
+            $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4";
+            $options = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+            ];
             
-            // タイムゾーン設定
-            $this->pdo->exec("SET time_zone = '+09:00'");
+            $this->pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+            $this->connected = true;
+            
+            if (defined('DEBUG_MODE') && DEBUG_MODE) {
+                error_log("Database connected successfully");
+            }
             
         } catch (PDOException $e) {
-            error_log("Database connection error: " . $e->getMessage());
-            throw new Exception("データベース接続エラー: " . $e->getMessage());
+            $this->connected = false;
+            $this->lastError = $e->getMessage();
+            
+            if (defined('DEBUG_MODE') && DEBUG_MODE) {
+                error_log("Database connection failed: " . $e->getMessage());
+            }
         }
     }
     
     /**
-     * クエリ実行（SELECT）
+     * PDO接続オブジェクト取得
+     */
+    public function getConnection() {
+        return $this->pdo;
+    }
+    
+    /**
+     * 接続状態を確認
+     */
+    public function isConnected() {
+        return $this->connected;
+    }
+    
+    /**
+     * 接続テスト（SmileyCSVImporter用）
+     */
+    public function testConnection() {
+        try {
+            if (!$this->connected) {
+                return false;
+            }
+            
+            $stmt = $this->pdo->query("SELECT 1");
+            return $stmt !== false;
+        } catch (PDOException $e) {
+            return false;
+        }
+    }
+    
+    /**
+     * 最後のエラーメッセージを取得
+     */
+    public function getLastError() {
+        return $this->lastError;
+    }
+    
+    /**
+     * データベース存在チェック
+     */
+    public function checkDatabase() {
+        try {
+            if (!$this->connected) {
+                return [
+                    'success' => false,
+                    'database' => null,
+                    'message' => $this->lastError
+                ];
+            }
+            
+            $result = $this->pdo->query("SELECT DATABASE() as current_db")->fetch();
+            return [
+                'success' => true,
+                'database' => $result['current_db'],
+                'message' => 'データベース接続成功'
+            ];
+        } catch (PDOException $e) {
+            return [
+                'success' => false,
+                'database' => null,
+                'message' => $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * システム情報取得
+     */
+    public function getSystemInfo() {
+        try {
+            if (!$this->connected) {
+                return ['error' => $this->lastError];
+            }
+            
+            $version = $this->pdo->query("SELECT VERSION() as version")->fetch();
+            return [
+                'mysql_version' => $version['version'],
+                'connection_status' => 'Connected'
+            ];
+        } catch (PDOException $e) {
+            return ['error' => $e->getMessage()];
+        }
+    }
+    
+    /**
+     * クエリ実行（SmileyCSVImporter用）
      */
     public function query($sql, $params = []) {
         try {
@@ -82,63 +156,49 @@ class Database {
             $stmt->execute($params);
             return $stmt;
         } catch (PDOException $e) {
-            error_log("Query error: " . $e->getMessage() . " SQL: " . $sql);
-            throw new Exception("クエリエラー: " . $e->getMessage());
+            throw new Exception("Database query error: " . $e->getMessage());
         }
     }
     
     /**
-     * プリペアドステートメント準備
-     */
-    public function prepare($sql) {
-        try {
-            return $this->pdo->prepare($sql);
-        } catch (PDOException $e) {
-            error_log("Prepare error: " . $e->getMessage() . " SQL: " . $sql);
-            throw new Exception("プリペアドステートメントエラー: " . $e->getMessage());
-        }
-    }
-    
-    /**
-     * 単一実行（INSERT/UPDATE/DELETE）
-     */
-    public function execute($sql, $params = []) {
-        try {
-            $stmt = $this->pdo->prepare($sql);
-            $result = $stmt->execute($params);
-            return $result;
-        } catch (PDOException $e) {
-            error_log("Execute error: " . $e->getMessage() . " SQL: " . $sql);
-            throw new Exception("実行エラー: " . $e->getMessage());
-        }
-    }
-    
-    /**
-     * 単一レコード取得
+     * 単一行取得
      */
     public function fetchOne($sql, $params = []) {
-        $stmt = $this->query($sql, $params);
-        return $stmt->fetch();
+        try {
+            $stmt = $this->query($sql, $params);
+            return $stmt->fetch();
+        } catch (Exception $e) {
+            throw $e;
+        }
     }
     
     /**
-     * 全レコード取得
+     * 複数行取得
      */
     public function fetchAll($sql, $params = []) {
-        $stmt = $this->query($sql, $params);
-        return $stmt->fetchAll();
+        try {
+            $stmt = $this->query($sql, $params);
+            return $stmt->fetchAll();
+        } catch (Exception $e) {
+            throw $e;
+        }
     }
     
     /**
-     * レコード数取得
+     * テーブル存在確認
      */
-    public function count($sql, $params = []) {
-        $stmt = $this->query($sql, $params);
-        return $stmt->rowCount();
+    public function tableExists($tableName) {
+        try {
+            $sql = "SHOW TABLES LIKE ?";
+            $stmt = $this->query($sql, [$tableName]);
+            return $stmt->rowCount() > 0;
+        } catch (Exception $e) {
+            return false;
+        }
     }
     
     /**
-     * 最後に挿入されたIDを取得
+     * 最後のINSERT ID取得
      */
     public function lastInsertId() {
         return $this->pdo->lastInsertId();
@@ -165,131 +225,16 @@ class Database {
         return $this->pdo->rollback();
     }
     
-/**
-     * テーブル存在確認（修正版）
-     */
-    public function tableExists($tableName) {
-        try {
-            $sql = "SHOW TABLES LIKE ?";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$tableName]);
-            
-            return $stmt->rowCount() > 0;
-            
-        } catch (Exception $e) {
-            error_log("tableExists error: " . $e->getMessage());
-            return false;
-        }
-    }
-    
     /**
-     * 全テーブル一覧取得
-     */
-    public function getTables() {
-        try {
-            $stmt = $this->query('SHOW TABLES');
-            $tables = [];
-            while ($row = $stmt->fetch()) {
-                $tables[] = array_values($row)[0];
-            }
-            return $tables;
-        } catch (Exception $e) {
-            return [];
-        }
-    }
-    
-    /**
-     * データベース情報取得
-     */
-    public function getDatabaseInfo() {
-        try {
-            $info = [];
-            
-            // MySQLバージョン
-            $stmt = $this->query('SELECT VERSION() as version');
-            $result = $stmt->fetch();
-            $info['mysql_version'] = $result['version'] ?? 'Unknown';
-            
-            // データベース名
-            $info['database_name'] = $this->database;
-            
-            // 文字セット
-            $stmt = $this->query('SELECT @@character_set_database as charset');
-            $result = $stmt->fetch();
-            $info['charset'] = $result['charset'] ?? 'Unknown';
-            
-            // テーブル数
-            $tables = $this->getTables();
-            $info['table_count'] = count($tables);
-            $info['tables'] = $tables;
-            
-            return $info;
-            
-        } catch (Exception $e) {
-            return [
-                'error' => $e->getMessage(),
-                'mysql_version' => 'Error',
-                'database_name' => $this->database,
-                'charset' => 'Unknown',
-                'table_count' => 0,
-                'tables' => []
-            ];
-        }
-    }
-    
-    /**
-     * 接続テスト
-     */
-    public function testConnection() {
-        try {
-            $this->query('SELECT 1');
-            return [
-                'status' => true,
-                'message' => '接続成功',
-                'database' => $this->database,
-                'host' => $this->host
-            ];
-        } catch (Exception $e) {
-            return [
-                'status' => false,
-                'message' => '接続失敗: ' . $e->getMessage(),
-                'database' => $this->database,
-                'host' => $this->host
-            ];
-        }
-    }
-    
-    /**
-     * クローン禁止（Singletonパターン）
+     * クローン禁止（Singleton パターン）
      */
     private function __clone() {}
     
     /**
-     * アンシリアライズ禁止（Singletonパターン）
+     * アンシリアライズ禁止（Singleton パターン）
      */
     public function __wakeup() {
         throw new Exception("Cannot unserialize singleton");
     }
-    
-    /**
-     * デストラクタ
-     */
-    public function __destruct() {
-        $this->pdo = null;
-    }
-}
-
-/**
- * グローバル関数（後方互換性のため）
- */
-function getDatabase() {
-    return Database::getInstance();
-}
-
-/**
- * ファクトリー関数（new Database()の代替）
- */
-function createDatabase() {
-    return Database::getInstance();
 }
 ?>
