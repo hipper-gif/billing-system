@@ -1,10 +1,32 @@
 <?php
 /**
- * SecurityHelper クラス
+ * SecurityHelper クラス（修正版）
  * Smiley配食事業システム用セキュリティユーティリティ
+ * ファイルアップロード検証機能を強化
  */
 
 class SecurityHelper {
+    
+    /**
+     * セキュアセッション開始
+     */
+    public static function secureSessionStart() {
+        if (session_status() === PHP_SESSION_NONE) {
+            // セキュアなセッション設定
+            ini_set('session.cookie_httponly', 1);
+            ini_set('session.use_only_cookies', 1);
+            ini_set('session.cookie_secure', isset($_SERVER['HTTPS']));
+            ini_set('session.cookie_samesite', 'Strict');
+            
+            session_start();
+            
+            // セッション固定攻撃対策
+            if (!isset($_SESSION['initiated'])) {
+                session_regenerate_id(true);
+                $_SESSION['initiated'] = true;
+            }
+        }
+    }
     
     /**
      * セキュリティヘッダーを設定
@@ -58,6 +80,156 @@ class SecurityHelper {
             default:
                 return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
         }
+    }
+    
+    /**
+     * ファイルアップロードの安全性チェック（CSVインポート用）
+     */
+    public static function validateFileUpload($file, $options = []) {
+        $maxSize = $options['max_size'] ?? (10 * 1024 * 1024); // デフォルト10MB
+        $allowedTypes = $options['allowed_types'] ?? [
+            'text/csv',
+            'text/plain',
+            'application/csv',
+            'application/vnd.ms-excel'
+        ];
+        $allowedExtensions = $options['allowed_extensions'] ?? ['csv', 'txt'];
+        
+        $result = [
+            'valid' => true,
+            'errors' => []
+        ];
+        
+        // ファイルがアップロードされているかチェック
+        if (!isset($file['tmp_name']) || !is_uploaded_file($file['tmp_name'])) {
+            $result['valid'] = false;
+            $result['errors'][] = 'ファイルが正常にアップロードされませんでした。';
+            return $result;
+        }
+        
+        // アップロードエラーチェック
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            $result['valid'] = false;
+            $result['errors'][] = self::getUploadErrorMessage($file['error']);
+        }
+        
+        // ファイルサイズチェック
+        if ($file['size'] > $maxSize) {
+            $result['valid'] = false;
+            $result['errors'][] = 'ファイルサイズが大きすぎます。(' . number_format($maxSize / 1024 / 1024, 1) . 'MB以下)';
+        }
+        
+        // 拡張子チェック
+        $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        if (!in_array($extension, $allowedExtensions)) {
+            $result['valid'] = false;
+            $result['errors'][] = '許可されていない拡張子です: .' . $extension;
+        }
+        
+        // MIMEタイプチェック（実際のファイル内容を確認）
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $detectedType = finfo_file($finfo, $file['tmp_name']);
+            finfo_close($finfo);
+            
+            if (!in_array($detectedType, $allowedTypes)) {
+                $result['valid'] = false;
+                $result['errors'][] = '許可されていないファイル形式です: ' . $detectedType;
+            }
+        }
+        
+        // ファイル名の安全性チェック
+        if (preg_match('/[<>:"|?*\\\\\/]/', $file['name'])) {
+            $result['valid'] = false;
+            $result['errors'][] = 'ファイル名に使用できない文字が含まれています。';
+        }
+        
+        // ファイル内容の安全性チェック
+        $contentCheck = self::checkFileContent($file['tmp_name']);
+        if (!$contentCheck['safe']) {
+            $result['valid'] = false;
+            $result['errors'] = array_merge($result['errors'], $contentCheck['errors']);
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * ファイル内容の安全性チェック
+     */
+    private static function checkFileContent($tmpPath) {
+        $result = [
+            'safe' => true,
+            'errors' => []
+        ];
+        
+        $handle = fopen($tmpPath, 'r');
+        if ($handle) {
+            $firstBytes = fread($handle, 1024);
+            fclose($handle);
+            
+            // 実行可能ファイルの署名をチェック
+            $dangerousSignatures = [
+                "\x4D\x5A" => 'PE executable',
+                "\x7F\x45\x4C\x46" => 'ELF executable',
+                "<?php" => 'PHP script',
+                "<script" => 'JavaScript',
+                "<%" => 'ASP/JSP',
+            ];
+            
+            foreach ($dangerousSignatures as $signature => $type) {
+                if (strpos($firstBytes, $signature) === 0 || strpos($firstBytes, $signature) !== false) {
+                    $result['safe'] = false;
+                    $result['errors'][] = '危険なファイル内容が検出されました: ' . $type;
+                }
+            }
+            
+            // CSVファイルとして妥当かチェック
+            if (!self::isValidCSVContent($firstBytes)) {
+                $result['safe'] = false;
+                $result['errors'][] = '有効なCSVファイルではありません。';
+            }
+        } else {
+            $result['safe'] = false;
+            $result['errors'][] = 'ファイル内容を確認できませんでした。';
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * CSV内容の妥当性チェック
+     */
+    private static function isValidCSVContent($content) {
+        // 最初の行がCSVらしいかチェック
+        $firstLine = strtok($content, "\n");
+        if (empty($firstLine)) {
+            return false;
+        }
+        
+        // カンマまたはタブ区切りがあるかチェック
+        $commaCount = substr_count($firstLine, ',');
+        $tabCount = substr_count($firstLine, "\t");
+        
+        // 最低2つのフィールドがあることを確認
+        return ($commaCount > 0 || $tabCount > 0);
+    }
+    
+    /**
+     * アップロードエラーメッセージ取得
+     */
+    private static function getUploadErrorMessage($errorCode) {
+        $messages = [
+            UPLOAD_ERR_INI_SIZE => 'ファイルサイズがPHP設定の上限を超えています',
+            UPLOAD_ERR_FORM_SIZE => 'ファイルサイズがフォームの上限を超えています',
+            UPLOAD_ERR_PARTIAL => 'ファイルが部分的にしかアップロードされませんでした',
+            UPLOAD_ERR_NO_FILE => 'ファイルがアップロードされませんでした',
+            UPLOAD_ERR_NO_TMP_DIR => '一時ディレクトリが見つかりません',
+            UPLOAD_ERR_CANT_WRITE => 'ディスクへの書き込みに失敗しました',
+            UPLOAD_ERR_EXTENSION => 'PHPの拡張機能によってアップロードが停止されました'
+        ];
+        
+        return $messages[$errorCode] ?? '不明なアップロードエラーが発生しました';
     }
     
     /**
@@ -143,11 +315,13 @@ class SecurityHelper {
      */
     public static function generateCSRFToken() {
         if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+            self::secureSessionStart();
         }
         
         $token = bin2hex(random_bytes(32));
         $_SESSION['csrf_token'] = $token;
+        $_SESSION['csrf_token_time'] = time();
+        
         return $token;
     }
     
@@ -156,100 +330,29 @@ class SecurityHelper {
      */
     public static function validateCSRFToken($token) {
         if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+            self::secureSessionStart();
         }
         
-        if (!isset($_SESSION['csrf_token'])) {
+        if (!isset($_SESSION['csrf_token']) || !isset($_SESSION['csrf_token_time'])) {
+            return false;
+        }
+        
+        // トークンの有効期限チェック（1時間）
+        if (time() - $_SESSION['csrf_token_time'] > 3600) {
+            unset($_SESSION['csrf_token']);
+            unset($_SESSION['csrf_token_time']);
             return false;
         }
         
         $isValid = hash_equals($_SESSION['csrf_token'], $token);
         
-        // トークンを使い回さないために削除
-        unset($_SESSION['csrf_token']);
+        // トークン使用後は削除（ワンタイムトークン）
+        if ($isValid) {
+            unset($_SESSION['csrf_token']);
+            unset($_SESSION['csrf_token_time']);
+        }
         
         return $isValid;
-    }
-    
-    /**
-     * SQLインジェクション対策用のパラメータ準備
-     */
-    public static function prepareSqlParams($data, $allowedFields = []) {
-        $params = [];
-        
-        foreach ($data as $key => $value) {
-            // 許可されたフィールドのみ
-            if (!empty($allowedFields) && !in_array($key, $allowedFields)) {
-                continue;
-            }
-            
-            // キー名の検証（英数字とアンダースコアのみ）
-            if (!preg_match('/^[a-zA-Z0-9_]+$/', $key)) {
-                continue;
-            }
-            
-            $params[$key] = $value;
-        }
-        
-        return $params;
-    }
-    
-    /**
-     * ファイルアップロードの安全性チェック
-     */
-    public static function validateUploadedFile($file, $allowedTypes = [], $maxSize = 5242880) {
-        $errors = [];
-        
-        // ファイルがアップロードされているかチェック
-        if (!isset($file['tmp_name']) || !is_uploaded_file($file['tmp_name'])) {
-            $errors[] = 'ファイルが正常にアップロードされませんでした。';
-            return $errors;
-        }
-        
-        // ファイルサイズチェック
-        if ($file['size'] > $maxSize) {
-            $errors[] = 'ファイルサイズが大きすぎます。(' . number_format($maxSize / 1024 / 1024, 1) . 'MB以下)';
-        }
-        
-        // MIMEタイプチェック
-        if (!empty($allowedTypes)) {
-            $finfo = finfo_open(FILEINFO_MIME_TYPE);
-            $mimeType = finfo_file($finfo, $file['tmp_name']);
-            finfo_close($finfo);
-            
-            if (!in_array($mimeType, $allowedTypes)) {
-                $errors[] = '許可されていないファイル形式です。';
-            }
-        }
-        
-        // ファイル名の安全性チェック
-        $filename = $file['name'];
-        if (preg_match('/[<>:"|?*]/', $filename)) {
-            $errors[] = 'ファイル名に使用できない文字が含まれています。';
-        }
-        
-        return $errors;
-    }
-    
-    /**
-     * パスワードハッシュ化
-     */
-    public static function hashPassword($password) {
-        return password_hash($password, PASSWORD_DEFAULT);
-    }
-    
-    /**
-     * パスワード検証
-     */
-    public static function verifyPassword($password, $hash) {
-        return password_verify($password, $hash);
-    }
-    
-    /**
-     * 安全なランダム文字列生成
-     */
-    public static function generateRandomString($length = 32) {
-        return bin2hex(random_bytes($length / 2));
     }
     
     /**
@@ -273,11 +376,54 @@ class SecurityHelper {
     }
     
     /**
+     * セキュリティイベントログ出力
+     */
+    public static function logSecurityEvent($event, $details = []) {
+        $logData = [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'event' => $event,
+            'ip' => self::getClientIP(),
+            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
+            'details' => $details
+        ];
+        
+        $logFile = __DIR__ . '/../logs/security.log';
+        $logDir = dirname($logFile);
+        
+        if (!is_dir($logDir)) {
+            mkdir($logDir, 0755, true);
+        }
+        
+        error_log(json_encode($logData, JSON_UNESCAPED_UNICODE) . "\n", 3, $logFile);
+    }
+    
+    /**
+     * 安全なランダム文字列生成
+     */
+    public static function generateRandomString($length = 32) {
+        return bin2hex(random_bytes($length / 2));
+    }
+    
+    /**
+     * パスワードハッシュ化
+     */
+    public static function hashPassword($password) {
+        return password_hash($password, PASSWORD_DEFAULT);
+    }
+    
+    /**
+     * パスワード検証
+     */
+    public static function verifyPassword($password, $hash) {
+        return password_verify($password, $hash);
+    }
+    
+    /**
      * レート制限チェック（簡易版）
      */
     public static function checkRateLimit($key, $limit = 60, $window = 3600) {
         if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+            self::secureSessionStart();
         }
         
         $now = time();
@@ -303,28 +449,6 @@ class SecurityHelper {
         
         $_SESSION[$sessionKey]['count']++;
         return true;
-    }
-    
-    /**
-     * ログ出力（セキュリティイベント用）
-     */
-    public static function logSecurityEvent($event, $details = []) {
-        $logData = [
-            'timestamp' => date('Y-m-d H:i:s'),
-            'event' => $event,
-            'ip' => self::getClientIP(),
-            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
-            'details' => $details
-        ];
-        
-        $logFile = __DIR__ . '/../logs/security.log';
-        $logDir = dirname($logFile);
-        
-        if (!is_dir($logDir)) {
-            mkdir($logDir, 0755, true);
-        }
-        
-        error_log(json_encode($logData, JSON_UNESCAPED_UNICODE) . "\n", 3, $logFile);
     }
 }
 ?>
