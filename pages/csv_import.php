@@ -532,7 +532,7 @@ require_once '../config/database.php';
                 updateProgress(25, 'ファイルアップロード中...');
 
                 // APIリクエスト
-                const response = await fetch('../api/import.php', {
+                const response = await fetch('../api/debug_import.php', {
                     method: 'POST',
                     body: formData
                 });
