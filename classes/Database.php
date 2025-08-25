@@ -2,8 +2,7 @@
 require_once __DIR__ . '/../config/database.php';
 
 /**
- * データベース接続クラス（Singleton パターン対応版）
- * 既存機能を維持しつつ getInstance() メソッドを追加
+ * データベース接続クラス（tableExists修正版）
  */
 class Database {
     private static $instance = null;
@@ -185,15 +184,105 @@ class Database {
     }
     
     /**
-     * テーブル存在確認
+     * テーブル存在確認（修正版）
+     * 元の問題: SHOW TABLESの結果処理が不正確だった
      */
     public function tableExists($tableName) {
         try {
-            $sql = "SHOW TABLES LIKE ?";
+            if (!$this->connected) {
+                return false;
+            }
+            
+            // 方法1: INFORMATION_SCHEMA を使用（より確実）
+            $sql = "SELECT COUNT(*) as table_count 
+                   FROM INFORMATION_SCHEMA.TABLES 
+                   WHERE TABLE_SCHEMA = DATABASE() 
+                   AND TABLE_NAME = ?";
+            
             $stmt = $this->query($sql, [$tableName]);
-            return $stmt->rowCount() > 0;
+            $result = $stmt->fetch();
+            
+            $exists = ($result && $result['table_count'] > 0);
+            
+            // デバッグログ
+            if (defined('DEBUG_MODE') && DEBUG_MODE) {
+                error_log("Table check: {$tableName} = " . ($exists ? 'EXISTS' : 'NOT EXISTS'));
+            }
+            
+            return $exists;
+            
         } catch (Exception $e) {
+            // エラーの場合はfalseを返すが、ログに記録
+            if (defined('DEBUG_MODE') && DEBUG_MODE) {
+                error_log("Table exists check error for {$tableName}: " . $e->getMessage());
+            }
             return false;
+        }
+    }
+    
+    /**
+     * 全テーブル一覧取得（デバッグ用）
+     */
+    public function getAllTables() {
+        try {
+            if (!$this->connected) {
+                return [];
+            }
+            
+            $sql = "SELECT TABLE_NAME 
+                   FROM INFORMATION_SCHEMA.TABLES 
+                   WHERE TABLE_SCHEMA = DATABASE() 
+                   ORDER BY TABLE_NAME";
+            
+            $stmt = $this->query($sql);
+            $results = $stmt->fetchAll();
+            
+            return array_column($results, 'TABLE_NAME');
+            
+        } catch (Exception $e) {
+            if (defined('DEBUG_MODE') && DEBUG_MODE) {
+                error_log("Get all tables error: " . $e->getMessage());
+            }
+            return [];
+        }
+    }
+    
+    /**
+     * テーブル詳細情報取得（デバッグ用）
+     */
+    public function getTableInfo($tableName) {
+        try {
+            if (!$this->connected) {
+                return null;
+            }
+            
+            // テーブル存在確認
+            if (!$this->tableExists($tableName)) {
+                return null;
+            }
+            
+            // レコード数取得
+            $countSql = "SELECT COUNT(*) as record_count FROM `{$tableName}`";
+            $countStmt = $this->query($countSql);
+            $countResult = $countStmt->fetch();
+            
+            // カラム情報取得
+            $columnSql = "SHOW COLUMNS FROM `{$tableName}`";
+            $columnStmt = $this->query($columnSql);
+            $columns = $columnStmt->fetchAll();
+            
+            return [
+                'table_name' => $tableName,
+                'record_count' => $countResult['record_count'],
+                'column_count' => count($columns),
+                'columns' => $columns
+            ];
+            
+        } catch (Exception $e) {
+            if (defined('DEBUG_MODE') && DEBUG_MODE) {
+                error_log("Get table info error for {$tableName}: " . $e->getMessage());
+            }
+            return null;
         }
     }
     
