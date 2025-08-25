@@ -1,7 +1,6 @@
 <?php
 /**
- * Smiley配食事業専用CSVインポーター（完全修正版）
- * 「結果が全て0」問題の完全解決
+ * Smiley配食事業専用CSVインポーター（import.php互換版）
  */
 class SmileyCSVImporter {
     private $db;
@@ -11,8 +10,8 @@ class SmileyCSVImporter {
     private $fieldMapping = [
         '法人CD' => 'corporation_code',
         '法人名' => 'corporation_name',
-        '事業所CD' => 'company_code',      // 実際：配達先企業コード
-        '事業所名' => 'company_name',      // 実際：配達先企業名
+        '事業所CD' => 'company_code',
+        '事業所名' => 'company_name',
         '給食業者CD' => 'supplier_code',
         '給食業者名' => 'supplier_name',
         '給食区分CD' => 'category_code',
@@ -20,8 +19,8 @@ class SmileyCSVImporter {
         '配達日' => 'delivery_date',
         '部門CD' => 'department_code',
         '部門名' => 'department_name',
-        '社員CD' => 'user_code',           // 実際：利用者コード
-        '社員名' => 'user_name',           // 実際：利用者名
+        '社員CD' => 'user_code',
+        '社員名' => 'user_name',
         '雇用形態CD' => 'employee_type_code',
         '雇用形態名' => 'employee_type_name',
         '給食ﾒﾆｭｰCD' => 'product_code',
@@ -40,6 +39,7 @@ class SmileyCSVImporter {
     
     /**
      * CSVファイルインポート（メイン処理）
+     * import.php互換メソッド
      */
     public function importFile($filePath, $options = []) {
         $startTime = microtime(true);
@@ -488,6 +488,10 @@ class SmileyCSVImporter {
      * 部署データ確保
      */
     private function ensureDepartment($row, $companyId) {
+        if (empty($row['department_code'])) {
+            return null;
+        }
+        
         $sql = "SELECT id FROM departments WHERE company_id = ? AND department_code = ?";
         $result = $this->db->fetchOne($sql, [$companyId, $row['department_code']]);
         
@@ -531,6 +535,10 @@ class SmileyCSVImporter {
      * 業者データ確保
      */
     private function ensureSupplier($row) {
+        if (empty($row['supplier_code'])) {
+            return null;
+        }
+        
         $sql = "SELECT id FROM suppliers WHERE supplier_code = ?";
         $result = $this->db->fetchOne($sql, [$row['supplier_code']]);
         
