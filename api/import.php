@@ -1,14 +1,14 @@
 <?php
 /**
- * Smiley配食事業専用CSVインポートAPI
- * Singleton対応修復版
+ * CSVインポートAPI（根本修正版）
+ * 「結果が全て0」問題の完全解決
  */
 
-// エラー報告設定
+// エラー表示設定（デバッグ用）
 error_reporting(E_ALL);
-ini_set('display_errors', 0); // 本番では非表示
-ini_set('log_errors', 1);
+ini_set('display_errors', 1);
 
+// レスポンスヘッダー設定
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
@@ -20,149 +20,179 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
+// 必要ファイル読み込み
+require_once '../config/database.php';
+require_once '../classes/Database.php';
+require_once '../classes/SmileyCSVImporter.php';
+require_once '../classes/FileUploadHandler.php';
+require_once '../classes/SecurityHelper.php';
+
+/**
+ * JSONレスポンス送信
+ */
+function sendResponse($success, $message, $data = null, $errors = []) {
+    $response = [
+        'success' => $success,
+        'message' => $message,
+        'timestamp' => date('Y-m-d H:i:s')
+    ];
+    
+    if ($data !== null) {
+        $response['data'] = $data;
+    }
+    
+    if (!empty($errors)) {
+        $response['errors'] = $errors;
+    }
+    
+    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    exit;
+}
+
 try {
-    // 必須ファイル読み込み
-    require_once '../config/database.php';
-    require_once '../classes/Database.php';
-    require_once '../classes/SmileyCSVImporter.php';
-    require_once '../classes/SecurityHelper.php';
+    // データベース接続
+    $db = Database::getInstance();
     
-    // Singleton パターンでデータベース接続
-    $db = Database::getInstance(); // ← 修正：new Database() → Database::getInstance()
-    
+    // POST リクエスト処理（CSVアップロード）
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // ファイルアップロード確認
         if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
-            throw new Exception('ファイルがアップロードされていません');
+            sendResponse(false, 'CSVファイルがアップロードされていません');
         }
         
-        $file = $_FILES['csv_file'];
+        $uploadedFile = $_FILES['csv_file'];
         
-        // ファイル基本検証
-        $allowedTypes = ['text/csv', 'text/plain', 'application/vnd.ms-excel'];
-        $allowedExtensions = ['csv', 'txt'];
-        $maxFileSize = 10 * 1024 * 1024; // 10MB
+        // ファイル検証
+        $fileHandler = new FileUploadHandler();
+        $uploadResult = $fileHandler->uploadFile($uploadedFile);
         
-        // MIMEタイプチェック
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $detectedType = finfo_file($finfo, $file['tmp_name']);
-        finfo_close($finfo);
-        
-        if (!in_array($detectedType, $allowedTypes) && !in_array($file['type'], $allowedTypes)) {
-            throw new Exception('許可されていないファイル形式です: ' . $detectedType);
+        if (!$uploadResult['success']) {
+            sendResponse(false, 'ファイルアップロードエラー', null, $uploadResult['errors']);
         }
         
-        // 拡張子チェック
-        $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-        if (!in_array($extension, $allowedExtensions)) {
-            throw new Exception('許可されていない拡張子です: ' . $extension);
-        }
-        
-        // ファイルサイズチェック
-        if ($file['size'] > $maxFileSize) {
-            throw new Exception('ファイルサイズが上限（10MB）を超えています: ' . round($file['size'] / 1024 / 1024, 2) . 'MB');
-        }
-        
-        // CSVインポーター初期化
+        // CSVインポート実行
         $importer = new SmileyCSVImporter($db);
-        
-        // インポート実行
-        $result = $importer->importFile($file['tmp_name'], [
+        $importOptions = [
             'encoding' => $_POST['encoding'] ?? 'auto',
-            'validate_smiley' => true
-        ]);
+            'overwrite' => isset($_POST['overwrite']) ? (bool)$_POST['overwrite'] : false
+        ];
         
-        // 成功レスポンス
-        echo json_encode([
-            'success' => true,
-            'message' => "CSVインポートが完了しました",
-            'data' => [
-                'batch_id' => $result['batch_id'],
-                'total_records' => $result['stats']['total'],
-                'success_records' => $result['stats']['success'],
-                'error_records' => $result['stats']['errors'],
-                'duplicate_records' => $result['stats']['duplicate'] ?? 0,
-                'processing_time' => $result['processing_time']
-            ],
-            'errors' => $result['errors'] ?? []
-        ], JSON_UNESCAPED_UNICODE);
+        $importResult = $importer->importFile($uploadResult['filepath'], $importOptions);
         
-    } elseif ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        // 一時ファイル削除
+        if (file_exists($uploadResult['filepath'])) {
+            unlink($uploadResult['filepath']);
+        }
+        
+        // 結果レスポンス
+        if ($importResult['success']) {
+            sendResponse(true, 'CSVインポートが正常に完了しました', [
+                'batch_id' => $importResult['batch_id'],
+                'stats' => $importResult['stats'],
+                'processing_time' => $importResult['processing_time']
+            ], $importResult['errors']);
+        } else {
+            sendResponse(false, 'CSVインポートでエラーが発生しました', [
+                'batch_id' => $importResult['batch_id'],
+                'stats' => $importResult['stats'],
+                'processing_time' => $importResult['processing_time']
+            ], $importResult['errors']);
+        }
+    }
+    
+    // GET リクエスト処理（ステータス確認等）
+    elseif ($_SERVER['REQUEST_METHOD'] === 'GET') {
         
         $action = $_GET['action'] ?? 'status';
         
         switch ($action) {
             case 'status':
+                // システム状態確認
+                $status = [
+                    'database_connected' => $db->testConnection(),
+                    'tables_exist' => [
+                        'orders' => $db->tableExists('orders'),
+                        'companies' => $db->tableExists('companies'),
+                        'departments' => $db->tableExists('departments'),
+                        'users' => $db->tableExists('users'),
+                        'suppliers' => $db->tableExists('suppliers'),
+                        'products' => $db->tableExists('products'),
+                        'import_logs' => $db->tableExists('import_logs')
+                    ],
+                    'php_extensions' => [
+                        'mysqli' => extension_loaded('mysqli'),
+                        'mbstring' => extension_loaded('mbstring'),
+                        'fileinfo' => extension_loaded('fileinfo')
+                    ]
+                ];
+                sendResponse(true, 'システム状態を確認しました', $status);
+                break;
+                
+            case 'history':
                 // インポート履歴取得
-                $sql = "SELECT * FROM import_logs ORDER BY created_at DESC LIMIT 10";
-                $stmt = $db->query($sql);
-                $logs = $stmt->fetchAll();
+                $limit = min(50, max(1, intval($_GET['limit'] ?? 20)));
+                $offset = max(0, intval($_GET['offset'] ?? 0));
                 
-                echo json_encode([
-                    'success' => true,
-                    'data' => [
-                        'recent_imports' => $logs,
-                        'system_status' => 'operational'
+                $sql = "SELECT batch_id, file_path, total_records, success_records, 
+                              error_records, duplicate_records, processing_time_seconds, 
+                              created_at 
+                        FROM import_logs 
+                        ORDER BY created_at DESC 
+                        LIMIT ? OFFSET ?";
+                
+                $history = $db->fetchAll($sql, [$limit, $offset]);
+                
+                sendResponse(true, 'インポート履歴を取得しました', [
+                    'history' => $history,
+                    'pagination' => [
+                        'limit' => $limit,
+                        'offset' => $offset
                     ]
-                ], JSON_UNESCAPED_UNICODE);
+                ]);
                 break;
                 
-            case 'test':
-                // システムテスト
-                $testQuery = "SELECT COUNT(*) as total_orders FROM orders";
-                $stmt = $db->query($testQuery);
-                $result = $stmt->fetch();
+            case 'batch_detail':
+                // バッチ詳細取得
+                $batchId = $_GET['batch_id'] ?? '';
                 
-                echo json_encode([
-                    'success' => true,
-                    'message' => 'システムは正常に動作しています',
-                    'data' => [
-                        'database_connection' => 'OK',
-                        'total_orders' => $result['total_orders'],
-                        'timestamp' => date('Y-m-d H:i:s'),
-                        'importer_class' => class_exists('SmileyCSVImporter') ? 'EXISTS' : 'NOT_EXISTS'
-                    ]
-                ], JSON_UNESCAPED_UNICODE);
-                break;
+                if (empty($batchId)) {
+                    sendResponse(false, 'バッチIDが指定されていません');
+                }
                 
-            case 'companies':
-                // 配達先企業一覧
-                $sql = "SELECT id, company_code, company_name, 
-                               (SELECT COUNT(*) FROM users WHERE company_id = companies.id AND is_active = 1) as user_count,
-                               (SELECT COUNT(*) FROM orders WHERE company_id = companies.id AND delivery_date >= CURDATE() - INTERVAL 30 DAY) as recent_orders
-                        FROM companies 
-                        WHERE is_active = 1 
-                        ORDER BY company_name";
-                $stmt = $db->query($sql);
-                $companies = $stmt->fetchAll();
+                $sql = "SELECT * FROM import_logs WHERE batch_id = ?";
+                $batchDetail = $db->fetchOne($sql, [$batchId]);
                 
-                echo json_encode([
-                    'success' => true,
-                    'data' => [
-                        'companies' => $companies
-                    ]
-                ], JSON_UNESCAPED_UNICODE);
+                if (!$batchDetail) {
+                    sendResponse(false, '指定されたバッチが見つかりません');
+                }
+                
+                // エラー詳細をデコード
+                if ($batchDetail['error_details']) {
+                    $batchDetail['error_details'] = json_decode($batchDetail['error_details'], true);
+                }
+                
+                sendResponse(true, 'バッチ詳細を取得しました', $batchDetail);
                 break;
                 
             default:
-                throw new Exception('不正なアクションです: ' . $action);
+                sendResponse(false, '不明なアクションです');
         }
-        
-    } else {
-        throw new Exception('サポートされていないHTTPメソッドです: ' . $_SERVER['REQUEST_METHOD']);
+    }
+    
+    else {
+        sendResponse(false, 'サポートされていないHTTPメソッドです');
     }
     
 } catch (Exception $e) {
     // エラーログ記録
-    error_log("CSV Import API Error: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
+    error_log("CSVインポートAPI エラー: " . $e->getMessage());
+    error_log("ファイル: " . $e->getFile() . " 行: " . $e->getLine());
     
-    http_response_code(500);
-    echo json_encode([
-        'success' => false,
+    sendResponse(false, 'システムエラーが発生しました', null, [[
         'message' => $e->getMessage(),
-        'error_code' => 'IMPORT_ERROR',
-        'timestamp' => date('Y-m-d H:i:s')
-    ], JSON_UNESCAPED_UNICODE);
+        'file' => basename($e->getFile()),
+        'line' => $e->getLine()
+    ]]);
 }
 ?>
