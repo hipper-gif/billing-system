@@ -165,15 +165,19 @@ class Database {
         return $this->pdo->rollback();
     }
     
-    /**
-     * テーブル存在確認
+/**
+     * テーブル存在確認（修正版）
      */
     public function tableExists($tableName) {
         try {
             $sql = "SHOW TABLES LIKE ?";
-            $stmt = $this->query($sql, [$tableName]);
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([$tableName]);
+            
             return $stmt->rowCount() > 0;
+            
         } catch (Exception $e) {
+            error_log("tableExists error: " . $e->getMessage());
             return false;
         }
     }
