@@ -3,858 +3,620 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSVインポート - Smiley配食事業管理システム</title>
+    <title>CSVインポート - Smiley配食事業システム</title>
     
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
     <style>
         :root {
-            --smiley-primary: #2E8B57;
-            --smiley-secondary: #90EE90;
-            --smiley-light: #F0FFF0;
-            --smiley-dark: #1F5F3F;
+            --smiley-green: #2E8B57;
+            --smiley-light-green: #3CB371;
+            --smiley-dark-green: #228B22;
+        }
+        
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .navbar {
+            background: linear-gradient(135deg, var(--smiley-green), var(--smiley-light-green));
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
         
         .navbar-brand {
-            color: var(--smiley-primary) !important;
             font-weight: bold;
+            font-size: 1.5rem;
         }
         
-        .btn-smiley {
-            background-color: var(--smiley-primary);
-            border-color: var(--smiley-primary);
-            color: white;
+        .main-container {
+            max-width: 1000px;
+            margin: 2rem auto;
+            padding: 0 1rem;
         }
         
-        .btn-smiley:hover {
-            background-color: var(--smiley-dark);
-            border-color: var(--smiley-dark);
-            color: white;
+        .upload-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            overflow: hidden;
         }
         
         .card-header {
-            background-color: var(--smiley-light);
-            border-bottom: 2px solid var(--smiley-primary);
+            background: linear-gradient(135deg, var(--smiley-green), var(--smiley-light-green));
+            color: white;
+            padding: 1.5rem;
+            text-align: center;
         }
         
-        .upload-area {
-            border: 3px dashed #dee2e6;
-            background-color: #f8f9fa;
+        .drop-zone {
+            border: 3px dashed #ddd;
+            border-radius: 10px;
             padding: 3rem;
             text-align: center;
-            border-radius: 10px;
-            cursor: pointer;
             transition: all 0.3s ease;
-            min-height: 200px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
+            cursor: pointer;
+            background: #fafafa;
+            margin: 2rem;
         }
         
-        .upload-area:hover {
-            border-color: var(--smiley-primary);
-            background-color: var(--smiley-light);
+        .drop-zone.drag-over {
+            border-color: var(--smiley-green);
+            background: #f0f8f4;
         }
         
-        .upload-area.dragover {
-            border-color: var(--smiley-primary);
-            background-color: var(--smiley-light);
-            transform: scale(1.02);
+        .drop-zone:hover {
+            border-color: var(--smiley-light-green);
+            background: #f8fffe;
         }
         
         .upload-icon {
-            font-size: 3rem;
-            color: var(--smiley-primary);
+            font-size: 4rem;
+            color: var(--smiley-green);
             margin-bottom: 1rem;
         }
         
-        .progress {
-            height: 25px;
+        .progress-container {
+            display: none;
+            margin: 2rem;
+        }
+        
+        .result-container {
+            display: none;
+            margin: 2rem;
+        }
+        
+        .btn-smiley {
+            background: linear-gradient(135deg, var(--smiley-green), var(--smiley-light-green));
+            border: none;
+            color: white;
+            padding: 0.75rem 2rem;
+            border-radius: 25px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-smiley:hover {
+            background: linear-gradient(135deg, var(--smiley-dark-green), var(--smiley-green));
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
         }
         
         .stats-card {
-            border-left: 4px solid var(--smiley-primary);
-        }
-        
-        .error-row:hover {
-            background-color: #fff3cd;
-        }
-        
-        .success-badge {
-            background-color: var(--smiley-primary);
-        }
-        
-        .file-info {
-            background-color: var(--smiley-light);
-            border: 1px solid var(--smiley-secondary);
-            border-radius: 8px;
+            background: white;
+            border-radius: 10px;
             padding: 1rem;
-            margin: 1rem 0;
-        }
-        
-        .step-indicator {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 2rem;
-        }
-        
-        .step {
-            flex: 1;
             text-align: center;
-            position: relative;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
         
-        .step::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 40px;
-            height: 40px;
-            background-color: #dee2e6;
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 1;
-        }
-        
-        .step.active::before {
-            background-color: var(--smiley-primary);
-        }
-        
-        .step.completed::before {
-            background-color: var(--smiley-primary);
-        }
-        
-        .step-number {
-            position: relative;
-            z-index: 2;
-            color: white;
+        .stats-number {
+            font-size: 2rem;
             font-weight: bold;
-            line-height: 40px;
+            color: var(--smiley-green);
         }
         
-        .step-title {
-            margin-top: 50px;
+        .alert-info {
+            border-left: 4px solid var(--smiley-green);
+            background: #f8fff8;
+        }
+        
+        .error-list {
+            max-height: 300px;
+            overflow-y: auto;
             font-size: 0.9rem;
-        }
-        
-        @media (max-width: 768px) {
-            .upload-area {
-                padding: 2rem;
-                min-height: 150px;
-            }
-            
-            .upload-icon {
-                font-size: 2rem;
-            }
         }
     </style>
 </head>
-
-<body class="bg-light">
-    <!-- ナビゲーションバー -->
-    <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom">
+<body>
+    <!-- ナビゲーション -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container">
             <a class="navbar-brand" href="../index.php">
-                <i class="bi bi-emoji-smile"></i> Smiley配食事業管理システム
+                <i class="fas fa-utensils me-2"></i>
+                Smiley配食事業システム
             </a>
-            <div class="navbar-nav ms-auto">
-                <a class="nav-link" href="../pages/companies.php">企業管理</a>
-                <a class="nav-link" href="../pages/departments.php">部署管理</a>
-                <a class="nav-link" href="../pages/users.php">利用者管理</a>
-                <a class="nav-link active" href="../pages/csv_import.php">CSVインポート</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#">CSVインポート</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="companies.php">配達先企業</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="users.php">利用者管理</a>
+                    </li>
+                </ul>
             </div>
         </div>
     </nav>
 
-    <div class="container my-5">
-        <!-- ページヘッダー -->
-        <div class="row mb-4">
-            <div class="col">
-                <h1 class="h2 text-dark">
-                    <i class="bi bi-file-earmark-arrow-up"></i> CSVインポート
-                </h1>
-                <p class="text-muted">Smiley配食事業の注文データをCSVファイルからインポートします</p>
-            </div>
+    <!-- メインコンテンツ -->
+    <div class="main-container">
+        <!-- 説明カード -->
+        <div class="alert alert-info mb-4">
+            <h5><i class="fas fa-info-circle me-2"></i>CSVインポートについて</h5>
+            <ul class="mb-0">
+                <li>配食システムから出力されたCSVファイル（23フィールド）をアップロードしてください</li>
+                <li>対応エンコーディング: SJIS-win, UTF-8</li>
+                <li>最大ファイルサイズ: 50MB</li>
+                <li>重複データは自動的にスキップされます</li>
+            </ul>
         </div>
 
-        <!-- ステップインジケーター -->
-        <div class="card mb-4">
-            <div class="card-body">
-                <div class="step-indicator">
-                    <div class="step active" id="step1">
-                        <div class="step-number">1</div>
-                        <div class="step-title">ファイル選択</div>
-                    </div>
-                    <div class="step" id="step2">
-                        <div class="step-number">2</div>
-                        <div class="step-title">アップロード</div>
-                    </div>
-                    <div class="step" id="step3">
-                        <div class="step-number">3</div>
-                        <div class="step-title">処理中</div>
-                    </div>
-                    <div class="step" id="step4">
-                        <div class="step-number">4</div>
-                        <div class="step-title">完了</div>
-                    </div>
-                </div>
+        <!-- アップロードカード -->
+        <div class="upload-card">
+            <div class="card-header">
+                <h3><i class="fas fa-file-csv me-2"></i>CSVファイル インポート</h3>
+                <p class="mb-0">給食システムのCSVファイルをここにドラッグ&ドロップするか、クリックして選択してください</p>
             </div>
-        </div>
-
-        <!-- メインコンテンツ -->
-        <div class="row">
-            <div class="col-lg-8">
-                <!-- ファイルアップロードエリア -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0">
-                            <i class="bi bi-cloud-upload"></i> CSVファイルアップロード
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <form id="uploadForm" enctype="multipart/form-data">
-                            <div class="upload-area" id="uploadArea">
-                                <i class="bi bi-file-earmark-plus upload-icon"></i>
-                                <h4>ファイルをドラッグ&ドロップ</h4>
-                                <p class="text-muted mb-3">または、クリックしてファイルを選択してください</p>
-                                <input type="file" id="csvFile" name="csv_file" accept=".csv,.txt" style="display: none;">
-                                <button type="button" class="btn btn-smiley" onclick="document.getElementById('csvFile').click()">
-                                    <i class="bi bi-folder2-open"></i> ファイルを選択
-                                </button>
-                                <div class="mt-3">
-                                    <small class="text-muted">
-                                        対応形式: CSV, TXT | 最大サイズ: 10MB | エンコーディング: SJIS-win, UTF-8
-                                    </small>
-                                </div>
-                            </div>
-
-                            <!-- ファイル情報表示 -->
-                            <div id="fileInfo" class="file-info" style="display: none;">
-                                <div class="row align-items-center">
-                                    <div class="col-md-8">
-                                        <h6 class="mb-1" id="fileName"></h6>
-                                        <div class="text-muted">
-                                            <i class="bi bi-file-earmark-text"></i>
-                                            <span id="fileSize"></span> | 
-                                            <span id="fileType"></span>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-4 text-end">
-                                        <button type="button" class="btn btn-outline-danger btn-sm" id="removeFile">
-                                            <i class="bi bi-trash"></i> 削除
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- オプション設定 -->
-                            <div class="row mt-3">
-                                <div class="col-md-6">
-                                    <label for="encoding" class="form-label">エンコーディング</label>
-                                    <select class="form-select" id="encoding" name="encoding">
-                                        <option value="auto">自動判定</option>
-                                        <option value="SJIS-win">Shift-JIS (Windows)</option>
-                                        <option value="UTF-8">UTF-8</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="form-check mt-4">
-                                        <input class="form-check-input" type="checkbox" id="overwrite" name="overwrite">
-                                        <label class="form-check-label" for="overwrite">
-                                            既存データを上書き
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="mt-4">
-                                <button type="submit" class="btn btn-smiley btn-lg" id="importBtn" disabled>
-                                    <i class="bi bi-upload"></i> インポート開始
-                                </button>
-                                <button type="button" class="btn btn-outline-secondary btn-lg ms-2" id="cancelBtn" style="display: none;">
-                                    <i class="bi bi-x-circle"></i> キャンセル
-                                </button>
-                            </div>
-                        </form>
-
-                        <!-- 進捗バー -->
-                        <div id="progressSection" style="display: none;" class="mt-4">
-                            <div class="d-flex justify-content-between mb-2">
-                                <span>処理中...</span>
-                                <span id="progressPercent">0%</span>
-                            </div>
-                            <div class="progress">
-                                <div id="progressBar" class="progress-bar bg-success progress-bar-striped progress-bar-animated" 
-                                     role="progressbar" style="width: 0%"></div>
-                            </div>
-                            <div class="mt-2">
-                                <small id="progressMessage" class="text-muted">ファイルを処理しています...</small>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-lg-4">
-                <!-- 使用方法ガイド -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h6 class="card-title mb-0">
-                            <i class="bi bi-info-circle"></i> 使用方法
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <ol class="list-unstyled">
-                            <li class="mb-2">
-                                <span class="badge bg-primary rounded-pill me-2">1</span>
-                                CSVファイルを準備
-                            </li>
-                            <li class="mb-2">
-                                <span class="badge bg-primary rounded-pill me-2">2</span>
-                                ドラッグ&ドロップまたは選択
-                            </li>
-                            <li class="mb-2">
-                                <span class="badge bg-primary rounded-pill me-2">3</span>
-                                設定を確認
-                            </li>
-                            <li class="mb-2">
-                                <span class="badge bg-primary rounded-pill me-2">4</span>
-                                インポート開始
-                            </li>
-                        </ol>
-                        
-                        <hr>
-                        
-                        <h6>CSVフォーマット要件</h6>
-                        <ul class="small text-muted">
-                            <li>23フィールド形式</li>
-                            <li>ヘッダー行必須</li>
-                            <li>Smiley配食事業仕様準拠</li>
-                            <li>最大10,000レコード</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <!-- システム状態 -->
-                <div class="card">
-                    <div class="card-header">
-                        <h6 class="card-title mb-0">
-                            <i class="bi bi-gear"></i> システム状態
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>データベース:</span>
-                            <span id="dbStatus" class="badge bg-secondary">確認中</span>
-                        </div>
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>API接続:</span>
-                            <span id="apiStatus" class="badge bg-secondary">確認中</span>
-                        </div>
-                        <div class="d-flex justify-content-between">
-                            <span>最終更新:</span>
-                            <span id="lastUpdate" class="small text-muted">-</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 結果表示エリア -->
-        <div id="resultSection" style="display: none;" class="mt-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">
-                        <i class="bi bi-check-circle"></i> インポート結果
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <!-- 統計サマリー -->
-                    <div class="row mb-4" id="statsRow">
-                        <div class="col-md-3">
-                            <div class="card stats-card">
-                                <div class="card-body text-center">
-                                    <h3 id="totalRecords" class="text-primary mb-1">-</h3>
-                                    <div class="text-muted small">総レコード数</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card stats-card">
-                                <div class="card-body text-center">
-                                    <h3 id="successRecords" class="text-success mb-1">-</h3>
-                                    <div class="text-muted small">成功</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card stats-card">
-                                <div class="card-body text-center">
-                                    <h3 id="errorRecords" class="text-danger mb-1">-</h3>
-                                    <div class="text-muted small">エラー</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card stats-card">
-                                <div class="card-body text-center">
-                                    <h3 id="duplicateRecords" class="text-warning mb-1">-</h3>
-                                    <div class="text-muted small">重複</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 処理詳細 -->
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <div class="d-flex justify-content-between">
-                                <span>バッチID:</span>
-                                <span id="batchId" class="font-monospace small">-</span>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="d-flex justify-content-between">
-                                <span>処理時間:</span>
-                                <span id="processingTime">-</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- エラー詳細 -->
-                    <div id="errorSection" style="display: none;">
-                        <h6 class="mb-3">
-                            <i class="bi bi-exclamation-triangle"></i> エラー詳細
-                        </h6>
-                        <div class="table-responsive">
-                            <table class="table table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>行番号</th>
-                                        <th>エラー内容</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="errorTable">
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <!-- アクションボタン -->
-                    <div class="mt-4">
-                        <button type="button" class="btn btn-smiley" id="newImportBtn">
-                            <i class="bi bi-arrow-clockwise"></i> 新しいインポート
-                        </button>
-                        <button type="button" class="btn btn-outline-primary" id="viewDataBtn">
-                            <i class="bi bi-table"></i> データを確認
+            
+            <!-- ファイルアップロード -->
+            <form id="csvUploadForm" enctype="multipart/form-data">
+                <div class="drop-zone" onclick="document.getElementById('csvFile').click()">
+                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                    <h4>CSVファイルをアップロード</h4>
+                    <p class="text-muted">クリックしてファイルを選択するか、ここにドラッグ&ドロップしてください</p>
+                    <input type="file" id="csvFile" name="csv_file" accept=".csv,.txt" style="display: none;" required>
+                    <div class="mt-3">
+                        <button type="submit" class="btn btn-smiley" disabled>
+                            <i class="fas fa-upload me-2"></i>インポート開始
                         </button>
                     </div>
                 </div>
+            </form>
+            
+            <!-- プログレスバー -->
+            <div class="progress-container">
+                <h5><i class="fas fa-cog fa-spin me-2"></i>処理中...</h5>
+                <div class="progress mb-3">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                         role="progressbar" style="width: 0%"></div>
+                </div>
+                <div class="text-center">
+                    <small class="text-muted">CSVファイルを解析・インポートしています...</small>
+                </div>
+            </div>
+            
+            <!-- 結果表示 -->
+            <div class="result-container">
+                <div id="importResults"></div>
             </div>
         </div>
+
+        <!-- システム状態確認 -->
+        <div class="mt-4 text-center">
+            <button class="btn btn-outline-secondary" onclick="checkSystemStatus()">
+                <i class="fas fa-heartbeat me-2"></i>システム状態確認
+            </button>
+        </div>
+        
+        <div id="systemStatus" class="mt-3"></div>
     </div>
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
+    
     <script>
         // グローバル変数
         let selectedFile = null;
-        let isUploading = false;
-
-        // DOM読み込み完了後の初期化
+        
+        // DOM読み込み完了時の処理
         document.addEventListener('DOMContentLoaded', function() {
-            initializeUploadArea();
-            initializeFormHandlers();
-            checkSystemStatus();
+            initializeUpload();
         });
-
-        /**
-         * アップロードエリアの初期化
-         */
-        function initializeUploadArea() {
-            const uploadArea = document.getElementById('uploadArea');
+        
+        // アップロード機能初期化
+        function initializeUpload() {
+            const dropZone = document.querySelector('.drop-zone');
             const fileInput = document.getElementById('csvFile');
-
-            // ドラッグ&ドロップイベント
-            uploadArea.addEventListener('dragover', function(e) {
+            const form = document.getElementById('csvUploadForm');
+            const submitBtn = form.querySelector('button[type="submit"]');
+            
+            // ドラッグ&ドロップ処理
+            dropZone.addEventListener('dragover', (e) => {
                 e.preventDefault();
-                uploadArea.classList.add('dragover');
+                dropZone.classList.add('drag-over');
             });
-
-            uploadArea.addEventListener('dragleave', function(e) {
+            
+            dropZone.addEventListener('dragleave', (e) => {
                 e.preventDefault();
-                uploadArea.classList.remove('dragover');
+                dropZone.classList.remove('drag-over');
             });
-
-            uploadArea.addEventListener('drop', function(e) {
+            
+            dropZone.addEventListener('drop', (e) => {
                 e.preventDefault();
-                uploadArea.classList.remove('dragover');
+                dropZone.classList.remove('drag-over');
                 
                 const files = e.dataTransfer.files;
                 if (files.length > 0) {
                     handleFileSelection(files[0]);
                 }
             });
-
-            // クリックでファイル選択
-            uploadArea.addEventListener('click', function() {
-                fileInput.click();
-            });
-
-            // ファイル選択変更
-            fileInput.addEventListener('change', function(e) {
+            
+            // ファイル選択処理
+            fileInput.addEventListener('change', (e) => {
                 if (e.target.files.length > 0) {
                     handleFileSelection(e.target.files[0]);
                 }
             });
-        }
-
-        /**
-         * フォームハンドラーの初期化
-         */
-        function initializeFormHandlers() {
-            const uploadForm = document.getElementById('uploadForm');
-            const removeFileBtn = document.getElementById('removeFile');
-            const newImportBtn = document.getElementById('newImportBtn');
-            const viewDataBtn = document.getElementById('viewDataBtn');
-
-            // フォーム送信
-            uploadForm.addEventListener('submit', function(e) {
+            
+            // フォーム送信処理
+            form.addEventListener('submit', (e) => {
                 e.preventDefault();
-                startImport();
-            });
-
-            // ファイル削除
-            removeFileBtn.addEventListener('click', function() {
-                removeSelectedFile();
-            });
-
-            // 新しいインポート
-            newImportBtn.addEventListener('click', function() {
-                resetForm();
-            });
-
-            // データ確認
-            viewDataBtn.addEventListener('click', function() {
-                window.open('../pages/companies.php', '_blank');
+                if (selectedFile) {
+                    uploadFile(selectedFile);
+                }
             });
         }
-
-        /**
-         * ファイル選択処理
-         */
+        
+        // ファイル選択処理
         function handleFileSelection(file) {
-            // ファイル形式チェック
-            const allowedTypes = ['text/csv', 'text/plain', 'application/vnd.ms-excel'];
-            const allowedExtensions = ['.csv', '.txt'];
-            const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
-
-            if (!allowedExtensions.includes(fileExtension)) {
-                showAlert('danger', 'CSVまたはTXTファイルを選択してください');
-                return;
-            }
-
-            // ファイルサイズチェック（10MB）
-            if (file.size > 10 * 1024 * 1024) {
-                showAlert('danger', 'ファイルサイズは10MB以下にしてください');
-                return;
-            }
-
             selectedFile = file;
-            displayFileInfo(file);
-            updateStepIndicator(2);
+            const submitBtn = document.querySelector('button[type="submit"]');
+            const dropZone = document.querySelector('.drop-zone');
             
-            document.getElementById('importBtn').disabled = false;
-        }
-
-        /**
-         * ファイル情報表示
-         */
-        function displayFileInfo(file) {
-            const fileInfo = document.getElementById('fileInfo');
-            const fileName = document.getElementById('fileName');
-            const fileSize = document.getElementById('fileSize');
-            const fileType = document.getElementById('fileType');
-
-            fileName.textContent = file.name;
-            fileSize.textContent = formatFileSize(file.size);
-            fileType.textContent = file.type || 'text/csv';
-
-            fileInfo.style.display = 'block';
-        }
-
-        /**
-         * 選択ファイル削除
-         */
-        function removeSelectedFile() {
-            selectedFile = null;
-            document.getElementById('fileInfo').style.display = 'none';
-            document.getElementById('csvFile').value = '';
-            document.getElementById('importBtn').disabled = true;
-            updateStepIndicator(1);
-        }
-
-        /**
-         * インポート開始
-         */
-        async function startImport() {
-            if (!selectedFile || isUploading) {
+            // ファイル検証
+            if (!validateFile(file)) {
                 return;
             }
-
-            isUploading = true;
-            updateStepIndicator(3);
-            showProgressSection();
-
+            
+            // UI更新
+            dropZone.innerHTML = `
+                <i class="fas fa-file-csv upload-icon" style="color: var(--smiley-green);"></i>
+                <h5>選択されたファイル</h5>
+                <p class="text-success"><strong>${file.name}</strong></p>
+                <p class="text-muted">サイズ: ${formatFileSize(file.size)}</p>
+                <div class="mt-3">
+                    <button type="submit" class="btn btn-smiley">
+                        <i class="fas fa-upload me-2"></i>インポート開始
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary ms-2" onclick="resetUpload()">
+                        <i class="fas fa-times me-2"></i>キャンセル
+                    </button>
+                </div>
+            `;
+            
+            submitBtn.disabled = false;
+        }
+        
+        // ファイル検証
+        function validateFile(file) {
+            const maxSize = 50 * 1024 * 1024; // 50MB
+            const allowedTypes = ['text/csv', 'text/plain', 'application/csv'];
+            const allowedExtensions = ['csv', 'txt'];
+            
+            // 拡張子チェック
+            const extension = file.name.split('.').pop().toLowerCase();
+            if (!allowedExtensions.includes(extension)) {
+                showAlert('danger', 'ファイル形式エラー', `許可されていない拡張子です: .${extension}`);
+                return false;
+            }
+            
+            // サイズチェック
+            if (file.size > maxSize) {
+                showAlert('danger', 'ファイルサイズエラー', `ファイルサイズが大きすぎます: ${formatFileSize(file.size)} (上限: 50MB)`);
+                return false;
+            }
+            
+            // 空ファイルチェック
+            if (file.size === 0) {
+                showAlert('danger', 'ファイルエラー', 'ファイルが空です');
+                return false;
+            }
+            
+            return true;
+        }
+        
+        // ファイルアップロード実行
+        function uploadFile(file) {
             const formData = new FormData();
-            formData.append('csv_file', selectedFile);
-            formData.append('encoding', document.getElementById('encoding').value);
+            formData.append('csv_file', file);
+            formData.append('encoding', 'auto');
+            formData.append('overwrite', '0');
             
-            if (document.getElementById('overwrite').checked) {
-                formData.append('overwrite', '1');
-            }
-
-            try {
-                updateProgress(10, 'ファイルをアップロード中...');
-
-                const response = await fetch('../api/import.php', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                updateProgress(50, 'サーバーで処理中...');
-
+            // UI状態変更
+            showProgress();
+            
+            // アップロード実行
+            fetch('../api/import.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-
-                const result = await response.json();
-                
-                updateProgress(100, '処理完了');
-
-                setTimeout(() => {
-                    hideProgressSection();
-                    displayResults(result);
-                    updateStepIndicator(4);
-                }, 1000);
-
-            } catch (error) {
-                console.error('Import error:', error);
-                hideProgressSection();
-                showAlert('danger', `インポートエラー: ${error.message}`);
-                updateStepIndicator(2);
-            } finally {
-                isUploading = false;
-            }
-        }
-
-        /**
-         * 結果表示
-         */
-        function displayResults(result) {
-            if (result.success) {
-                showAlert('success', result.message);
-                displaySuccessResults(result);
-            } else {
-                showAlert('danger', result.message);
-                if (result.data && result.data.stats) {
-                    displaySuccessResults(result);
-                }
-            }
-        }
-
-        /**
-         * 成功結果表示
-         */
-        function displaySuccessResults(result) {
-            const data = result.data || {};
-            const stats = data.stats || {};
-
-            // 統計表示
-            document.getElementById('totalRecords').textContent = stats.total_records || 0;
-            document.getElementById('successRecords').textContent = stats.success_records || 0;
-            document.getElementById('errorRecords').textContent = stats.error_records || 0;
-            document.getElementById('duplicateRecords').textContent = stats.duplicate_records || 0;
-
-            // 詳細情報
-            document.getElementById('batchId').textContent = data.batch_id || '-';
-            document.getElementById('processingTime').textContent = (stats.processing_time || '-');
-
-            // エラー詳細
-            if (result.errors && result.errors.length > 0) {
-                displayErrors(result.errors);
-            }
-
-            document.getElementById('resultSection').style.display = 'block';
-        }
-
-        /**
-         * エラー詳細表示
-         */
-        function displayErrors(errors) {
-            const errorSection = document.getElementById('errorSection');
-            const errorTable = document.getElementById('errorTable');
-
-            errorTable.innerHTML = '';
-
-            errors.forEach(error => {
-                const row = document.createElement('tr');
-                row.className = 'error-row';
-                row.innerHTML = `
-                    <td>${error.line || '-'}</td>
-                    <td>${error.message || 'エラー詳細なし'}</td>
-                `;
-                errorTable.appendChild(row);
+                return response.json();
+            })
+            .then(data => {
+                hideProgress();
+                displayResults(data);
+            })
+            .catch(error => {
+                hideProgress();
+                console.error('Upload error:', error);
+                showAlert('danger', 'アップロードエラー', 'ファイルのアップロード中にエラーが発生しました: ' + error.message);
             });
-
-            errorSection.style.display = 'block';
         }
-
-        /**
-         * 進捗セクション表示
-         */
-        function showProgressSection() {
-            document.getElementById('progressSection').style.display = 'block';
-            document.getElementById('importBtn').disabled = true;
-            document.getElementById('cancelBtn').style.display = 'inline-block';
-        }
-
-        /**
-         * 進捗セクション非表示
-         */
-        function hideProgressSection() {
-            document.getElementById('progressSection').style.display = 'none';
-            document.getElementById('importBtn').disabled = false;
-            document.getElementById('cancelBtn').style.display = 'none';
-        }
-
-        /**
-         * 進捗更新
-         */
-        function updateProgress(percent, message) {
-            document.getElementById('progressBar').style.width = percent + '%';
-            document.getElementById('progressPercent').textContent = percent + '%';
-            document.getElementById('progressMessage').textContent = message;
-        }
-
-        /**
-         * ステップインジケーター更新
-         */
-        function updateStepIndicator(activeStep) {
-            for (let i = 1; i <= 4; i++) {
-                const step = document.getElementById(`step${i}`);
-                step.classList.remove('active', 'completed');
-                
-                if (i < activeStep) {
-                    step.classList.add('completed');
-                } else if (i === activeStep) {
-                    step.classList.add('active');
-                }
-            }
-        }
-
-        /**
-         * システム状態チェック
-         */
-        async function checkSystemStatus() {
-            try {
-                const response = await fetch('../api/import.php?action=status');
-                const result = await response.json();
-
-                if (result.success) {
-                    document.getElementById('dbStatus').textContent = '正常';
-                    document.getElementById('dbStatus').className = 'badge bg-success';
-                    document.getElementById('apiStatus').textContent = '正常';
-                    document.getElementById('apiStatus').className = 'badge bg-success';
-                } else {
-                    document.getElementById('dbStatus').textContent = 'エラー';
-                    document.getElementById('dbStatus').className = 'badge bg-danger';
-                    document.getElementById('apiStatus').textContent = 'エラー';
-                    document.getElementById('apiStatus').className = 'badge bg-danger';
-                }
-
-                document.getElementById('lastUpdate').textContent = new Date().toLocaleString('ja-JP');
-
-            } catch (error) {
-                document.getElementById('dbStatus').textContent = '不明';
-                document.getElementById('dbStatus').className = 'badge bg-warning';
-                document.getElementById('apiStatus').textContent = '不明';
-                document.getElementById('apiStatus').className = 'badge bg-warning';
-            }
-        }
-
-        /**
-         * フォームリセット
-         */
-        function resetForm() {
-            removeSelectedFile();
-            document.getElementById('encoding').value = 'auto';
-            document.getElementById('overwrite').checked = false;
-            document.getElementById('resultSection').style.display = 'none';
-            hideProgressSection();
-            updateStepIndicator(1);
-            clearAlerts();
-        }
-
-        /**
-         * アラート表示
-         */
-        function showAlert(type, message) {
-            clearAlerts();
+        
+        // プログレス表示
+        function showProgress() {
+            document.querySelector('.drop-zone').style.display = 'none';
+            document.querySelector('.progress-container').style.display = 'block';
             
+            // プログレスバーアニメーション
+            let progress = 0;
+            const progressBar = document.querySelector('.progress-bar');
+            const interval = setInterval(() => {
+                progress += Math.random() * 15;
+                if (progress > 90) progress = 90;
+                progressBar.style.width = progress + '%';
+                if (progress >= 90) clearInterval(interval);
+            }, 200);
+        }
+        
+        // プログレス非表示
+        function hideProgress() {
+            document.querySelector('.progress-container').style.display = 'none';
+            document.querySelector('.progress-bar').style.width = '100%';
+        }
+        
+        // 結果表示
+        function displayResults(data) {
+            const resultsContainer = document.querySelector('.result-container');
+            const resultsDiv = document.getElementById('importResults');
+            
+            let html = '';
+            
+            if (data.success) {
+                html = `
+                    <div class="alert alert-success">
+                        <h5><i class="fas fa-check-circle me-2"></i>インポート完了</h5>
+                        <p>${data.message}</p>
+                    </div>
+                    
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-2">
+                            <div class="stats-card">
+                                <div class="stats-number">${data.data.stats.total_records}</div>
+                                <div class="text-muted">総件数</div>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="stats-card">
+                                <div class="stats-number text-success">${data.data.stats.success_records}</div>
+                                <div class="text-muted">成功</div>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="stats-card">
+                                <div class="stats-number text-danger">${data.data.stats.error_records}</div>
+                                <div class="text-muted">エラー</div>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="stats-card">
+                                <div class="stats-number text-warning">${data.data.stats.duplicate_records}</div>
+                                <div class="text-muted">重複</div>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="stats-card">
+                                <div class="stats-number text-info">${data.data.stats.new_companies}</div>
+                                <div class="text-muted">新規企業</div>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="stats-card">
+                                <div class="stats-number text-info">${data.data.stats.new_users}</div>
+                                <div class="text-muted">新規利用者</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <strong>バッチID:</strong> ${data.data.batch_id}<br>
+                        <strong>処理時間:</strong> ${data.data.stats.processing_time}
+                    </div>
+                `;
+            } else {
+                html = `
+                    <div class="alert alert-danger">
+                        <h5><i class="fas fa-exclamation-triangle me-2"></i>インポートエラー</h5>
+                        <p>${data.message}</p>
+                    </div>
+                `;
+            }
+            
+            // エラー詳細表示
+            if (data.data && data.data.errors && data.data.errors.length > 0) {
+                html += `
+                    <div class="alert alert-warning">
+                        <h6><i class="fas fa-list me-2"></i>エラー詳細 (${data.data.errors.length}件)</h6>
+                        <div class="error-list">
+                `;
+                
+                data.data.errors.forEach((error, index) => {
+                    html += `<div class="small mb-1"><strong>${index + 1}.</strong> ${error.context}: ${error.message}</div>`;
+                });
+                
+                html += `</div></div>`;
+            }
+            
+            html += `
+                <div class="text-center mt-4">
+                    <button class="btn btn-outline-primary me-2" onclick="resetUpload()">
+                        <i class="fas fa-plus me-2"></i>新しいファイルをインポート
+                    </button>
+                    <button class="btn btn-outline-info" onclick="location.href='users.php'">
+                        <i class="fas fa-users me-2"></i>利用者管理画面へ
+                    </button>
+                </div>
+            `;
+            
+            resultsDiv.innerHTML = html;
+            resultsContainer.style.display = 'block';
+        }
+        
+        // アップロードリセット
+        function resetUpload() {
+            selectedFile = null;
+            document.getElementById('csvFile').value = '';
+            document.querySelector('.result-container').style.display = 'none';
+            
+            // ドロップゾーンを元に戻す
+            const dropZone = document.querySelector('.drop-zone');
+            dropZone.style.display = 'block';
+            dropZone.innerHTML = `
+                <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                <h4>CSVファイルをアップロード</h4>
+                <p class="text-muted">クリックしてファイルを選択するか、ここにドラッグ&ドロップしてください</p>
+                <input type="file" id="csvFile" name="csv_file" accept=".csv,.txt" style="display: none;" required>
+                <div class="mt-3">
+                    <button type="submit" class="btn btn-smiley" disabled>
+                        <i class="fas fa-upload me-2"></i>インポート開始
+                    </button>
+                </div>
+            `;
+            
+            // イベントリスナー再設定
+            initializeUpload();
+        }
+        
+        // システム状態確認
+        function checkSystemStatus() {
+            const statusDiv = document.getElementById('systemStatus');
+            
+            statusDiv.innerHTML = `
+                <div class="text-center">
+                    <i class="fas fa-spinner fa-spin"></i> システム状態を確認中...
+                </div>
+            `;
+            
+            fetch('../api/import.php?action=status')
+            .then(response => response.json())
+            .then(data => {
+                let html = '';
+                
+                if (data.success) {
+                    html = `
+                        <div class="alert alert-success">
+                            <h6><i class="fas fa-check-circle me-2"></i>システム状態: 正常</h6>
+                            <div class="row g-2 mt-2">
+                                <div class="col-md-6">
+                                    <small><strong>データベース接続:</strong> ${data.data.database_connection ? '✓ 正常' : '✗ エラー'}</small><br>
+                                    <small><strong>データベースパターン:</strong> ${data.data.database_pattern}</small><br>
+                                    <small><strong>PDO接続:</strong> ${data.data.pdo_connection ? '✓ 正常' : '✗ エラー'}</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <small><strong>必要クラス:</strong></small><br>
+                                    <small>Database: ${data.data.required_classes.Database ? '✓' : '✗'}</small><br>
+                                    <small>SmileyCSVImporter: ${data.data.required_classes.SmileyCSVImporter ? '✓' : '✗'}</small><br>
+                                    <small>SecurityHelper: ${data.data.required_classes.SecurityHelper ? '✓' : '✗'}</small>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // テーブル状態表示
+                    if (data.data.tables) {
+                        html += `
+                            <div class="alert alert-info">
+                                <h6><i class="fas fa-database me-2"></i>データベーステーブル状態</h6>
+                                <div class="row g-1">
+                        `;
+                        
+                        Object.entries(data.data.tables).forEach(([table, exists]) => {
+                            html += `<div class="col-md-3"><small>${table}: ${exists ? '✓' : '✗'}</small></div>`;
+                        });
+                        
+                        html += `</div></div>`;
+                    }
+                } else {
+                    html = `
+                        <div class="alert alert-danger">
+                            <h6><i class="fas fa-exclamation-triangle me-2"></i>システム状態: エラー</h6>
+                            <p>${data.message}</p>
+                        </div>
+                    `;
+                }
+                
+                statusDiv.innerHTML = html;
+            })
+            .catch(error => {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h6><i class="fas fa-exclamation-triangle me-2"></i>システム状態確認エラー</h6>
+                        <p>システム状態の確認中にエラーが発生しました: ${error.message}</p>
+                    </div>
+                `;
+            });
+        }
+        
+        // ユーティリティ関数
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        function showAlert(type, title, message) {
             const alertDiv = document.createElement('div');
             alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
             alertDiv.innerHTML = `
-                ${message}
+                <h6><i class="fas fa-exclamation-triangle me-2"></i>${title}</h6>
+                <p>${message}</p>
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             `;
             
-            const container = document.querySelector('.container');
-            const firstRow = container.querySelector('.row');
-            if (firstRow) {
-                container.insertBefore(alertDiv, firstRow);
-            } else {
-                container.appendChild(alertDiv);
-            }
+            document.querySelector('.main-container').insertBefore(alertDiv, document.querySelector('.upload-card'));
             
-            // 自動削除
+            // 5秒後に自動削除
             setTimeout(() => {
                 if (alertDiv.parentNode) {
                     alertDiv.remove();
                 }
             }, 5000);
         }
-
-        /**
-         * アラート削除
-         */
-        function clearAlerts() {
-            const alerts = document.querySelectorAll('.alert');
-            alerts.forEach(alert => alert.remove());
-        }
-
-        /**
-         * ファイルサイズフォーマット
-         */
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-
-        /**
-         * 定期的なシステム状態更新
-         */
-        setInterval(checkSystemStatus, 60000); // 1分ごと
+        
+        // ページ読み込み時にシステム状態を確認
+        window.addEventListener('load', () => {
+            // 3秒後に自動でシステム状態確認
+            setTimeout(() => {
+                checkSystemStatus();
+            }, 3000);
+        });
     </script>
 </body>
 </html>
