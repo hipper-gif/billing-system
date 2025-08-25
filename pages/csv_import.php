@@ -814,7 +814,13 @@
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             `;
             
-            document.querySelector('.container').insertBefore(alertDiv, document.querySelector('.row'));
+            const container = document.querySelector('.container');
+            const firstRow = container.querySelector('.row');
+            if (firstRow) {
+                container.insertBefore(alertDiv, firstRow);
+            } else {
+                container.appendChild(alertDiv);
+            }
             
             // 自動削除
             setTimeout(() => {
