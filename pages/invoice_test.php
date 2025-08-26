@@ -1,49 +1,4 @@
-function displayGenerationResult(data) {
-            const result = data.test_generation;
-            
-            if (result.status === 'success') {
-                let html = '<div class="success">✅ 請求書生成テスト成功</div>';
-                
-                html += `
-                    <h4>📋 生成結果</h4>
-                    <div class="stat-grid">
-                        <div class="stat-card">
-                            <div class="stat-value">${result.invoices_created}</div>
-                            <div class="stat-label">請求書生成数</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value">${result.companies_processed}</div>
-                            <div class="stat-label">対象企業数</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value">${result.period_start}</div>
-                            <div class="stat-label">期間開始</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value">${result.period_end}</div>
-                            <div class="stat-label">期間終了</div>
-                        </div>
-                    </div>
-                `;
-                
-                if (result.company_details && result.company_details.length > 0) {
-                    html += '<h4>🏢 生成された請求書詳細</h4>';
-                    html += '<table class="data-table"><thead><tr><th>企業名</th><th>利用者数</th><th>注文件数</th><th>小計</th><th>消費税</th><th>合計</th></tr></thead><tbody>';
-                    result.company_details.forEach(company => {
-                        html += `<tr>
-                            <td>${company.company_name}</td>
-                            <td>${company.user_count || 0}名</td>
-                            <td>${company.order_count}件</td>
-                            <td>¥${Number(company.subtotal || 0).toLocaleString()}</td>
-                            <td>¥${Number(company.tax_amount || 0).toLocaleString()}</td>
-                            <td><strong>¥${Number(company.total_amount || 0).toLocaleString()}</strong></td>
-                        </tr>`;
-                    });
-                    html += '</tbody></table>';
-                }
-                
-                // 生成された請求書の確認
-                if (result.created_invoices && result.created_invoices.length > 0) {<?php
+<?php
 /**
  * 請求書生成機能テストツール
  * 実際のテーブル構造に基づいて請求書生成をテスト
@@ -55,7 +10,7 @@ function displayGenerationResult(data) {
 
 require_once __DIR__ . '/../classes/Database.php';
 
-// API処理（JSONレスポンス）
+// API処理を最初に実行
 if (isset($_GET['action'])) {
     header('Content-Type: application/json; charset=utf-8');
     
@@ -78,14 +33,16 @@ if (isset($_GET['action'])) {
         
         echo json_encode([
             'success' => true,
-            'data' => $result
+            'data' => $result,
+            'timestamp' => date('Y-m-d H:i:s')
         ], JSON_UNESCAPED_UNICODE);
         
     } catch (Exception $e) {
         http_response_code(500);
         echo json_encode([
             'success' => false,
-            'error' => $e->getMessage()
+            'error' => $e->getMessage(),
+            'timestamp' => date('Y-m-d H:i:s')
         ], JSON_UNESCAPED_UNICODE);
     }
     exit;
@@ -408,7 +365,7 @@ function generateInvoiceNumber() {
     return "{$prefix}-{$date}-{$random}";
 }
 
-// HTMLページ表示
+// HTMLページ表示（APIでない場合のみ）
 ?>
 <!DOCTYPE html>
 <html lang="ja">
@@ -505,7 +462,6 @@ function generateInvoiceNumber() {
     <script>
         function checkData() {
             showLoading('dataCheckResult');
-            
             fetch('?action=check_data')
                 .then(response => response.json())
                 .then(data => {
@@ -522,7 +478,6 @@ function generateInvoiceNumber() {
 
         function getOrderSample() {
             showLoading('orderSampleResult');
-            
             fetch('?action=get_orders')
                 .then(response => response.json())
                 .then(data => {
@@ -541,9 +496,7 @@ function generateInvoiceNumber() {
             if (!confirm('実際に請求書データを生成します。実行してもよろしいですか？')) {
                 return;
             }
-            
             showLoading('generationTestResult');
-            
             fetch('?action=test_generate')
                 .then(response => response.json())
                 .then(data => {
@@ -561,28 +514,23 @@ function generateInvoiceNumber() {
         function displayDataCheckResult(data) {
             let html = '<div class="success">✅ データ確認完了</div>';
             
-            // エラーがある場合は表示
             if (data.error) {
                 html += `<div class="error">⚠️ 部分的エラー: ${data.error}</div>`;
                 html += '<div class="success">💡 テーブル件数は取得できました</div>';
             }
             
-            // テーブル件数表示
             html += '<h4>📊 テーブル件数</h4>';
             html += '<div class="stat-grid">';
             Object.keys(data.table_counts).forEach(table => {
                 const count = data.table_counts[table];
                 const isError = typeof count === 'string' && count.includes('Error');
-                html += `
-                    <div class="stat-card ${isError ? 'error' : ''}">
-                        <div class="stat-value">${isError ? '❌' : count}</div>
-                        <div class="stat-label">${table}</div>
-                    </div>
-                `;
+                html += `<div class="stat-card ${isError ? 'error' : ''}">
+                    <div class="stat-value">${isError ? '❌' : count}</div>
+                    <div class="stat-label">${table}</div>
+                </div>`;
             });
             html += '</div>';
             
-            // 日別注文データ
             if (data.daily_orders && data.daily_orders.length > 0) {
                 html += '<h4>📅 日別注文データ（直近10日）</h4>';
                 html += '<table class="data-table"><thead><tr><th>配達日</th><th>注文件数</th><th>日計金額</th><th>利用者数</th></tr></thead><tbody>';
@@ -592,24 +540,6 @@ function generateInvoiceNumber() {
                 html += '</tbody></table>';
             }
             
-            // 利用者別集計
-            if (data.user_summary && data.user_summary.length > 0) {
-                html += '<h4>👤 利用者別集計（上位10名）</h4>';
-                html += '<table class="data-table"><thead><tr><th>利用者コード</th><th>利用者名</th><th>企業名</th><th>注文件数</th><th>総額</th><th>最終注文日</th></tr></thead><tbody>';
-                data.user_summary.slice(0, 10).forEach(user => {
-                    html += `<tr>
-                        <td>${user.user_code}</td>
-                        <td>${user.user_name}</td>
-                        <td>${user.company_name || '未設定'}</td>
-                        <td>${user.order_count}件</td>
-                        <td>¥${Number(user.total_amount || 0).toLocaleString()}</td>
-                        <td>${user.last_order || '-'}</td>
-                    </tr>`;
-                });
-                html += '</tbody></table>';
-            }
-            
-            // 企業別集計
             if (data.company_summary && data.company_summary.length > 0) {
                 html += '<h4>🏢 企業別集計</h4>';
                 html += '<table class="data-table"><thead><tr><th>企業名</th><th>利用者数</th><th>注文件数</th><th>総額</th></tr></thead><tbody>';
@@ -619,21 +549,11 @@ function generateInvoiceNumber() {
                 html += '</tbody></table>';
             }
             
-            // データ整合性情報
-            if (data.data_integrity) {
-                html += '<h4>🔍 データ整合性チェック</h4>';
-                html += '<table class="data-table"><thead><tr><th>テーブル</th><th>ユニーク利用者コード数</th></tr></thead><tbody>';
-                data.data_integrity.forEach(integrity => {
-                    html += `<tr><td>${integrity.source_table}</td><td>${integrity.unique_user_codes}件</td></tr>`;
-                });
-                html += '</tbody></table>';
-            }
-            
             document.getElementById('dataCheckResult').innerHTML = html;
         }
 
         function displayOrderSample(orders) {
-            let html = '<div class="success">注文データサンプル取得完了</div>';
+            let html = '<div class="success">✅ 注文データサンプル取得完了</div>';
             html += '<table class="data-table"><thead><tr><th>配達日</th><th>利用者コード</th><th>利用者名</th><th>企業名</th><th>商品名</th><th>数量</th><th>単価</th><th>金額</th></tr></thead><tbody>';
             
             orders.forEach(order => {
@@ -659,27 +579,13 @@ function generateInvoiceNumber() {
             if (result.status === 'success') {
                 let html = '<div class="success">✅ 請求書生成テスト成功</div>';
                 
-                html += `
-                    <h4>📋 生成結果</h4>
-                    <div class="stat-grid">
-                        <div class="stat-card">
-                            <div class="stat-value">${result.invoices_created}</div>
-                            <div class="stat-label">請求書生成数</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value">${result.companies_processed}</div>
-                            <div class="stat-label">対象企業数</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value">${result.period_start}</div>
-                            <div class="stat-label">期間開始</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value">${result.period_end}</div>
-                            <div class="stat-label">期間終了</div>
-                        </div>
-                    </div>
-                `;
+                html += '<h4>📋 生成結果</h4>';
+                html += '<div class="stat-grid">';
+                html += `<div class="stat-card"><div class="stat-value">${result.invoices_created}</div><div class="stat-label">請求書生成数</div></div>`;
+                html += `<div class="stat-card"><div class="stat-value">${result.companies_processed}</div><div class="stat-label">対象企業数</div></div>`;
+                html += `<div class="stat-card"><div class="stat-value">${result.period_start}</div><div class="stat-label">期間開始</div></div>`;
+                html += `<div class="stat-card"><div class="stat-value">${result.period_end}</div><div class="stat-label">期間終了</div></div>`;
+                html += '</div>';
                 
                 if (result.company_details && result.company_details.length > 0) {
                     html += '<h4>🏢 生成された請求書詳細</h4>';
@@ -697,7 +603,6 @@ function generateInvoiceNumber() {
                     html += '</tbody></table>';
                 }
                 
-                // 生成された請求書の確認
                 if (result.created_invoices && result.created_invoices.length > 0) {
                     html += '<h4>📄 作成された請求書</h4>';
                     html += '<table class="data-table"><thead><tr><th>請求書ID</th><th>請求書番号</th><th>企業名</th><th>金額</th><th>明細件数</th></tr></thead><tbody>';
@@ -713,43 +618,22 @@ function generateInvoiceNumber() {
                     html += '</tbody></table>';
                 }
                 
-                // 次のステップ案内
-                if (result.invoice_ids && result.invoice_ids.length > 0) {
-                    html += `
-                        <div class="success" style="margin-top: 20px;">
-                            <h5>🎉 請求書生成完了！</h5>
-                            <p>生成されたIDで請求書一覧画面で確認できます</p>
-                            <p><strong>次のステップ:</strong></p>
-                            <ul>
-                                <li>✅ 請求書データベース挿入 - 完了</li>
-                                <li>⏳ PDF生成機能のテスト</li>
-                                <li>⏳ フロントエンド画面での表示確認</li>
-                                <li>⏳ SmileyInvoiceGeneratorクラスの完全実装</li>
-                            </ul>
-                        </div>
-                    `;
-                }
+                html += `<div class="success" style="margin-top: 20px;">
+                    <h5>🎉 請求書生成完了！</h5>
+                    <p><strong>次のステップ:</strong></p>
+                    <ul>
+                        <li>✅ 請求書データベース挿入 - 完了</li>
+                        <li>⏳ PDF生成機能のテスト</li>
+                        <li>⏳ フロントエンド画面での表示確認</li>
+                        <li>⏳ SmileyInvoiceGeneratorクラスの完全実装</li>
+                    </ul>
+                </div>`;
                 
                 document.getElementById('generationTestResult').innerHTML = html;
             } else if (result.status === 'error') {
                 let html = '<div class="error">❌ 請求書生成テストでエラーが発生しました</div>';
                 html += `<div class="error">エラー詳細: ${result.error}</div>`;
-                html += `<div>期間: ${result.period_start} ～ ${result.period_end}</div>`;
-                
-                html += `
-                    <div style="margin-top: 15px;">
-                        <h5>🔧 トラブルシューティング</h5>
-                        <ul>
-                            <li>照合順序エラーが発生している可能性があります</li>
-                            <li>テーブル間のJOINで文字列比較に問題があります</li>
-                            <li>データ確認を先に実行して問題を特定してください</li>
-                        </ul>
-                    </div>
-                `;
-                
                 document.getElementById('generationTestResult').innerHTML = html;
-            } else {
-                showError('generationTestResult', '予期しないレスポンス形式です');
             }
         }
 
