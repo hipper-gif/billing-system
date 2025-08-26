@@ -1,10 +1,10 @@
 <?php
 /**
- * 請求書生成・管理API
- * Smiley配食事業の請求書生成、一覧取得、ステータス更新を処理
+ * 請求書生成・管理API（修正版）
+ * POST処理エラー修正・請求書生成機能完全対応
  * 
  * @author Claude
- * @version 1.0.0
+ * @version 2.0.0
  * @created 2025-08-26
  */
 
@@ -55,13 +55,18 @@ try {
     echo json_encode([
         'success' => false,
         'error' => $e->getMessage(),
-        'timestamp' => date('Y-m-d H:i:s')
+        'timestamp' => date('Y-m-d H:i:s'),
+        'debug' => [
+            'method' => $_SERVER['REQUEST_METHOD'],
+            'file' => basename(__FILE__),
+            'line' => __LINE__
+        ]
     ], JSON_UNESCAPED_UNICODE);
 }
 
 /**
  * GET リクエスト処理
- * 請求書一覧取得、詳細取得
+ * 請求書一覧取得、詳細取得、対象データ取得
  */
 function handleGetRequest($invoiceGenerator) {
     $action = $_GET['action'] ?? 'list';
@@ -92,7 +97,7 @@ function handleGetRequest($invoiceGenerator) {
             break;
             
         default:
-            throw new Exception('未対応のアクションです');
+            throw new Exception('未対応のアクションです: ' . $action);
     }
 }
 
@@ -101,19 +106,33 @@ function handleGetRequest($invoiceGenerator) {
  * 請求書生成
  */
 function handlePostRequest($invoiceGenerator) {
-    $action = $_POST['action'] ?? 'generate';
+    // Content-Type チェック
+    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+    
+    if (strpos($contentType, 'application/json') !== false) {
+        // JSON データ処理
+        $input = json_decode(file_get_contents('php://input'), true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('JSON データの解析に失敗しました: ' . json_last_error_msg());
+        }
+    } else {
+        // フォームデータ処理
+        $input = $_POST;
+    }
+    
+    $action = $input['action'] ?? 'generate';
     
     switch ($action) {
         case 'generate':
-            generateInvoices($invoiceGenerator);
+            generateInvoices($invoiceGenerator, $input);
             break;
             
         case 'regenerate':
-            regenerateInvoice($invoiceGenerator);
+            regenerateInvoice($invoiceGenerator, $input);
             break;
             
         default:
-            throw new Exception('未対応のアクションです');
+            throw new Exception('未対応のアクションです: ' . $action);
     }
 }
 
@@ -123,6 +142,10 @@ function handlePostRequest($invoiceGenerator) {
  */
 function handlePutRequest($invoiceGenerator) {
     $input = json_decode(file_get_contents('php://input'), true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('JSON データの解析に失敗しました');
+    }
+    
     $action = $input['action'] ?? 'update_status';
     
     switch ($action) {
@@ -131,7 +154,7 @@ function handlePutRequest($invoiceGenerator) {
             break;
             
         default:
-            throw new Exception('未対応のアクションです');
+            throw new Exception('未対応のアクションです: ' . $action);
     }
 }
 
@@ -141,6 +164,10 @@ function handlePutRequest($invoiceGenerator) {
  */
 function handleDeleteRequest($invoiceGenerator) {
     $input = json_decode(file_get_contents('php://input'), true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('JSON データの解析に失敗しました');
+    }
+    
     $invoiceId = $input['invoice_id'] ?? null;
     
     if (!$invoiceId) {
@@ -155,6 +182,54 @@ function handleDeleteRequest($invoiceGenerator) {
         'invoice_id' => $invoiceId,
         'timestamp' => date('Y-m-d H:i:s')
     ], JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * 請求書生成実行
+ */
+function generateInvoices($invoiceGenerator, $input) {
+    // 必須パラメータ検証
+    $requiredParams = ['invoice_type', 'period_start', 'period_end'];
+    foreach ($requiredParams as $param) {
+        if (empty($input[$param])) {
+            throw new Exception("必須パラメータが不足しています: {$param}");
+        }
+    }
+    
+    // 日付形式検証
+    if (!validateDateFormat($input['period_start']) || !validateDateFormat($input['period_end'])) {
+        throw new Exception('日付形式が正しくありません（YYYY-MM-DD形式で入力してください）');
+    }
+    
+    // 期間チェック
+    if (strtotime($input['period_start']) > strtotime($input['period_end'])) {
+        throw new Exception('開始日は終了日より前の日付を選択してください');
+    }
+    
+    // パラメータ構築
+    $params = [
+        'invoice_type' => SecurityHelper::sanitizeInput($input['invoice_type']),
+        'period_start' => $input['period_start'],
+        'period_end' => $input['period_end'],
+        'due_date' => $input['due_date'] ?? null,
+        'target_ids' => !empty($input['target_ids']) ? array_map('intval', $input['target_ids']) : [],
+        'auto_generate_pdf' => !empty($input['auto_generate_pdf'])
+    ];
+    
+    // 請求書生成実行
+    try {
+        $result = $invoiceGenerator->generateInvoices($params);
+        
+        echo json_encode([
+            'success' => true,
+            'data' => $result,
+            'message' => "請求書を{$result['total_invoices']}件生成しました（合計金額: ¥" . number_format($result['total_amount']) . "）",
+            'timestamp' => date('Y-m-d H:i:s')
+        ], JSON_UNESCAPED_UNICODE);
+        
+    } catch (Exception $e) {
+        throw new Exception('請求書生成エラー: ' . $e->getMessage());
+    }
 }
 
 /**
@@ -182,10 +257,6 @@ function getInvoiceList($invoiceGenerator) {
     }
     
     $result = $invoiceGenerator->getInvoiceList($filters, $page, $limit);
-    
-    // 統計情報追加
-    $statistics = calculateListStatistics($result['invoices']);
-    $result['statistics'] = $statistics;
     
     echo json_encode([
         'success' => true,
@@ -224,39 +295,150 @@ function getInvoiceDetail($invoiceGenerator) {
 }
 
 /**
- * 請求書生成
+ * 対象企業一覧取得
  */
-function generateInvoices($invoiceGenerator) {
-    // 必須パラメータ検証
-    $requiredParams = ['invoice_type', 'period_start', 'period_end'];
-    foreach ($requiredParams as $param) {
-        if (empty($_POST[$param])) {
-            throw new Exception("{$param}は必須です");
-        }
-    }
+function getTargetCompanies() {
+    $db = Database::getInstance();
     
-    // パラメータ構築
-    $params = [
-        'invoice_type' => SecurityHelper::sanitizeInput($_POST['invoice_type']),
-        'period_start' => $_POST['period_start'],
-        'period_end' => $_POST['period_end'],
-        'due_date' => $_POST['due_date'] ?? null,
-        'target_ids' => !empty($_POST['target_ids']) ? array_map('intval', $_POST['target_ids']) : [],
-        'auto_generate_pdf' => !empty($_POST['auto_generate_pdf'])
-    ];
-    
-    // 日付形式検証
-    if (!validateDateFormat($params['period_start']) || !validateDateFormat($params['period_end'])) {
-        throw new Exception('日付形式が正しくありません（YYYY-MM-DD形式で入力してください）');
-    }
-    
-    // 請求書生成実行
-    $result = $invoiceGenerator->generateInvoices($params);
+    $stmt = $db->prepare("
+        SELECT 
+            c.id, c.company_name,
+            COUNT(DISTINCT u.id) as user_count,
+            COUNT(DISTINCT o.id) as recent_order_count,
+            COALESCE(SUM(o.total_amount), 0) as recent_total_amount
+        FROM companies c
+        LEFT JOIN users u ON c.id = u.company_id AND u.is_active = 1
+        LEFT JOIN orders o ON c.id = o.company_id AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        WHERE c.is_active = 1
+        GROUP BY c.id, c.company_name
+        HAVING user_count > 0
+        ORDER BY c.company_name
+    ");
+    $stmt->execute();
+    $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     echo json_encode([
         'success' => true,
-        'data' => $result,
-        'message' => "請求書を{$result['total_invoices']}件生成しました",
+        'data' => $companies,
+        'count' => count($companies),
+        'timestamp' => date('Y-m-d H:i:s')
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * 対象部署一覧取得
+ */
+function getTargetDepartments() {
+    $companyId = intval($_GET['company_id'] ?? 0);
+    $db = Database::getInstance();
+    
+    $whereClause = "WHERE d.is_active = 1 AND c.is_active = 1";
+    $params = [];
+    
+    if ($companyId > 0) {
+        $whereClause .= " AND d.company_id = ?";
+        $params[] = $companyId;
+    }
+    
+    $stmt = $db->prepare("
+        SELECT 
+            d.id, d.department_name, d.company_id,
+            c.company_name,
+            COUNT(DISTINCT u.id) as user_count,
+            COUNT(DISTINCT o.id) as recent_order_count
+        FROM departments d
+        INNER JOIN companies c ON d.company_id = c.id
+        LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
+        LEFT JOIN orders o ON d.id = o.department_id AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        {$whereClause}
+        GROUP BY d.id, d.department_name, d.company_id, c.company_name
+        HAVING user_count > 0
+        ORDER BY c.company_name, d.department_name
+    ");
+    $stmt->execute($params);
+    $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $departments,
+        'count' => count($departments),
+        'timestamp' => date('Y-m-d H:i:s')
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * 対象利用者一覧取得
+ */
+function getTargetUsers() {
+    $companyId = intval($_GET['company_id'] ?? 0);
+    $departmentId = intval($_GET['department_id'] ?? 0);
+    $db = Database::getInstance();
+    
+    $whereClause = "WHERE u.is_active = 1 AND c.is_active = 1";
+    $params = [];
+    
+    if ($companyId > 0) {
+        $whereClause .= " AND u.company_id = ?";
+        $params[] = $companyId;
+    }
+    
+    if ($departmentId > 0) {
+        $whereClause .= " AND u.department_id = ?";
+        $params[] = $departmentId;
+    }
+    
+    $stmt = $db->prepare("
+        SELECT 
+            u.id, u.user_name, u.company_id, u.department_id,
+            c.company_name, d.department_name,
+            COUNT(o.id) as recent_order_count,
+            COALESCE(SUM(o.total_amount), 0) as recent_total_amount
+        FROM users u
+        LEFT JOIN companies c ON u.company_id = c.id
+        LEFT JOIN departments d ON u.department_id = d.id
+        LEFT JOIN orders o ON u.id = o.user_id AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        {$whereClause}
+        GROUP BY u.id, u.user_name, u.company_id, u.department_id, c.company_name, d.department_name
+        HAVING recent_order_count > 0
+        ORDER BY c.company_name, d.department_name, u.user_name
+    ");
+    $stmt->execute($params);
+    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $users,
+        'count' => count($users),
+        'timestamp' => date('Y-m-d H:i:s')
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * 請求書統計情報取得
+ */
+function getInvoiceStatistics() {
+    $db = Database::getInstance();
+    
+    // 基本統計
+    $stmt = $db->prepare("
+        SELECT 
+            COUNT(*) as total_invoices,
+            COUNT(CASE WHEN status = 'issued' THEN 1 END) as issued_count,
+            COUNT(CASE WHEN status = 'sent' THEN 1 END) as sent_count,
+            COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_count,
+            COUNT(CASE WHEN status = 'overdue' THEN 1 END) as overdue_count,
+            COALESCE(SUM(total_amount), 0) as total_amount,
+            COALESCE(SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END), 0) as paid_amount,
+            COALESCE(SUM(CASE WHEN status IN ('issued', 'sent') THEN total_amount ELSE 0 END), 0) as pending_amount
+        FROM invoices
+        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+    ");
+    $stmt->execute();
+    $basicStats = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $basicStats,
         'timestamp' => date('Y-m-d H:i:s')
     ], JSON_UNESCAPED_UNICODE);
 }
@@ -289,205 +471,10 @@ function updateInvoiceStatus($invoiceGenerator, $input) {
 }
 
 /**
- * 対象企業一覧取得
- */
-function getTargetCompanies() {
-    $db = Database::getInstance();
-    
-    $stmt = $db->prepare("
-        SELECT 
-            id, company_name, billing_method, payment_method,
-            COUNT(DISTINCT u.id) as user_count,
-            COUNT(DISTINCT d.id) as department_count
-        FROM companies c
-        LEFT JOIN users u ON c.id = u.company_id AND u.is_active = 1
-        LEFT JOIN departments d ON c.id = d.company_id AND d.is_active = 1
-        WHERE c.is_active = 1
-        GROUP BY c.id, c.company_name, c.billing_method, c.payment_method
-        ORDER BY c.company_name
-    ");
-    $stmt->execute();
-    $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    echo json_encode([
-        'success' => true,
-        'data' => $companies,
-        'count' => count($companies),
-        'timestamp' => date('Y-m-d H:i:s')
-    ], JSON_UNESCAPED_UNICODE);
-}
-
-/**
- * 対象部署一覧取得
- */
-function getTargetDepartments() {
-    $companyId = intval($_GET['company_id'] ?? 0);
-    $db = Database::getInstance();
-    
-    $whereClause = "WHERE d.is_active = 1 AND c.is_active = 1";
-    $params = [];
-    
-    if ($companyId > 0) {
-        $whereClause .= " AND d.company_id = ?";
-        $params[] = $companyId;
-    }
-    
-    $stmt = $db->prepare("
-        SELECT 
-            d.id, d.department_name, d.company_id,
-            c.company_name, c.billing_method,
-            COUNT(DISTINCT u.id) as user_count
-        FROM departments d
-        INNER JOIN companies c ON d.company_id = c.id
-        LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
-        {$whereClause}
-        GROUP BY d.id, d.department_name, d.company_id, c.company_name, c.billing_method
-        ORDER BY c.company_name, d.department_name
-    ");
-    $stmt->execute($params);
-    $departments = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    echo json_encode([
-        'success' => true,
-        'data' => $departments,
-        'count' => count($departments),
-        'timestamp' => date('Y-m-d H:i:s')
-    ], JSON_UNESCAPED_UNICODE);
-}
-
-/**
- * 対象利用者一覧取得
- */
-function getTargetUsers() {
-    $companyId = intval($_GET['company_id'] ?? 0);
-    $departmentId = intval($_GET['department_id'] ?? 0);
-    $db = Database::getInstance();
-    
-    $whereClause = "WHERE u.is_active = 1";
-    $params = [];
-    
-    if ($companyId > 0) {
-        $whereClause .= " AND u.company_id = ?";
-        $params[] = $companyId;
-    }
-    
-    if ($departmentId > 0) {
-        $whereClause .= " AND u.department_id = ?";
-        $params[] = $departmentId;
-    }
-    
-    $stmt = $db->prepare("
-        SELECT 
-            u.id, u.user_name, u.company_id, u.department_id,
-            c.company_name, d.department_name, u.payment_method,
-            COUNT(o.id) as recent_order_count,
-            COALESCE(SUM(o.total_amount), 0) as recent_total_amount
-        FROM users u
-        LEFT JOIN companies c ON u.company_id = c.id
-        LEFT JOIN departments d ON u.department_id = d.id
-        LEFT JOIN orders o ON u.id = o.user_id AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-        {$whereClause}
-        GROUP BY u.id, u.user_name, u.company_id, u.department_id, c.company_name, d.department_name, u.payment_method
-        ORDER BY c.company_name, d.department_name, u.user_name
-    ");
-    $stmt->execute($params);
-    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    echo json_encode([
-        'success' => true,
-        'data' => $users,
-        'count' => count($users),
-        'timestamp' => date('Y-m-d H:i:s')
-    ], JSON_UNESCAPED_UNICODE);
-}
-
-/**
- * 請求書統計情報取得
- */
-function getInvoiceStatistics() {
-    $db = Database::getInstance();
-    
-    // 基本統計
-    $stmt = $db->prepare("
-        SELECT 
-            COUNT(*) as total_invoices,
-            COUNT(CASE WHEN status = 'issued' THEN 1 END) as issued_count,
-            COUNT(CASE WHEN status = 'sent' THEN 1 END) as sent_count,
-            COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_count,
-            COUNT(CASE WHEN status = 'overdue' THEN 1 END) as overdue_count,
-            COALESCE(SUM(total_amount), 0) as total_amount,
-            COALESCE(SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END), 0) as paid_amount,
-            COALESCE(SUM(CASE WHEN status IN ('issued', 'sent') THEN total_amount ELSE 0 END), 0) as pending_amount,
-            COALESCE(SUM(CASE WHEN status = 'overdue' THEN total_amount ELSE 0 END), 0) as overdue_amount
-        FROM invoices
-        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
-    ");
-    $stmt->execute();
-    $basicStats = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    // 月別統計（過去12ヶ月）
-    $stmt = $db->prepare("
-        SELECT 
-            DATE_FORMAT(issue_date, '%Y-%m') as month,
-            COUNT(*) as invoice_count,
-            COALESCE(SUM(total_amount), 0) as total_amount,
-            COALESCE(AVG(total_amount), 0) as avg_amount
-        FROM invoices
-        WHERE issue_date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
-        GROUP BY DATE_FORMAT(issue_date, '%Y-%m')
-        ORDER BY month DESC
-    ");
-    $stmt->execute();
-    $monthlyStats = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // タイプ別統計
-    $stmt = $db->prepare("
-        SELECT 
-            invoice_type,
-            COUNT(*) as count,
-            COALESCE(SUM(total_amount), 0) as total_amount,
-            COALESCE(AVG(total_amount), 0) as avg_amount
-        FROM invoices
-        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
-        GROUP BY invoice_type
-    ");
-    $stmt->execute();
-    $typeStats = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // 企業別統計（上位10社）
-    $stmt = $db->prepare("
-        SELECT 
-            c.company_name,
-            COUNT(i.id) as invoice_count,
-            COALESCE(SUM(i.total_amount), 0) as total_amount,
-            MAX(i.issue_date) as last_invoice_date
-        FROM companies c
-        INNER JOIN invoices i ON c.id = i.company_id
-        WHERE i.created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
-        GROUP BY c.id, c.company_name
-        ORDER BY total_amount DESC
-        LIMIT 10
-    ");
-    $stmt->execute();
-    $companyStats = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    echo json_encode([
-        'success' => true,
-        'data' => [
-            'basic' => $basicStats,
-            'monthly' => $monthlyStats,
-            'by_type' => $typeStats,
-            'top_companies' => $companyStats
-        ],
-        'timestamp' => date('Y-m-d H:i:s')
-    ], JSON_UNESCAPED_UNICODE);
-}
-
-/**
  * 請求書再生成
  */
-function regenerateInvoice($invoiceGenerator) {
-    $invoiceId = intval($_POST['invoice_id'] ?? 0);
+function regenerateInvoice($invoiceGenerator, $input) {
+    $invoiceId = intval($input['invoice_id'] ?? 0);
     
     if (!$invoiceId) {
         throw new Exception('請求書IDが必要です');
@@ -504,7 +491,7 @@ function regenerateInvoice($invoiceGenerator) {
         throw new Exception('支払済みまたは送付済みの請求書は再生成できません');
     }
     
-    // 元請求書をキャンセルし、新しい請求書を生成
+    // 元請求書をキャンセル
     $invoiceGenerator->updateInvoiceStatus($invoiceId, 'cancelled', '再生成のためキャンセル');
     
     $params = [
@@ -517,13 +504,13 @@ function regenerateInvoice($invoiceGenerator) {
     
     // ターゲットID設定
     switch ($invoice['invoice_type']) {
-        case SmileyInvoiceGenerator::TYPE_COMPANY_BULK:
+        case 'company_bulk':
             $params['target_ids'] = [$invoice['company_id']];
             break;
-        case SmileyInvoiceGenerator::TYPE_DEPARTMENT_BULK:
+        case 'department_bulk':
             $params['target_ids'] = [$invoice['department_id']];
             break;
-        case SmileyInvoiceGenerator::TYPE_INDIVIDUAL:
+        case 'individual':
             $params['target_ids'] = [$invoice['user_id']];
             break;
     }
@@ -537,48 +524,6 @@ function regenerateInvoice($invoiceGenerator) {
         'old_invoice_id' => $invoiceId,
         'timestamp' => date('Y-m-d H:i:s')
     ], JSON_UNESCAPED_UNICODE);
-}
-
-/**
- * 請求書一覧の統計計算
- */
-function calculateListStatistics($invoices) {
-    $stats = [
-        'total_count' => count($invoices),
-        'total_amount' => 0,
-        'avg_amount' => 0,
-        'status_breakdown' => [],
-        'type_breakdown' => []
-    ];
-    
-    $statusCount = [];
-    $typeCount = [];
-    
-    foreach ($invoices as $invoice) {
-        $stats['total_amount'] += floatval($invoice['total_amount']);
-        
-        // ステータス別集計
-        $status = $invoice['status'];
-        if (!isset($statusCount[$status])) {
-            $statusCount[$status] = ['count' => 0, 'amount' => 0];
-        }
-        $statusCount[$status]['count']++;
-        $statusCount[$status]['amount'] += floatval($invoice['total_amount']);
-        
-        // タイプ別集計
-        $type = $invoice['invoice_type'];
-        if (!isset($typeCount[$type])) {
-            $typeCount[$type] = ['count' => 0, 'amount' => 0];
-        }
-        $typeCount[$type]['count']++;
-        $typeCount[$type]['amount'] += floatval($invoice['total_amount']);
-    }
-    
-    $stats['avg_amount'] = $stats['total_count'] > 0 ? $stats['total_amount'] / $stats['total_count'] : 0;
-    $stats['status_breakdown'] = $statusCount;
-    $stats['type_breakdown'] = $typeCount;
-    
-    return $stats;
 }
 
 /**
@@ -599,70 +544,5 @@ function sendErrorResponse($message, $code = 400) {
         'timestamp' => date('Y-m-d H:i:s')
     ], JSON_UNESCAPED_UNICODE);
     exit;
-}
-
-/**
- * ファイルダウンロード用ヘッダー設定
- */
-function setDownloadHeaders($filename, $contentType = 'application/octet-stream') {
-    header('Content-Type: ' . $contentType);
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    header('Cache-Control: no-cache, must-revalidate');
-    header('Expires: 0');
-}
-
-/**
- * 請求書CSV出力
- */
-function exportInvoicesToCSV() {
-    $filters = [];
-    if (!empty($_GET['company_id'])) $filters['company_id'] = intval($_GET['company_id']);
-    if (!empty($_GET['status'])) $filters['status'] = SecurityHelper::sanitizeInput($_GET['status']);
-    if (!empty($_GET['period_start'])) $filters['period_start'] = $_GET['period_start'];
-    if (!empty($_GET['period_end'])) $filters['period_end'] = $_GET['period_end'];
-    
-    $invoiceGenerator = new SmileyInvoiceGenerator();
-    $result = $invoiceGenerator->getInvoiceList($filters, 1, 10000); // 最大10,000件
-    
-    $filename = 'invoices_' . date('Y-m-d_H-i-s') . '.csv';
-    setDownloadHeaders($filename, 'text/csv');
-    
-    $output = fopen('php://output', 'w');
-    
-    // CSVヘッダー
-    $headers = [
-        '請求書番号', '請求書タイプ', '企業名', '発行日', '支払期限',
-        '小計', '税額', '合計金額', '注文件数', '総数量', 'ステータス'
-    ];
-    
-    // BOM付きでUTF-8出力（Excel対応）
-    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
-    fputcsv($output, $headers);
-    
-    // データ出力
-    foreach ($result['invoices'] as $invoice) {
-        $row = [
-            $invoice['invoice_number'],
-            $invoice['invoice_type'],
-            $invoice['billing_company_name'],
-            $invoice['issue_date'],
-            $invoice['due_date'],
-            number_format($invoice['subtotal']),
-            number_format($invoice['tax_amount']),
-            number_format($invoice['total_amount']),
-            $invoice['order_count'],
-            $invoice['total_quantity'],
-            $invoice['status']
-        ];
-        fputcsv($output, $row);
-    }
-    
-    fclose($output);
-    exit;
-}
-
-// CSV出力リクエストの場合
-if (isset($_GET['export']) && $_GET['export'] === 'csv') {
-    exportInvoicesToCSV();
 }
 ?>
