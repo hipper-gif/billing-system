@@ -11,9 +11,166 @@
 require_once __DIR__ . '/../classes/Database.php';
 require_once __DIR__ . '/../classes/SecurityHelper.php';
 
-// セキュリティヘッダー設定
-SecurityHelper::setSecurityHeaders();
+// API処理（JSONレスポンス）
+if (isset($_GET['action']) && $_GET['action'] === 'get_structure') {
+    header('Content-Type: application/json; charset=utf-8');
+    
+    try {
+        $db = Database::getInstance();
+        $result = getTableStructure($db);
+        
+        echo json_encode([
+            'success' => true,
+            'tables' => $result['tables'],
+            'statistics' => $result['statistics'],
+            'timestamp' => date('Y-m-d H:i:s')
+        ], JSON_UNESCAPED_UNICODE);
+        
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode([
+            'success' => false,
+            'error' => $e->getMessage(),
+            'timestamp' => date('Y-m-d H:i:s')
+        ], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
 
+/**
+ * テーブル構造取得
+ */
+function getTableStructure($db) {
+    $tables = [];
+    $totalColumns = 0;
+    $totalIndexes = 0;
+    $totalConstraints = 0;
+    
+    // データベース名取得
+    $stmt = $db->prepare("SELECT DATABASE() as db_name");
+    $stmt->execute();
+    $dbName = $stmt->fetch(PDO::FETCH_ASSOC)['db_name'];
+    
+    // テーブル一覧取得（統計情報含む）
+    $stmt = $db->prepare("
+        SELECT 
+            t.TABLE_NAME,
+            t.ENGINE,
+            t.TABLE_ROWS,
+            t.DATA_LENGTH,
+            t.TABLE_COMMENT
+        FROM INFORMATION_SCHEMA.TABLES t
+        WHERE t.TABLE_SCHEMA = ?
+        AND t.TABLE_TYPE = 'BASE TABLE'
+        ORDER BY t.TABLE_NAME
+    ");
+    $stmt->execute([$dbName]);
+    $tableList = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    foreach ($tableList as $tableInfo) {
+        $tableName = $tableInfo['TABLE_NAME'];
+        
+        // カラム情報取得
+        $stmt = $db->prepare("
+            SELECT 
+                c.COLUMN_NAME as column_name,
+                c.DATA_TYPE as data_type,
+                c.CHARACTER_MAXIMUM_LENGTH as character_maximum_length,
+                c.NUMERIC_PRECISION as numeric_precision,
+                c.NUMERIC_SCALE as numeric_scale,
+                c.IS_NULLABLE as is_nullable,
+                c.COLUMN_DEFAULT as column_default,
+                c.COLUMN_KEY as column_key,
+                c.COLUMN_COMMENT as column_comment,
+                c.EXTRA as extra
+            FROM INFORMATION_SCHEMA.COLUMNS c
+            WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ?
+            ORDER BY c.ORDINAL_POSITION
+        ");
+        $stmt->execute([$dbName, $tableName]);
+        $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // 外部キー制約情報取得
+        $stmt = $db->prepare("
+            SELECT 
+                kcu.COLUMN_NAME,
+                kcu.REFERENCED_TABLE_NAME,
+                kcu.REFERENCED_COLUMN_NAME,
+                rc.CONSTRAINT_NAME,
+                'FOREIGN KEY' as constraint_type
+            FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+            JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc 
+                ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+                AND kcu.TABLE_SCHEMA = rc.CONSTRAINT_SCHEMA
+            WHERE kcu.TABLE_SCHEMA = ? AND kcu.TABLE_NAME = ?
+        ");
+        $stmt->execute([$dbName, $tableName]);
+        $constraints = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // 制約情報をカラムに統合
+        foreach ($columns as &$column) {
+            foreach ($constraints as $constraint) {
+                if ($column['column_name'] === $constraint['COLUMN_NAME']) {
+                    $column['constraint_type'] = $constraint['constraint_type'];
+                    $column['referenced_table'] = $constraint['REFERENCED_TABLE_NAME'];
+                    $column['referenced_column'] = $constraint['REFERENCED_COLUMN_NAME'];
+                    break;
+                }
+            }
+        }
+        
+        // インデックス情報取得
+        $stmt = $db->prepare("
+            SELECT COUNT(*) as index_count
+            FROM INFORMATION_SCHEMA.STATISTICS 
+            WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+        ");
+        $stmt->execute([$dbName, $tableName]);
+        $indexCount = $stmt->fetch(PDO::FETCH_ASSOC)['index_count'];
+        
+        $tables[] = [
+            'table_name' => $tableName,
+            'engine' => $tableInfo['ENGINE'],
+            'table_rows' => $tableInfo['TABLE_ROWS'],
+            'data_size' => formatBytes($tableInfo['DATA_LENGTH']),
+            'table_comment' => $tableInfo['TABLE_COMMENT'],
+            'columns' => $columns,
+            'index_count' => $indexCount
+        ];
+        
+        $totalColumns += count($columns);
+        $totalIndexes += $indexCount;
+        $totalConstraints += count($constraints);
+    }
+    
+    return [
+        'tables' => $tables,
+        'statistics' => [
+            'total_tables' => count($tables),
+            'total_columns' => $totalColumns,
+            'total_indexes' => $totalIndexes,
+            'total_constraints' => $totalConstraints
+        ]
+    ];
+}
+
+/**
+ * バイト数フォーマット
+ */
+function formatBytes($bytes, $precision = 2) {
+    if ($bytes == 0) return '0 B';
+    
+    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    
+    for ($i = 0; $bytes > 1024 && $i < count($units) - 1; $i++) {
+        $bytes /= 1024;
+    }
+    
+    return round($bytes, $precision) . ' ' . $units[$i];
+}
+
+// HTMLページ表示（APIリクエストでない場合）
+SecurityHelper::setSecurityHeaders();
 $pageTitle = 'テーブル構造確認 - Smiley配食事業システム';
 ?>
 <!DOCTYPE html>
@@ -314,21 +471,33 @@ $pageTitle = 'テーブル構造確認 - Smiley配食事業システム';
         function loadTableStructure() {
             showLoading(true);
             
-            // PHPから直接テーブル構造を取得
-            fetch('table_debug.php?action=get_structure')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        tableData = data.tables;
-                        filteredData = tableData;
-                        updateStatistics(data.statistics);
-                        renderTables();
-                    } else {
-                        showError(data.error);
+            // 現在のページに ?action=get_structure を付けてAPIコール
+            fetch(window.location.pathname + '?action=get_structure')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(text => {
+                    try {
+                        const data = JSON.parse(text);
+                        if (data.success) {
+                            tableData = data.tables;
+                            filteredData = tableData;
+                            updateStatistics(data.statistics);
+                            renderTables();
+                        } else {
+                            showError(data.error);
+                        }
+                    } catch (e) {
+                        console.error('JSON Parse Error:', e);
+                        console.error('Response text:', text);
+                        showError('JSONの解析に失敗しました: ' + e.message);
                     }
                 })
                 .catch(error => {
-                    console.error('Error:', error);
+                    console.error('Fetch Error:', error);
                     showError('テーブル構造の取得に失敗しました: ' + error.message);
                 })
                 .finally(() => {
@@ -501,161 +670,3 @@ $pageTitle = 'テーブル構造確認 - Smiley配食事業システム';
     </script>
 </body>
 </html>
-
-<?php
-// API処理部分
-if (isset($_GET['action']) && $_GET['action'] === 'get_structure') {
-    header('Content-Type: application/json; charset=utf-8');
-    
-    try {
-        $db = Database::getInstance();
-        $result = getTableStructure($db);
-        
-        echo json_encode([
-            'success' => true,
-            'tables' => $result['tables'],
-            'statistics' => $result['statistics'],
-            'timestamp' => date('Y-m-d H:i:s')
-        ], JSON_UNESCAPED_UNICODE);
-        
-    } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode([
-            'success' => false,
-            'error' => $e->getMessage(),
-            'timestamp' => date('Y-m-d H:i:s')
-        ], JSON_UNESCAPED_UNICODE);
-    }
-    exit;
-}
-
-/**
- * テーブル構造取得
- */
-function getTableStructure($db) {
-    $tables = [];
-    $totalColumns = 0;
-    $totalIndexes = 0;
-    $totalConstraints = 0;
-    
-    // データベース名取得
-    $stmt = $db->prepare("SELECT DATABASE() as db_name");
-    $stmt->execute();
-    $dbName = $stmt->fetch(PDO::FETCH_ASSOC)['db_name'];
-    
-    // テーブル一覧取得（統計情報含む）
-    $stmt = $db->prepare("
-        SELECT 
-            t.TABLE_NAME,
-            t.ENGINE,
-            t.TABLE_ROWS,
-            t.DATA_LENGTH,
-            t.TABLE_COMMENT
-        FROM INFORMATION_SCHEMA.TABLES t
-        WHERE t.TABLE_SCHEMA = ?
-        AND t.TABLE_TYPE = 'BASE TABLE'
-        ORDER BY t.TABLE_NAME
-    ");
-    $stmt->execute([$dbName]);
-    $tableList = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    foreach ($tableList as $tableInfo) {
-        $tableName = $tableInfo['TABLE_NAME'];
-        
-        // カラム情報取得
-        $stmt = $db->prepare("
-            SELECT 
-                c.COLUMN_NAME as column_name,
-                c.DATA_TYPE as data_type,
-                c.CHARACTER_MAXIMUM_LENGTH as character_maximum_length,
-                c.NUMERIC_PRECISION as numeric_precision,
-                c.NUMERIC_SCALE as numeric_scale,
-                c.IS_NULLABLE as is_nullable,
-                c.COLUMN_DEFAULT as column_default,
-                c.COLUMN_KEY as column_key,
-                c.COLUMN_COMMENT as column_comment,
-                c.EXTRA as extra
-            FROM INFORMATION_SCHEMA.COLUMNS c
-            WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ?
-            ORDER BY c.ORDINAL_POSITION
-        ");
-        $stmt->execute([$dbName, $tableName]);
-        $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // 外部キー制約情報取得
-        $stmt = $db->prepare("
-            SELECT 
-                kcu.COLUMN_NAME,
-                kcu.REFERENCED_TABLE_NAME,
-                kcu.REFERENCED_COLUMN_NAME,
-                rc.CONSTRAINT_NAME,
-                'FOREIGN KEY' as constraint_type
-            FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
-            JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc 
-                ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
-                AND kcu.TABLE_SCHEMA = rc.CONSTRAINT_SCHEMA
-            WHERE kcu.TABLE_SCHEMA = ? AND kcu.TABLE_NAME = ?
-        ");
-        $stmt->execute([$dbName, $tableName]);
-        $constraints = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // 制約情報をカラムに統合
-        foreach ($columns as &$column) {
-            foreach ($constraints as $constraint) {
-                if ($column['column_name'] === $constraint['COLUMN_NAME']) {
-                    $column['constraint_type'] = $constraint['constraint_type'];
-                    $column['referenced_table'] = $constraint['REFERENCED_TABLE_NAME'];
-                    $column['referenced_column'] = $constraint['REFERENCED_COLUMN_NAME'];
-                    break;
-                }
-            }
-        }
-        
-        // インデックス情報取得
-        $stmt = $db->prepare("
-            SELECT COUNT(*) as index_count
-            FROM INFORMATION_SCHEMA.STATISTICS 
-            WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-        ");
-        $stmt->execute([$dbName, $tableName]);
-        $indexCount = $stmt->fetch(PDO::FETCH_ASSOC)['index_count'];
-        
-        $tables[] = [
-            'table_name' => $tableName,
-            'engine' => $tableInfo['ENGINE'],
-            'table_rows' => $tableInfo['TABLE_ROWS'],
-            'data_size' => formatBytes($tableInfo['DATA_LENGTH']),
-            'table_comment' => $tableInfo['TABLE_COMMENT'],
-            'columns' => $columns,
-            'index_count' => $indexCount
-        ];
-        
-        $totalColumns += count($columns);
-        $totalIndexes += $indexCount;
-        $totalConstraints += count($constraints);
-    }
-    
-    return [
-        'tables' => $tables,
-        'statistics' => [
-            'total_tables' => count($tables),
-            'total_columns' => $totalColumns,
-            'total_indexes' => $totalIndexes,
-            'total_constraints' => $totalConstraints
-        ]
-    ];
-}
-
-/**
- * バイト数フォーマット
- */
-function formatBytes($bytes, $precision = 2) {
-    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    
-    for ($i = 0; $bytes > 1024 && $i < count($units) - 1; $i++) {
-        $bytes /= 1024;
-    }
-    
-    return round($bytes, $precision) . ' ' . $units[$i];
-}
-?>
