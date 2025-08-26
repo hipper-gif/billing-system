@@ -1,4 +1,49 @@
-<?php
+function displayGenerationResult(data) {
+            const result = data.test_generation;
+            
+            if (result.status === 'success') {
+                let html = '<div class="success">✅ 請求書生成テスト成功</div>';
+                
+                html += `
+                    <h4>📋 生成結果</h4>
+                    <div class="stat-grid">
+                        <div class="stat-card">
+                            <div class="stat-value">${result.invoices_created}</div>
+                            <div class="stat-label">請求書生成数</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${result.companies_processed}</div>
+                            <div class="stat-label">対象企業数</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${result.period_start}</div>
+                            <div class="stat-label">期間開始</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${result.period_end}</div>
+                            <div class="stat-label">期間終了</div>
+                        </div>
+                    </div>
+                `;
+                
+                if (result.company_details && result.company_details.length > 0) {
+                    html += '<h4>🏢 生成された請求書詳細</h4>';
+                    html += '<table class="data-table"><thead><tr><th>企業名</th><th>利用者数</th><th>注文件数</th><th>小計</th><th>消費税</th><th>合計</th></tr></thead><tbody>';
+                    result.company_details.forEach(company => {
+                        html += `<tr>
+                            <td>${company.company_name}</td>
+                            <td>${company.user_count || 0}名</td>
+                            <td>${company.order_count}件</td>
+                            <td>¥${Number(company.subtotal || 0).toLocaleString()}</td>
+                            <td>¥${Number(company.tax_amount || 0).toLocaleString()}</td>
+                            <td><strong>¥${Number(company.total_amount || 0).toLocaleString()}</strong></td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+                
+                // 生成された請求書の確認
+                if (result.created_invoices && result.created_invoices.length > 0) {<?php
 /**
  * 請求書生成機能テストツール
  * 実際のテーブル構造に基づいて請求書生成をテスト
@@ -47,65 +92,95 @@ if (isset($_GET['action'])) {
 }
 
 /**
- * 請求書生成に必要なデータをチェック
+ * 請求書生成に必要なデータをチェック（照合順序エラー対応版）
  */
 function checkInvoiceGenerationData($db) {
     $result = [];
     
-    // 1. 基本データ確認
-    $tables = ['companies', 'users', 'orders', 'products', 'invoices'];
-    
-    foreach ($tables as $table) {
-        $stmt = $db->query("SELECT COUNT(*) as count FROM {$table}");
-        $count = $stmt->fetch()['count'];
-        $result['table_counts'][$table] = $count;
+    try {
+        // 1. 基本データ確認
+        $tables = ['companies', 'users', 'orders', 'products', 'invoices'];
+        
+        foreach ($tables as $table) {
+            $stmt = $db->query("SELECT COUNT(*) as count FROM {$table}");
+            $count = $stmt->fetch()['count'];
+            $result['table_counts'][$table] = $count;
+        }
+        
+        // 2. 注文データの詳細確認
+        $stmt = $db->query("
+            SELECT 
+                DATE(delivery_date) as delivery_date,
+                COUNT(*) as order_count,
+                SUM(total_amount) as daily_total,
+                COUNT(DISTINCT user_code) as user_count
+            FROM orders 
+            GROUP BY DATE(delivery_date)
+            ORDER BY delivery_date DESC
+            LIMIT 10
+        ");
+        $result['daily_orders'] = $stmt->fetchAll();
+        
+        // 3. 利用者別集計（照合順序エラー対応）
+        $stmt = $db->query("
+            SELECT 
+                u.user_code,
+                u.user_name,
+                u.company_name,
+                COUNT(o.id) as order_count,
+                COALESCE(SUM(o.total_amount), 0) as total_amount,
+                MIN(o.delivery_date) as first_order,
+                MAX(o.delivery_date) as last_order
+            FROM users u
+            LEFT JOIN orders o ON u.user_code COLLATE utf8mb4_unicode_ci = o.user_code COLLATE utf8mb4_unicode_ci
+            GROUP BY u.user_code, u.user_name, u.company_name
+            ORDER BY total_amount DESC
+        ");
+        $result['user_summary'] = $stmt->fetchAll();
+        
+        // 4. 企業別集計（照合順序エラー対応）
+        $stmt = $db->query("
+            SELECT 
+                c.company_name,
+                COUNT(DISTINCT u.user_code) as user_count,
+                COUNT(o.id) as order_count,
+                COALESCE(SUM(o.total_amount), 0) as total_amount
+            FROM companies c
+            LEFT JOIN users u ON c.company_name COLLATE utf8mb4_unicode_ci = u.company_name COLLATE utf8mb4_unicode_ci
+            LEFT JOIN orders o ON u.user_code COLLATE utf8mb4_unicode_ci = o.user_code COLLATE utf8mb4_unicode_ci
+            GROUP BY c.id, c.company_name
+            ORDER BY total_amount DESC
+        ");
+        $result['company_summary'] = $stmt->fetchAll();
+        
+        // 5. データ整合性チェック
+        $stmt = $db->query("
+            SELECT 
+                'orders' as source_table,
+                COUNT(DISTINCT user_code) as unique_user_codes
+            FROM orders
+            UNION ALL
+            SELECT 
+                'users' as source_table,
+                COUNT(DISTINCT user_code) as unique_user_codes
+            FROM users
+        ");
+        $result['data_integrity'] = $stmt->fetchAll();
+        
+    } catch (Exception $e) {
+        $result['error'] = $e->getMessage();
+        
+        // エラー時の簡易チェック
+        foreach ($tables as $table) {
+            try {
+                $stmt = $db->query("SELECT COUNT(*) as count FROM {$table}");
+                $count = $stmt->fetch()['count'];
+                $result['table_counts'][$table] = $count;
+            } catch (Exception $tableError) {
+                $result['table_counts'][$table] = 'Error: ' . $tableError->getMessage();
+            }
+        }
     }
-    
-    // 2. 注文データの詳細確認
-    $stmt = $db->query("
-        SELECT 
-            DATE(delivery_date) as delivery_date,
-            COUNT(*) as order_count,
-            SUM(total_amount) as daily_total,
-            COUNT(DISTINCT user_code) as user_count
-        FROM orders 
-        GROUP BY DATE(delivery_date)
-        ORDER BY delivery_date DESC
-        LIMIT 10
-    ");
-    $result['daily_orders'] = $stmt->fetchAll();
-    
-    // 3. 利用者別集計
-    $stmt = $db->query("
-        SELECT 
-            u.user_code,
-            u.user_name,
-            u.company_name,
-            COUNT(o.id) as order_count,
-            SUM(o.total_amount) as total_amount,
-            MIN(o.delivery_date) as first_order,
-            MAX(o.delivery_date) as last_order
-        FROM users u
-        LEFT JOIN orders o ON u.user_code = o.user_code
-        GROUP BY u.user_code, u.user_name, u.company_name
-        ORDER BY total_amount DESC
-    ");
-    $result['user_summary'] = $stmt->fetchAll();
-    
-    // 4. 企業別集計
-    $stmt = $db->query("
-        SELECT 
-            c.company_name,
-            COUNT(DISTINCT u.user_code) as user_count,
-            COUNT(o.id) as order_count,
-            COALESCE(SUM(o.total_amount), 0) as total_amount
-        FROM companies c
-        LEFT JOIN users u ON c.company_name = u.company_name
-        LEFT JOIN orders o ON u.user_code = o.user_code
-        GROUP BY c.id, c.company_name
-        ORDER BY total_amount DESC
-    ");
-    $result['company_summary'] = $stmt->fetchAll();
     
     return $result;
 }
@@ -133,7 +208,7 @@ function getOrderSample($db) {
 }
 
 /**
- * 請求書生成のテスト実行
+ * 請求書生成のテスト実行（照合順序エラー対応版）
  */
 function testInvoiceGeneration($db) {
     // 期間設定（過去30日）
@@ -144,30 +219,54 @@ function testInvoiceGeneration($db) {
     // テスト用請求書データ生成
     $result = [];
     
-    // 1. 企業別請求書データを生成
-    $stmt = $db->query("
-        SELECT 
-            c.id as company_id,
-            c.company_name,
-            COUNT(o.id) as order_count,
-            SUM(o.total_amount) as subtotal,
-            SUM(o.total_amount) * 0.1 as tax_amount,
-            SUM(o.total_amount) * 1.1 as total_amount
-        FROM companies c
-        INNER JOIN users u ON c.company_name = u.company_name
-        INNER JOIN orders o ON u.user_code = o.user_code
-        WHERE o.delivery_date BETWEEN ? AND ?
-        GROUP BY c.id, c.company_name
-        HAVING order_count > 0
-    ", [$periodStart, $periodEnd]);
-    
-    $companyInvoices = $stmt->fetchAll();
-    
-    // 2. 請求書テーブルに挿入テスト
-    $db->query("START TRANSACTION");
-    
     try {
+        // 1. 企業別請求書データを生成（照合順序対応）
+        $stmt = $db->query("
+            SELECT 
+                c.id as company_id,
+                c.company_name,
+                COUNT(o.id) as order_count,
+                SUM(o.total_amount) as subtotal,
+                ROUND(SUM(o.total_amount) * 0.1, 0) as tax_amount,
+                ROUND(SUM(o.total_amount) * 1.1, 0) as total_amount,
+                COUNT(DISTINCT u.user_code) as user_count
+            FROM companies c
+            INNER JOIN users u ON c.company_name COLLATE utf8mb4_unicode_ci = u.company_name COLLATE utf8mb4_unicode_ci
+            INNER JOIN orders o ON u.user_code COLLATE utf8mb4_unicode_ci = o.user_code COLLATE utf8mb4_unicode_ci
+            WHERE o.delivery_date BETWEEN ? AND ?
+            GROUP BY c.id, c.company_name
+            HAVING order_count > 0
+        ", [$periodStart, $periodEnd]);
+        
+        $companyInvoices = $stmt->fetchAll();
+        
+        if (empty($companyInvoices)) {
+            // データがない場合は全期間で試行
+            $stmt = $db->query("
+                SELECT 
+                    c.id as company_id,
+                    c.company_name,
+                    COUNT(o.id) as order_count,
+                    SUM(o.total_amount) as subtotal,
+                    ROUND(SUM(o.total_amount) * 0.1, 0) as tax_amount,
+                    ROUND(SUM(o.total_amount) * 1.1, 0) as total_amount,
+                    COUNT(DISTINCT u.user_code) as user_count
+                FROM companies c
+                INNER JOIN users u ON c.company_name COLLATE utf8mb4_unicode_ci = u.company_name COLLATE utf8mb4_unicode_ci
+                INNER JOIN orders o ON u.user_code COLLATE utf8mb4_unicode_ci = o.user_code COLLATE utf8mb4_unicode_ci
+                GROUP BY c.id, c.company_name
+                HAVING order_count > 0
+            ");
+            
+            $companyInvoices = $stmt->fetchAll();
+            $periodStart = '2024-01-01'; // 全期間
+        }
+        
+        // 2. 請求書テーブルに挿入テスト
+        $db->query("START TRANSACTION");
+        
         $insertedCount = 0;
+        $invoiceIds = [];
         
         foreach ($companyInvoices as $company) {
             // 請求書番号生成
@@ -177,7 +276,7 @@ function testInvoiceGeneration($db) {
             $stmt = $db->query("
                 SELECT u.id, u.user_code, u.user_name 
                 FROM users u 
-                WHERE u.company_name = ? 
+                WHERE u.company_name COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
                 LIMIT 1
             ", [$company['company_name']]);
             $user = $stmt->fetch();
@@ -212,6 +311,7 @@ function testInvoiceGeneration($db) {
             ]);
             
             $invoiceId = $db->lastInsertId();
+            $invoiceIds[] = $invoiceId;
             
             // 請求書明細挿入
             $stmt = $db->query("
@@ -224,9 +324,10 @@ function testInvoiceGeneration($db) {
                     o.unit_price,
                     o.total_amount
                 FROM orders o
-                INNER JOIN users u ON o.user_code = u.user_code
-                WHERE u.company_name = ? 
+                INNER JOIN users u ON o.user_code COLLATE utf8mb4_unicode_ci = u.user_code COLLATE utf8mb4_unicode_ci
+                WHERE u.company_name COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
                 AND o.delivery_date BETWEEN ? AND ?
+                ORDER BY o.delivery_date, o.user_code
             ", [$company['company_name'], $periodStart, $periodEnd]);
             
             $orderDetails = $stmt->fetchAll();
@@ -261,12 +362,37 @@ function testInvoiceGeneration($db) {
             'due_date' => $dueDate,
             'companies_processed' => count($companyInvoices),
             'invoices_created' => $insertedCount,
+            'invoice_ids' => $invoiceIds,
             'company_details' => $companyInvoices
         ];
         
+        // 生成された請求書の確認
+        if (!empty($invoiceIds)) {
+            $placeholders = str_repeat('?,', count($invoiceIds) - 1) . '?';
+            $stmt = $db->query("
+                SELECT 
+                    i.id,
+                    i.invoice_number,
+                    i.company_name,
+                    i.total_amount,
+                    COUNT(id_details.id) as detail_count
+                FROM invoices i
+                LEFT JOIN invoice_details id_details ON i.id = id_details.invoice_id
+                WHERE i.id IN ({$placeholders})
+                GROUP BY i.id, i.invoice_number, i.company_name, i.total_amount
+            ", $invoiceIds);
+            
+            $result['test_generation']['created_invoices'] = $stmt->fetchAll();
+        }
+        
     } catch (Exception $e) {
         $db->query("ROLLBACK");
-        throw $e;
+        $result['test_generation'] = [
+            'status' => 'error',
+            'error' => $e->getMessage(),
+            'period_start' => $periodStart,
+            'period_end' => $periodEnd
+        ];
     }
     
     return $result;
@@ -433,15 +559,23 @@ function generateInvoiceNumber() {
         }
 
         function displayDataCheckResult(data) {
-            let html = '<div class="success">データ確認完了</div>';
+            let html = '<div class="success">✅ データ確認完了</div>';
+            
+            // エラーがある場合は表示
+            if (data.error) {
+                html += `<div class="error">⚠️ 部分的エラー: ${data.error}</div>`;
+                html += '<div class="success">💡 テーブル件数は取得できました</div>';
+            }
             
             // テーブル件数表示
             html += '<h4>📊 テーブル件数</h4>';
             html += '<div class="stat-grid">';
             Object.keys(data.table_counts).forEach(table => {
+                const count = data.table_counts[table];
+                const isError = typeof count === 'string' && count.includes('Error');
                 html += `
-                    <div class="stat-card">
-                        <div class="stat-value">${data.table_counts[table]}</div>
+                    <div class="stat-card ${isError ? 'error' : ''}">
+                        <div class="stat-value">${isError ? '❌' : count}</div>
                         <div class="stat-label">${table}</div>
                     </div>
                 `;
@@ -453,7 +587,24 @@ function generateInvoiceNumber() {
                 html += '<h4>📅 日別注文データ（直近10日）</h4>';
                 html += '<table class="data-table"><thead><tr><th>配達日</th><th>注文件数</th><th>日計金額</th><th>利用者数</th></tr></thead><tbody>';
                 data.daily_orders.forEach(day => {
-                    html += `<tr><td>${day.delivery_date}</td><td>${day.order_count}件</td><td>¥${Number(day.daily_total).toLocaleString()}</td><td>${day.user_count}名</td></tr>`;
+                    html += `<tr><td>${day.delivery_date}</td><td>${day.order_count}件</td><td>¥${Number(day.daily_total || 0).toLocaleString()}</td><td>${day.user_count}名</td></tr>`;
+                });
+                html += '</tbody></table>';
+            }
+            
+            // 利用者別集計
+            if (data.user_summary && data.user_summary.length > 0) {
+                html += '<h4>👤 利用者別集計（上位10名）</h4>';
+                html += '<table class="data-table"><thead><tr><th>利用者コード</th><th>利用者名</th><th>企業名</th><th>注文件数</th><th>総額</th><th>最終注文日</th></tr></thead><tbody>';
+                data.user_summary.slice(0, 10).forEach(user => {
+                    html += `<tr>
+                        <td>${user.user_code}</td>
+                        <td>${user.user_name}</td>
+                        <td>${user.company_name || '未設定'}</td>
+                        <td>${user.order_count}件</td>
+                        <td>¥${Number(user.total_amount || 0).toLocaleString()}</td>
+                        <td>${user.last_order || '-'}</td>
+                    </tr>`;
                 });
                 html += '</tbody></table>';
             }
@@ -463,7 +614,17 @@ function generateInvoiceNumber() {
                 html += '<h4>🏢 企業別集計</h4>';
                 html += '<table class="data-table"><thead><tr><th>企業名</th><th>利用者数</th><th>注文件数</th><th>総額</th></tr></thead><tbody>';
                 data.company_summary.forEach(company => {
-                    html += `<tr><td>${company.company_name || '未設定'}</td><td>${company.user_count}名</td><td>${company.order_count}件</td><td>¥${Number(company.total_amount).toLocaleString()}</td></tr>`;
+                    html += `<tr><td>${company.company_name || '未設定'}</td><td>${company.user_count}名</td><td>${company.order_count}件</td><td>¥${Number(company.total_amount || 0).toLocaleString()}</td></tr>`;
+                });
+                html += '</tbody></table>';
+            }
+            
+            // データ整合性情報
+            if (data.data_integrity) {
+                html += '<h4>🔍 データ整合性チェック</h4>';
+                html += '<table class="data-table"><thead><tr><th>テーブル</th><th>ユニーク利用者コード数</th></tr></thead><tbody>';
+                data.data_integrity.forEach(integrity => {
+                    html += `<tr><td>${integrity.source_table}</td><td>${integrity.unique_user_codes}件</td></tr>`;
                 });
                 html += '</tbody></table>';
             }
@@ -493,10 +654,11 @@ function generateInvoiceNumber() {
         }
 
         function displayGenerationResult(data) {
-            if (data.test_generation.status === 'success') {
+            const result = data.test_generation;
+            
+            if (result.status === 'success') {
                 let html = '<div class="success">✅ 請求書生成テスト成功</div>';
                 
-                const result = data.test_generation;
                 html += `
                     <h4>📋 生成結果</h4>
                     <div class="stat-grid">
@@ -521,22 +683,73 @@ function generateInvoiceNumber() {
                 
                 if (result.company_details && result.company_details.length > 0) {
                     html += '<h4>🏢 生成された請求書詳細</h4>';
-                    html += '<table class="data-table"><thead><tr><th>企業名</th><th>注文件数</th><th>小計</th><th>消費税</th><th>合計</th></tr></thead><tbody>';
+                    html += '<table class="data-table"><thead><tr><th>企業名</th><th>利用者数</th><th>注文件数</th><th>小計</th><th>消費税</th><th>合計</th></tr></thead><tbody>';
                     result.company_details.forEach(company => {
                         html += `<tr>
                             <td>${company.company_name}</td>
+                            <td>${company.user_count || 0}名</td>
                             <td>${company.order_count}件</td>
-                            <td>¥${Number(company.subtotal).toLocaleString()}</td>
-                            <td>¥${Number(company.tax_amount).toLocaleString()}</td>
-                            <td><strong>¥${Number(company.total_amount).toLocaleString()}</strong></td>
+                            <td>¥${Number(company.subtotal || 0).toLocaleString()}</td>
+                            <td>¥${Number(company.tax_amount || 0).toLocaleString()}</td>
+                            <td><strong>¥${Number(company.total_amount || 0).toLocaleString()}</strong></td>
                         </tr>`;
                     });
                     html += '</tbody></table>';
                 }
                 
+                // 生成された請求書の確認
+                if (result.created_invoices && result.created_invoices.length > 0) {
+                    html += '<h4>📄 作成された請求書</h4>';
+                    html += '<table class="data-table"><thead><tr><th>請求書ID</th><th>請求書番号</th><th>企業名</th><th>金額</th><th>明細件数</th></tr></thead><tbody>';
+                    result.created_invoices.forEach(invoice => {
+                        html += `<tr>
+                            <td>${invoice.id}</td>
+                            <td><strong>${invoice.invoice_number}</strong></td>
+                            <td>${invoice.company_name}</td>
+                            <td>¥${Number(invoice.total_amount).toLocaleString()}</td>
+                            <td>${invoice.detail_count}件</td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+                
+                // 次のステップ案内
+                if (result.invoice_ids && result.invoice_ids.length > 0) {
+                    html += `
+                        <div class="success" style="margin-top: 20px;">
+                            <h5>🎉 請求書生成完了！</h5>
+                            <p>生成されたIDで請求書一覧画面で確認できます</p>
+                            <p><strong>次のステップ:</strong></p>
+                            <ul>
+                                <li>✅ 請求書データベース挿入 - 完了</li>
+                                <li>⏳ PDF生成機能のテスト</li>
+                                <li>⏳ フロントエンド画面での表示確認</li>
+                                <li>⏳ SmileyInvoiceGeneratorクラスの完全実装</li>
+                            </ul>
+                        </div>
+                    `;
+                }
+                
+                document.getElementById('generationTestResult').innerHTML = html;
+            } else if (result.status === 'error') {
+                let html = '<div class="error">❌ 請求書生成テストでエラーが発生しました</div>';
+                html += `<div class="error">エラー詳細: ${result.error}</div>`;
+                html += `<div>期間: ${result.period_start} ～ ${result.period_end}</div>`;
+                
+                html += `
+                    <div style="margin-top: 15px;">
+                        <h5>🔧 トラブルシューティング</h5>
+                        <ul>
+                            <li>照合順序エラーが発生している可能性があります</li>
+                            <li>テーブル間のJOINで文字列比較に問題があります</li>
+                            <li>データ確認を先に実行して問題を特定してください</li>
+                        </ul>
+                    </div>
+                `;
+                
                 document.getElementById('generationTestResult').innerHTML = html;
             } else {
-                showError('generationTestResult', '請求書生成テストに失敗しました');
+                showError('generationTestResult', '予期しないレスポンス形式です');
             }
         }
 
