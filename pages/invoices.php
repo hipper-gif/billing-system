@@ -1,4 +1,35 @@
-<?php
+// 統計情報読み込み
+        function loadStatistics() {
+            fetch('../api/invoices.php?action=statistics')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.text().then(text => {
+                        try {
+                            return JSON.parse(text);
+                        } catch (e) {
+                            console.warn('API Response is not JSON:', text.substring(0, 100));
+                            throw new Error('APIが存在しないか、JSON形式でないレスポンスです');
+                        }
+                    });
+                })
+                .then(data => {
+                    if (data.success) {
+                        updateStatistics(data.data);
+                    } else {
+                        console.warn('Statistics load warning:', data.error);
+                        updateStatistics({
+                            total_invoices: 0,
+                            total_amount: 0,
+                            paid_amount: 0,
+                            pending_amount: 0
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Statistics load error:', error);
+                    // API未実装の場合のデモデ<?php
 /**
  * 請求書一覧・管理画面
  * Smiley配食事業の請求書一覧表示、検索、ステータス管理
@@ -23,7 +54,7 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo htmlspecialchars($pageTitle); ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
     <style>
         :root {
@@ -513,13 +544,24 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
         // 統計情報読み込み
         function loadStatistics() {
             fetch('../api/invoices.php?action=statistics')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.text().then(text => {
+                        try {
+                            return JSON.parse(text);
+                        } catch (e) {
+                            console.warn('API Response is not JSON:', text.substring(0, 100));
+                            throw new Error('APIが存在しないか、JSON形式でないレスポンスです');
+                        }
+                    });
+                })
                 .then(data => {
                     if (data.success) {
                         updateStatistics(data.data);
                     } else {
                         console.warn('Statistics load warning:', data.error);
-                        // エラーでも空の統計を表示
                         updateStatistics({
                             total_invoices: 0,
                             total_amount: 0,
@@ -530,7 +572,7 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
                 })
                 .catch(error => {
                     console.error('Statistics load error:', error);
-                    // エラー時も統計表示領域を初期化
+                    // API未実装の場合のデモデータ
                     updateStatistics({
                         total_invoices: 0,
                         total_amount: 0,
@@ -566,7 +608,19 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
             });
             
             fetch(`../api/invoices.php?${params.toString()}`)
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.text().then(text => {
+                        try {
+                            return JSON.parse(text);
+                        } catch (e) {
+                            console.warn('API Response is not JSON:', text.substring(0, 200));
+                            throw new Error('APIレスポンスの解析に失敗しました');
+                        }
+                    });
+                })
                 .then(data => {
                     if (data.success) {
                         renderInvoices(data.data);
@@ -577,14 +631,30 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    tableBody.innerHTML = `
-                        <tr>
-                            <td colspan="8" class="text-center text-danger py-4">
-                                <i class="fas fa-exclamation-triangle me-2"></i>
-                                読み込みエラー: ${error.message}
-                            </td>
-                        </tr>
-                    `;
+                    // SmileyInvoiceGeneratorクラスが未実装の場合のデモ表示
+                    if (error.message.includes('SmileyInvoiceGenerator') || error.message.includes('Fatal error')) {
+                        tableBody.innerHTML = `
+                            <tr>
+                                <td colspan="8" class="text-center text-warning py-4">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <div class="h5">請求書機能準備中</div>
+                                    <p class="text-muted mb-3">SmileyInvoiceGeneratorクラスをデプロイ中です。しばらくお待ちください。</p>
+                                    <a href="../pages/invoice_test.php" class="btn btn-primary">
+                                        <i class="fas fa-vial me-2"></i>テスト機能を確認
+                                    </a>
+                                </td>
+                            </tr>
+                        `;
+                    } else {
+                        tableBody.innerHTML = `
+                            <tr>
+                                <td colspan="8" class="text-center text-danger py-4">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    読み込みエラー: ${error.message}
+                                </td>
+                            </tr>
+                        `;
+                    }
                 });
         }
         
