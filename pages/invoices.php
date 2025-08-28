@@ -1,41 +1,10 @@
-// 統計情報読み込み
-        function loadStatistics() {
-            fetch('../api/invoices.php?action=statistics')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-                    return response.text().then(text => {
-                        try {
-                            return JSON.parse(text);
-                        } catch (e) {
-                            console.warn('API Response is not JSON:', text.substring(0, 100));
-                            throw new Error('APIが存在しないか、JSON形式でないレスポンスです');
-                        }
-                    });
-                })
-                .then(data => {
-                    if (data.success) {
-                        updateStatistics(data.data);
-                    } else {
-                        console.warn('Statistics load warning:', data.error);
-                        updateStatistics({
-                            total_invoices: 0,
-                            total_amount: 0,
-                            paid_amount: 0,
-                            pending_amount: 0
-                        });
-                    }
-                })
-                .catch(error => {
-                    console.error('Statistics load error:', error);
-                    // API未実装の場合のデモデ<?php
+<?php
 /**
  * 請求書一覧・管理画面
  * Smiley配食事業の請求書一覧表示、検索、ステータス管理
  * 
  * @author Claude
- * @version 1.0.0
+ * @version 1.1.0 - 構文エラー修正版
  * @created 2025-08-28
  */
 
@@ -546,7 +515,7 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
             fetch('../api/invoices.php?action=statistics')
                 .then(response => {
                     if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        throw new Error('HTTP ' + response.status + ': ' + response.statusText);
                     }
                     return response.text().then(text => {
                         try {
@@ -603,14 +572,20 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
             const params = new URLSearchParams({
                 action: 'list',
                 page: currentPage,
-                limit: limit,
-                ...filters
+                limit: limit
             });
             
-            fetch(`../api/invoices.php?${params.toString()}`)
+            // フィルター追加
+            for (const key in filters) {
+                if (filters[key]) {
+                    params.append(key, filters[key]);
+                }
+            }
+            
+            fetch('../api/invoices.php?' + params.toString())
                 .then(response => {
                     if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        throw new Error('HTTP ' + response.status + ': ' + response.statusText);
                     }
                     return response.text().then(text => {
                         try {
@@ -633,27 +608,9 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
                     console.error('Error:', error);
                     // SmileyInvoiceGeneratorクラスが未実装の場合のデモ表示
                     if (error.message.includes('SmileyInvoiceGenerator') || error.message.includes('Fatal error')) {
-                        tableBody.innerHTML = `
-                            <tr>
-                                <td colspan="8" class="text-center text-warning py-4">
-                                    <i class="fas fa-info-circle me-2"></i>
-                                    <div class="h5">請求書機能準備中</div>
-                                    <p class="text-muted mb-3">SmileyInvoiceGeneratorクラスをデプロイ中です。しばらくお待ちください。</p>
-                                    <a href="../pages/invoice_test.php" class="btn btn-primary">
-                                        <i class="fas fa-vial me-2"></i>テスト機能を確認
-                                    </a>
-                                </td>
-                            </tr>
-                        `;
+                        tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-warning py-4"><i class="fas fa-info-circle me-2"></i><div class="h5">請求書機能準備中</div><p class="text-muted mb-3">SmileyInvoiceGeneratorクラスをデプロイ中です。しばらくお待ちください。</p><a href="../pages/invoice_test.php" class="btn btn-primary"><i class="fas fa-vial me-2"></i>テスト機能を確認</a></td></tr>';
                     } else {
-                        tableBody.innerHTML = `
-                            <tr>
-                                <td colspan="8" class="text-center text-danger py-4">
-                                    <i class="fas fa-exclamation-triangle me-2"></i>
-                                    読み込みエラー: ${error.message}
-                                </td>
-                            </tr>
-                        `;
+                        tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-4"><i class="fas fa-exclamation-triangle me-2"></i>読み込みエラー: ' + error.message + '</td></tr>';
                     }
                 });
         }
@@ -686,18 +643,7 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
             const tableBody = document.getElementById('invoicesTableBody');
             
             if (!data.invoices || data.invoices.length === 0) {
-                tableBody.innerHTML = `
-                    <tr>
-                        <td colspan="8" class="empty-state">
-                            <i class="fas fa-inbox fa-3x mb-3 text-muted"></i>
-                            <div class="h5">請求書が見つかりません</div>
-                            <p class="text-muted">検索条件を変更するか、新しい請求書を生成してください。</p>
-                            <a href="../pages/invoice_generate.php" class="btn btn-primary">
-                                <i class="fas fa-plus me-2"></i>請求書生成
-                            </a>
-                        </td>
-                    </tr>
-                `;
+                tableBody.innerHTML = '<tr><td colspan="8" class="empty-state"><i class="fas fa-inbox fa-3x mb-3 text-muted"></i><div class="h5">請求書が見つかりません</div><p class="text-muted">検索条件を変更するか、新しい請求書を生成してください。</p><a href="../pages/invoice_generate.php" class="btn btn-primary"><i class="fas fa-plus me-2"></i>請求書生成</a></td></tr>';
                 return;
             }
             
@@ -706,48 +652,20 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
                 const invoiceType = invoice.invoice_type || 'company';
                 const status = invoice.status || 'draft';
                 
-                html += `
-                    <tr>
-                        <td>
-                            <a href="#" class="text-decoration-none" onclick="showInvoiceDetail(${invoice.id})">
-                                <strong>${invoice.invoice_number || ''}</strong>
-                            </a>
-                        </td>
-                        <td>
-                            <span class="badge type-badge type-${invoiceType}">
-                                ${getInvoiceTypeLabel(invoiceType)}
-                            </span>
-                        </td>
-                        <td>
-                            <div class="fw-bold">${invoice.company_name || '未設定'}</div>
-                            ${invoice.user_name ? `<small class="text-muted">${invoice.user_name}</small>` : ''}
-                        </td>
-                        <td>${formatDate(invoice.invoice_date)}</td>
-                        <td>
-                            ${formatDate(invoice.due_date)}
-                            ${isOverdue(invoice.due_date, status) ? '<i class="fas fa-exclamation-triangle text-danger ms-1" title="期限超過"></i>' : ''}
-                        </td>
-                        <td class="text-end">
-                            <strong>¥${parseFloat(invoice.total_amount || 0).toLocaleString()}</strong>
-                        </td>
-                        <td>
-                            <span class="badge status-badge status-${status}">
-                                ${getStatusLabel(status)}
-                            </span>
-                        </td>
-                        <td class="text-center action-buttons">
-                            <button type="button" class="btn btn-outline-primary btn-action me-1" onclick="showInvoiceDetail(${invoice.id})" title="詳細">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                            <button type="button" class="btn btn-outline-warning btn-action me-1" onclick="showStatusUpdate(${invoice.id}, '${status}')" title="ステータス変更">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            <button type="button" class="btn btn-outline-danger btn-action" onclick="showDeleteConfirm(${invoice.id}, '${invoice.invoice_number || ''}')" title="削除">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `;
+                html += '<tr>';
+                html += '<td><a href="#" class="text-decoration-none" onclick="showInvoiceDetail(' + invoice.id + ')"><strong>' + (invoice.invoice_number || '') + '</strong></a></td>';
+                html += '<td><span class="badge type-badge type-' + invoiceType + '">' + getInvoiceTypeLabel(invoiceType) + '</span></td>';
+                html += '<td><div class="fw-bold">' + (invoice.company_name || '未設定') + '</div>' + (invoice.user_name ? '<small class="text-muted">' + invoice.user_name + '</small>' : '') + '</td>';
+                html += '<td>' + formatDate(invoice.invoice_date) + '</td>';
+                html += '<td>' + formatDate(invoice.due_date) + (isOverdue(invoice.due_date, status) ? '<i class="fas fa-exclamation-triangle text-danger ms-1" title="期限超過"></i>' : '') + '</td>';
+                html += '<td class="text-end"><strong>¥' + parseFloat(invoice.total_amount || 0).toLocaleString() + '</strong></td>';
+                html += '<td><span class="badge status-badge status-' + status + '">' + getStatusLabel(status) + '</span></td>';
+                html += '<td class="text-center action-buttons">';
+                html += '<button type="button" class="btn btn-outline-primary btn-action me-1" onclick="showInvoiceDetail(' + invoice.id + ')" title="詳細"><i class="fas fa-eye"></i></button>';
+                html += '<button type="button" class="btn btn-outline-warning btn-action me-1" onclick="showStatusUpdate(' + invoice.id + ', \'' + status + '\')" title="ステータス変更"><i class="fas fa-edit"></i></button>';
+                html += '<button type="button" class="btn btn-outline-danger btn-action" onclick="showDeleteConfirm(' + invoice.id + ', \'' + (invoice.invoice_number || '') + '\')" title="削除"><i class="fas fa-trash"></i></button>';
+                html += '</td>';
+                html += '</tr>';
             });
             
             tableBody.innerHTML = html;
@@ -761,54 +679,44 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
             const start = ((data.page - 1) * data.limit) + 1;
             const end = Math.min(data.page * data.limit, data.total_count);
             
-            paginationInfo.textContent = `${start}-${end} / ${data.total_count}件`;
+            paginationInfo.textContent = start + '-' + end + ' / ' + data.total_count + '件';
             
             // ページネーション構築
             let paginationHtml = '';
             
             // 前へ
-            paginationHtml += `
-                <li class="page-item ${data.page === 1 ? 'disabled' : ''}">
-                    <a class="page-link" href="#" onclick="changePage(${data.page - 1})" tabindex="-1">
-                        <i class="fas fa-chevron-left"></i>
-                    </a>
-                </li>
-            `;
+            paginationHtml += '<li class="page-item ' + (data.page === 1 ? 'disabled' : '') + '">';
+            paginationHtml += '<a class="page-link" href="#" onclick="changePage(' + (data.page - 1) + ')" tabindex="-1"><i class="fas fa-chevron-left"></i></a>';
+            paginationHtml += '</li>';
             
             // ページ番号
             const startPage = Math.max(1, data.page - 2);
             const endPage = Math.min(data.total_pages, data.page + 2);
             
             if (startPage > 1) {
-                paginationHtml += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(1)">1</a></li>`;
+                paginationHtml += '<li class="page-item"><a class="page-link" href="#" onclick="changePage(1)">1</a></li>';
                 if (startPage > 2) {
-                    paginationHtml += `<li class="page-item disabled"><a class="page-link" href="#">...</a></li>`;
+                    paginationHtml += '<li class="page-item disabled"><a class="page-link" href="#">...</a></li>';
                 }
             }
             
             for (let i = startPage; i <= endPage; i++) {
-                paginationHtml += `
-                    <li class="page-item ${i === data.page ? 'active' : ''}">
-                        <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
-                    </li>
-                `;
+                paginationHtml += '<li class="page-item ' + (i === data.page ? 'active' : '') + '">';
+                paginationHtml += '<a class="page-link" href="#" onclick="changePage(' + i + ')">' + i + '</a>';
+                paginationHtml += '</li>';
             }
             
             if (endPage < data.total_pages) {
                 if (endPage < data.total_pages - 1) {
-                    paginationHtml += `<li class="page-item disabled"><a class="page-link" href="#">...</a></li>`;
+                    paginationHtml += '<li class="page-item disabled"><a class="page-link" href="#">...</a></li>';
                 }
-                paginationHtml += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(${data.total_pages})">${data.total_pages}</a></li>`;
+                paginationHtml += '<li class="page-item"><a class="page-link" href="#" onclick="changePage(' + data.total_pages + ')">' + data.total_pages + '</a></li>';
             }
             
             // 次へ
-            paginationHtml += `
-                <li class="page-item ${data.page === data.total_pages ? 'disabled' : ''}">
-                    <a class="page-link" href="#" onclick="changePage(${data.page + 1})">
-                        <i class="fas fa-chevron-right"></i>
-                    </a>
-                </li>
-            `;
+            paginationHtml += '<li class="page-item ' + (data.page === data.total_pages ? 'disabled' : '') + '">';
+            paginationHtml += '<a class="page-link" href="#" onclick="changePage(' + (data.page + 1) + ')"><i class="fas fa-chevron-right"></i></a>';
+            paginationHtml += '</li>';
             
             pagination.innerHTML = paginationHtml;
         }
@@ -828,7 +736,7 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
             content.innerHTML = '<div class="text-center py-4"><i class="fas fa-spinner fa-spin me-2"></i>読み込み中...</div>';
             modal.show();
             
-            fetch(`../api/invoices.php?action=detail&invoice_id=${invoiceId}`)
+            fetch('../api/invoices.php?action=detail&invoice_id=' + invoiceId)
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
@@ -840,7 +748,7 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    content.innerHTML = `<div class="text-center text-danger py-4"><i class="fas fa-exclamation-triangle me-2"></i>${error.message}</div>`;
+                    content.innerHTML = '<div class="text-center text-danger py-4"><i class="fas fa-exclamation-triangle me-2"></i>' + error.message + '</div>';
                 });
         }
         
@@ -850,93 +758,23 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
             
             let detailsHtml = '';
             if (invoice.details && invoice.details.length > 0) {
-                detailsHtml = `
-                    <div class="mt-4">
-                        <h6><i class="fas fa-list me-2"></i>請求書明細</h6>
-                        <div class="table-responsive">
-                            <table class="table table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>配達日</th>
-                                        <th>利用者</th>
-                                        <th>商品名</th>
-                                        <th>数量</th>
-                                        <th>単価</th>
-                                        <th>金額</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                `;
+                detailsHtml = '<div class="mt-4"><h6><i class="fas fa-list me-2"></i>請求書明細</h6><div class="table-responsive"><table class="table table-sm"><thead><tr><th>配達日</th><th>利用者</th><th>商品名</th><th>数量</th><th>単価</th><th>金額</th></tr></thead><tbody>';
                 
                 invoice.details.forEach(detail => {
-                    detailsHtml += `
-                        <tr>
-                            <td>${formatDate(detail.order_date)}</td>
-                            <td>${detail.user_name || '-'}</td>
-                            <td>${detail.product_name}</td>
-                            <td class="text-center">${detail.quantity}</td>
-                            <td class="text-end">¥${parseFloat(detail.unit_price || 0).toLocaleString()}</td>
-                            <td class="text-end">¥${parseFloat(detail.amount || 0).toLocaleString()}</td>
-                        </tr>
-                    `;
+                    detailsHtml += '<tr>';
+                    detailsHtml += '<td>' + formatDate(detail.order_date) + '</td>';
+                    detailsHtml += '<td>' + (detail.user_name || '-') + '</td>';
+                    detailsHtml += '<td>' + detail.product_name + '</td>';
+                    detailsHtml += '<td class="text-center">' + detail.quantity + '</td>';
+                    detailsHtml += '<td class="text-end">¥' + parseFloat(detail.unit_price || 0).toLocaleString() + '</td>';
+                    detailsHtml += '<td class="text-end">¥' + parseFloat(detail.amount || 0).toLocaleString() + '</td>';
+                    detailsHtml += '</tr>';
                 });
                 
-                detailsHtml += `
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                `;
+                detailsHtml += '</tbody></table></div></div>';
             }
             
-            const html = `
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6><i class="fas fa-info-circle me-2"></i>請求書情報</h6>
-                        <table class="table table-sm">
-                            <tr><td width="120">請求書番号:</td><td><strong>${invoice.invoice_number || ''}</strong></td></tr>
-                            <tr><td>タイプ:</td><td><span class="badge type-badge type-${invoice.invoice_type || 'company'}">${getInvoiceTypeLabel(invoice.invoice_type || 'company')}</span></td></tr>
-                            <tr><td>ステータス:</td><td><span class="badge status-badge status-${invoice.status || 'draft'}">${getStatusLabel(invoice.status || 'draft')}</span></td></tr>
-                            <tr><td>発行日:</td><td>${formatDate(invoice.invoice_date)}</td></tr>
-                            <tr><td>支払期限:</td><td>${formatDate(invoice.due_date)}</td></tr>
-                            <tr><td>請求期間:</td><td>${formatDate(invoice.period_start)} ～ ${formatDate(invoice.period_end)}</td></tr>
-                        </table>
-                    </div>
-                    <div class="col-md-6">
-                        <h6><i class="fas fa-building me-2"></i>請求先情報</h6>
-                        <table class="table table-sm">
-                            <tr><td width="120">企業名:</td><td><strong>${invoice.company_name || '未設定'}</strong></td></tr>
-                            <tr><td>利用者:</td><td>${invoice.user_name || '-'}</td></tr>
-                            <tr><td>利用者コード:</td><td>${invoice.user_code || '-'}</td></tr>
-                            <tr><td>部署:</td><td>${invoice.department || '-'}</td></tr>
-                        </table>
-                    </div>
-                </div>
-                <div class="row mt-3">
-                    <div class="col-md-6">
-                        <h6><i class="fas fa-calculator me-2"></i>金額詳細</h6>
-                        <table class="table table-sm">
-                            <tr><td width="120">小計:</td><td class="text-end">¥${parseFloat(invoice.subtotal || 0).toLocaleString()}</td></tr>
-                            <tr><td>消費税:</td><td class="text-end">¥${parseFloat(invoice.tax_amount || 0).toLocaleString()}</td></tr>
-                            <tr class="fw-bold border-top"><td>合計金額:</td><td class="text-end">¥${parseFloat(invoice.total_amount || 0).toLocaleString()}</td></tr>
-                        </table>
-                    </div>
-                    <div class="col-md-6">
-                        <h6><i class="fas fa-chart-bar me-2"></i>統計情報</h6>
-                        <table class="table table-sm">
-                            <tr><td width="120">作成日:</td><td>${formatDateTime(invoice.created_at)}</td></tr>
-                            <tr><td>更新日:</td><td>${formatDateTime(invoice.updated_at)}</td></tr>
-                        </table>
-                    </div>
-                </div>
-                ${invoice.notes ? `
-                    <div class="mt-3">
-                        <h6><i class="fas fa-sticky-note me-2"></i>備考</h6>
-                        <div class="bg-light p-3 rounded">${invoice.notes}</div>
-                    </div>
-                ` : ''}
-                ${detailsHtml}
-            `;
+            const html = '<div class="row"><div class="col-md-6"><h6><i class="fas fa-info-circle me-2"></i>請求書情報</h6><table class="table table-sm"><tr><td width="120">請求書番号:</td><td><strong>' + (invoice.invoice_number || '') + '</strong></td></tr><tr><td>タイプ:</td><td><span class="badge type-badge type-' + (invoice.invoice_type || 'company') + '">' + getInvoiceTypeLabel(invoice.invoice_type || 'company') + '</span></td></tr><tr><td>ステータス:</td><td><span class="badge status-badge status-' + (invoice.status || 'draft') + '">' + getStatusLabel(invoice.status || 'draft') + '</span></td></tr><tr><td>発行日:</td><td>' + formatDate(invoice.invoice_date) + '</td></tr><tr><td>支払期限:</td><td>' + formatDate(invoice.due_date) + '</td></tr><tr><td>請求期間:</td><td>' + formatDate(invoice.period_start) + ' ～ ' + formatDate(invoice.period_end) + '</td></tr></table></div><div class="col-md-6"><h6><i class="fas fa-building me-2"></i>請求先情報</h6><table class="table table-sm"><tr><td width="120">企業名:</td><td><strong>' + (invoice.company_name || '未設定') + '</strong></td></tr><tr><td>利用者:</td><td>' + (invoice.user_name || '-') + '</td></tr><tr><td>利用者コード:</td><td>' + (invoice.user_code || '-') + '</td></tr><tr><td>部署:</td><td>' + (invoice.department || '-') + '</td></tr></table></div></div><div class="row mt-3"><div class="col-md-6"><h6><i class="fas fa-calculator me-2"></i>金額詳細</h6><table class="table table-sm"><tr><td width="120">小計:</td><td class="text-end">¥' + parseFloat(invoice.subtotal || 0).toLocaleString() + '</td></tr><tr><td>消費税:</td><td class="text-end">¥' + parseFloat(invoice.tax_amount || 0).toLocaleString() + '</td></tr><tr class="fw-bold border-top"><td>合計金額:</td><td class="text-end">¥' + parseFloat(invoice.total_amount || 0).toLocaleString() + '</td></tr></table></div><div class="col-md-6"><h6><i class="fas fa-chart-bar me-2"></i>統計情報</h6><table class="table table-sm"><tr><td width="120">作成日:</td><td>' + formatDateTime(invoice.created_at) + '</td></tr><tr><td>更新日:</td><td>' + formatDateTime(invoice.updated_at) + '</td></tr></table></div></div>' + (invoice.notes ? '<div class="mt-3"><h6><i class="fas fa-sticky-note me-2"></i>備考</h6><div class="bg-light p-3 rounded">' + invoice.notes + '</div></div>' : '') + detailsHtml;
             
             content.innerHTML = html;
         }
@@ -999,10 +837,7 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
             currentInvoiceId = invoiceId;
             
             const infoDiv = document.getElementById('deleteInvoiceInfo');
-            infoDiv.innerHTML = `
-                <strong>請求書番号:</strong> ${invoiceNumber}<br>
-                <strong>請求書ID:</strong> ${invoiceId}
-            `;
+            infoDiv.innerHTML = '<strong>請求書番号:</strong> ' + invoiceNumber + '<br><strong>請求書ID:</strong> ' + invoiceId;
             
             const modal = new bootstrap.Modal(document.getElementById('deleteConfirmModal'));
             modal.show();
@@ -1055,11 +890,16 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
         function exportToCSV() {
             const filters = getFilters();
             const params = new URLSearchParams({
-                action: 'export_csv',
-                ...filters
+                action: 'export_csv'
             });
             
-            window.location.href = `../api/invoices.php?${params.toString()}`;
+            for (const key in filters) {
+                if (filters[key]) {
+                    params.append(key, filters[key]);
+                }
+            }
+            
+            window.location.href = '../api/invoices.php?' + params.toString();
         }
         
         // ユーティリティ関数
@@ -1127,7 +967,6 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
         // 印刷
         document.getElementById('printInvoice').addEventListener('click', function() {
             if (currentInvoiceId) {
-                // 簡易印刷機能（実装可能であれば）
                 window.print();
             }
         });
