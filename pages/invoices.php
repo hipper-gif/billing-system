@@ -1,4 +1,169 @@
-.empty-state {
+<?php
+/**
+ * 請求書一覧・管理画面
+ * Smiley配食事業の請求書一覧表示、検索、ステータス管理
+ * 
+ * @author Claude
+ * @version 1.0.0
+ * @created 2025-08-28
+ */
+
+require_once __DIR__ . '/../classes/Database.php';
+require_once __DIR__ . '/../classes/SecurityHelper.php';
+
+// セキュリティヘッダー設定
+SecurityHelper::setSecurityHeaders();
+
+$pageTitle = '請求書一覧 - Smiley配食事業システム';
+?>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo htmlspecialchars($pageTitle); ?></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --smiley-primary: #ff6b35;
+            --smiley-secondary: #ffa500;
+            --smiley-accent: #ffeb3b;
+            --smiley-success: #4caf50;
+            --smiley-warning: #ff9800;
+            --smiley-danger: #f44336;
+        }
+
+        .smiley-header {
+            background: linear-gradient(135deg, var(--smiley-primary), var(--smiley-secondary));
+            color: white;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }
+
+        .filter-card {
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 12px;
+            margin-bottom: 2rem;
+        }
+
+        .filter-card .card-header {
+            background: linear-gradient(90deg, #f8f9fa, #e9ecef);
+            border-bottom: 2px solid var(--smiley-primary);
+            border-radius: 12px 12px 0 0 !important;
+            font-weight: 600;
+        }
+
+        .invoices-card {
+            border: none;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border-radius: 12px;
+        }
+
+        .invoice-table {
+            margin-bottom: 0;
+        }
+
+        .invoice-table th {
+            background-color: #f8f9fa;
+            border-top: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .invoice-table td {
+            vertical-align: middle;
+            font-size: 0.9rem;
+        }
+
+        .status-badge {
+            font-size: 0.8rem;
+            padding: 0.4em 0.8em;
+            border-radius: 15px;
+        }
+
+        .status-issued { background-color: #e3f2fd; color: #1976d2; }
+        .status-sent { background-color: #f3e5f5; color: #7b1fa2; }
+        .status-paid { background-color: #e8f5e8; color: #2e7d32; }
+        .status-overdue { background-color: #ffebee; color: #d32f2f; }
+        .status-cancelled { background-color: #f5f5f5; color: #616161; }
+        .status-draft { background-color: #fff3e0; color: #f57c00; }
+
+        .type-badge {
+            font-size: 0.8rem;
+            padding: 0.3em 0.6em;
+            border-radius: 10px;
+        }
+
+        .type-company_bulk { background-color: #e1f5fe; color: #0277bd; }
+        .type-department_bulk { background-color: #f1f8e9; color: #558b2f; }
+        .type-individual { background-color: #fce4ec; color: #c2185b; }
+        .type-mixed { background-color: #f3e5f5; color: #7b1fa2; }
+
+        .btn-action {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+            border-radius: 4px;
+        }
+
+        .statistics-row {
+            background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            text-align: center;
+            padding: 1rem;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .search-box {
+            position: relative;
+        }
+
+        .search-box .form-control {
+            padding-left: 2.5rem;
+        }
+
+        .search-box .fa-search {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #6c757d;
+        }
+
+        .pagination .page-link {
+            color: var(--smiley-primary);
+            border-color: #dee2e6;
+        }
+
+        .pagination .page-link:hover {
+            color: var(--smiley-secondary);
+            background-color: rgba(255, 107, 53, 0.1);
+        }
+
+        .pagination .page-item.active .page-link {
+            background-color: var(--smiley-primary);
+            border-color: var(--smiley-primary);
+        }
+
+        .empty-state {
             text-align: center;
             padding: 3rem 1rem;
             color: #6c757d;
@@ -351,20 +516,36 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        updateStatistics(data.data.basic);
+                        updateStatistics(data.data);
+                    } else {
+                        console.warn('Statistics load warning:', data.error);
+                        // エラーでも空の統計を表示
+                        updateStatistics({
+                            total_invoices: 0,
+                            total_amount: 0,
+                            paid_amount: 0,
+                            pending_amount: 0
+                        });
                     }
                 })
                 .catch(error => {
                     console.error('Statistics load error:', error);
+                    // エラー時も統計表示領域を初期化
+                    updateStatistics({
+                        total_invoices: 0,
+                        total_amount: 0,
+                        paid_amount: 0,
+                        pending_amount: 0
+                    });
                 });
         }
         
         // 統計情報更新
         function updateStatistics(stats) {
             document.getElementById('totalInvoices').textContent = stats.total_invoices || 0;
-            document.getElementById('totalAmount').textContent = '¥' + (stats.total_amount || 0).toLocaleString();
-            document.getElementById('paidAmount').textContent = '¥' + (stats.paid_amount || 0).toLocaleString();
-            document.getElementById('pendingAmount').textContent = '¥' + (stats.pending_amount || 0).toLocaleString();
+            document.getElementById('totalAmount').textContent = '¥' + (parseFloat(stats.total_amount) || 0).toLocaleString();
+            document.getElementById('paidAmount').textContent = '¥' + (parseFloat(stats.paid_amount) || 0).toLocaleString();
+            document.getElementById('pendingAmount').textContent = '¥' + (parseFloat(stats.pending_amount) || 0).toLocaleString();
         }
         
         // 請求書一覧読み込み
@@ -391,7 +572,7 @@
                         renderInvoices(data.data);
                         updatePagination(data.data);
                     } else {
-                        throw new Error(data.error);
+                        throw new Error(data.error || '請求書データの読み込みに失敗しました');
                     }
                 })
                 .catch(error => {
@@ -452,44 +633,46 @@
             
             let html = '';
             data.invoices.forEach(invoice => {
+                const invoiceType = invoice.invoice_type || 'company';
+                const status = invoice.status || 'draft';
+                
                 html += `
                     <tr>
                         <td>
                             <a href="#" class="text-decoration-none" onclick="showInvoiceDetail(${invoice.id})">
-                                <strong>${invoice.invoice_number}</strong>
+                                <strong>${invoice.invoice_number || ''}</strong>
                             </a>
                         </td>
                         <td>
-                            <span class="badge type-badge type-${invoice.invoice_type}">
-                                ${getInvoiceTypeLabel(invoice.invoice_type)}
+                            <span class="badge type-badge type-${invoiceType}">
+                                ${getInvoiceTypeLabel(invoiceType)}
                             </span>
                         </td>
                         <td>
-                            <div class="fw-bold">${invoice.billing_company_name}</div>
-                            ${invoice.billing_contact_person ? `<small class="text-muted">${invoice.billing_contact_person}</small>` : ''}
+                            <div class="fw-bold">${invoice.company_name || '未設定'}</div>
+                            ${invoice.user_name ? `<small class="text-muted">${invoice.user_name}</small>` : ''}
                         </td>
-                        <td>${formatDate(invoice.issue_date)}</td>
+                        <td>${formatDate(invoice.invoice_date)}</td>
                         <td>
                             ${formatDate(invoice.due_date)}
-                            ${isOverdue(invoice.due_date, invoice.status) ? '<i class="fas fa-exclamation-triangle text-danger ms-1" title="期限超過"></i>' : ''}
+                            ${isOverdue(invoice.due_date, status) ? '<i class="fas fa-exclamation-triangle text-danger ms-1" title="期限超過"></i>' : ''}
                         </td>
                         <td class="text-end">
                             <strong>¥${parseFloat(invoice.total_amount || 0).toLocaleString()}</strong>
-                            ${invoice.order_count ? `<br><small class="text-muted">${invoice.order_count}件</small>` : ''}
                         </td>
                         <td>
-                            <span class="badge status-badge status-${invoice.status}">
-                                ${getStatusLabel(invoice.status)}
+                            <span class="badge status-badge status-${status}">
+                                ${getStatusLabel(status)}
                             </span>
                         </td>
                         <td class="text-center action-buttons">
                             <button type="button" class="btn btn-outline-primary btn-action me-1" onclick="showInvoiceDetail(${invoice.id})" title="詳細">
                                 <i class="fas fa-eye"></i>
                             </button>
-                            <button type="button" class="btn btn-outline-warning btn-action me-1" onclick="showStatusUpdate(${invoice.id}, '${invoice.status}')" title="ステータス変更">
+                            <button type="button" class="btn btn-outline-warning btn-action me-1" onclick="showStatusUpdate(${invoice.id}, '${status}')" title="ステータス変更">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button type="button" class="btn btn-outline-danger btn-action" onclick="showDeleteConfirm(${invoice.id}, '${invoice.invoice_number}')" title="削除">
+                            <button type="button" class="btn btn-outline-danger btn-action" onclick="showDeleteConfirm(${invoice.id}, '${invoice.invoice_number || ''}')" title="削除">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </td>
@@ -562,6 +745,7 @@
         
         // ページ変更
         function changePage(page) {
+            if (page < 1) return;
             currentPage = page;
             loadInvoices();
         }
@@ -581,7 +765,7 @@
                         renderInvoiceDetail(data.data);
                         currentInvoiceId = invoiceId;
                     } else {
-                        throw new Error(data.error);
+                        throw new Error(data.error || '詳細の読み込みに失敗しました');
                     }
                 })
                 .catch(error => {
@@ -601,6 +785,67 @@
                         <h6><i class="fas fa-list me-2"></i>請求書明細</h6>
                         <div class="table-responsive">
                             <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>配達日</th>
+                                        <th>利用者</th>
+                                        <th>商品名</th>
+                                        <th>数量</th>
+                                        <th>単価</th>
+                                        <th>金額</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                `;
+                
+                invoice.details.forEach(detail => {
+                    detailsHtml += `
+                        <tr>
+                            <td>${formatDate(detail.order_date)}</td>
+                            <td>${detail.user_name || '-'}</td>
+                            <td>${detail.product_name}</td>
+                            <td class="text-center">${detail.quantity}</td>
+                            <td class="text-end">¥${parseFloat(detail.unit_price || 0).toLocaleString()}</td>
+                            <td class="text-end">¥${parseFloat(detail.amount || 0).toLocaleString()}</td>
+                        </tr>
+                    `;
+                });
+                
+                detailsHtml += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            const html = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-info-circle me-2"></i>請求書情報</h6>
+                        <table class="table table-sm">
+                            <tr><td width="120">請求書番号:</td><td><strong>${invoice.invoice_number || ''}</strong></td></tr>
+                            <tr><td>タイプ:</td><td><span class="badge type-badge type-${invoice.invoice_type || 'company'}">${getInvoiceTypeLabel(invoice.invoice_type || 'company')}</span></td></tr>
+                            <tr><td>ステータス:</td><td><span class="badge status-badge status-${invoice.status || 'draft'}">${getStatusLabel(invoice.status || 'draft')}</span></td></tr>
+                            <tr><td>発行日:</td><td>${formatDate(invoice.invoice_date)}</td></tr>
+                            <tr><td>支払期限:</td><td>${formatDate(invoice.due_date)}</td></tr>
+                            <tr><td>請求期間:</td><td>${formatDate(invoice.period_start)} ～ ${formatDate(invoice.period_end)}</td></tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-building me-2"></i>請求先情報</h6>
+                        <table class="table table-sm">
+                            <tr><td width="120">企業名:</td><td><strong>${invoice.company_name || '未設定'}</strong></td></tr>
+                            <tr><td>利用者:</td><td>${invoice.user_name || '-'}</td></tr>
+                            <tr><td>利用者コード:</td><td>${invoice.user_code || '-'}</td></tr>
+                            <tr><td>部署:</td><td>${invoice.department || '-'}</td></tr>
+                        </table>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-calculator me-2"></i>金額詳細</h6>
+                        <table class="table table-sm">
                             <tr><td width="120">小計:</td><td class="text-end">¥${parseFloat(invoice.subtotal || 0).toLocaleString()}</td></tr>
                             <tr><td>消費税:</td><td class="text-end">¥${parseFloat(invoice.tax_amount || 0).toLocaleString()}</td></tr>
                             <tr class="fw-bold border-top"><td>合計金額:</td><td class="text-end">¥${parseFloat(invoice.total_amount || 0).toLocaleString()}</td></tr>
@@ -609,9 +854,7 @@
                     <div class="col-md-6">
                         <h6><i class="fas fa-chart-bar me-2"></i>統計情報</h6>
                         <table class="table table-sm">
-                            <tr><td width="120">注文件数:</td><td>${invoice.order_count || 0}件</td></tr>
-                            <tr><td>総数量:</td><td>${invoice.total_quantity || 0}個</td></tr>
-                            <tr><td>作成日:</td><td>${formatDateTime(invoice.created_at)}</td></tr>
+                            <tr><td width="120">作成日:</td><td>${formatDateTime(invoice.created_at)}</td></tr>
                             <tr><td>更新日:</td><td>${formatDateTime(invoice.updated_at)}</td></tr>
                         </table>
                     </div>
@@ -672,7 +915,7 @@
                     loadInvoices();
                     loadStatistics();
                 } else {
-                    throw new Error(data.error);
+                    throw new Error(data.error || 'ステータス更新に失敗しました');
                 }
             })
             .catch(error => {
@@ -718,7 +961,7 @@
                     loadInvoices();
                     loadStatistics();
                 } else {
-                    throw new Error(data.error);
+                    throw new Error(data.error || '削除に失敗しました');
                 }
             })
             .catch(error => {
@@ -742,7 +985,7 @@
         function exportToCSV() {
             const filters = getFilters();
             const params = new URLSearchParams({
-                export: 'csv',
+                action: 'export_csv',
                 ...filters
             });
             
@@ -757,7 +1000,8 @@
                 'company_bulk': '企業一括',
                 'department_bulk': '部署別',
                 'individual': '個人請求',
-                'mixed': '混合請求'
+                'mixed': '混合請求',
+                'company': '企業一括'
             };
             return labels[type] || type;
         }
@@ -778,265 +1022,52 @@
         // 日付フォーマット
         function formatDate(dateString) {
             if (!dateString) return '-';
-            const date = new Date(dateString);
-            return date.toLocaleDateString('ja-JP');
+            try {
+                const date = new Date(dateString);
+                if (isNaN(date.getTime())) return '-';
+                return date.toLocaleDateString('ja-JP');
+            } catch (e) {
+                return '-';
+            }
         }
         
         // 日時フォーマット
         function formatDateTime(dateString) {
             if (!dateString) return '-';
-            const date = new Date(dateString);
-            return date.toLocaleString('ja-JP');
+            try {
+                const date = new Date(dateString);
+                if (isNaN(date.getTime())) return '-';
+                return date.toLocaleString('ja-JP');
+            } catch (e) {
+                return '-';
+            }
         }
         
         // 期限超過チェック
         function isOverdue(dueDate, status) {
             if (status === 'paid' || status === 'cancelled') return false;
             if (!dueDate) return false;
-            return new Date(dueDate) < new Date();
+            try {
+                return new Date(dueDate) < new Date();
+            } catch (e) {
+                return false;
+            }
         }
         
         // 印刷
         document.getElementById('printInvoice').addEventListener('click', function() {
             if (currentInvoiceId) {
-                window.open(`../reports/invoice_print.php?id=${currentInvoiceId}`, '_blank');
+                // 簡易印刷機能（実装可能であれば）
+                window.print();
             }
         });
         
         // PDF ダウンロード
         document.getElementById('downloadPDF').addEventListener('click', function() {
             if (currentInvoiceId) {
-                window.location.href = `../reports/invoice_pdf.php?id=${currentInvoiceId}`;
+                alert('PDF機能は今後実装予定です。');
             }
         });
     </script>
 </body>
 </html>
-                                <thead>
-                                    <tr>
-                                        <th>配達日</th>
-                                        <th>利用者</th>
-                                        <th>商品名</th>
-                                        <th>数量</th>
-                                        <th>単価</th>
-                                        <th>金額</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                `;
-                
-                invoice.details.forEach(detail => {
-                    detailsHtml += `
-                        <tr>
-                            <td>${formatDate(detail.delivery_date)}</td>
-                            <td>${detail.user_name || '-'}</td>
-                            <td>${detail.product_name}</td>
-                            <td class="text-center">${detail.quantity}</td>
-                            <td class="text-end">¥${parseFloat(detail.unit_price || 0).toLocaleString()}</td>
-                            <td class="text-end">¥${parseFloat(detail.total_amount || 0).toLocaleString()}</td>
-                        </tr>
-                    `;
-                });
-                
-                detailsHtml += `
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                `;
-            }
-            
-            const html = `
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6><i class="fas fa-info-circle me-2"></i>請求書情報</h6>
-                        <table class="table table-sm">
-                            <tr><td width="120">請求書番号:</td><td><strong>${invoice.invoice_number}</strong></td></tr>
-                            <tr><td>タイプ:</td><td><span class="badge type-badge type-${invoice.invoice_type}">${getInvoiceTypeLabel(invoice.invoice_type)}</span></td></tr>
-                            <tr><td>ステータス:</td><td><span class="badge status-badge status-${invoice.status}">${getStatusLabel(invoice.status)}</span></td></tr>
-                            <tr><td>発行日:</td><td>${formatDate(invoice.issue_date)}</td></tr>
-                            <tr><td>支払期限:</td><td>${formatDate(invoice.due_date)}</td></tr>
-                            <tr><td>請求期間:</td><td>${formatDate(invoice.period_start)} ～ ${formatDate(invoice.period_end)}</td></tr>
-                        </table>
-                    </div>
-                    <div class="col-md-6">
-                        <h6><i class="fas fa-building me-2"></i>請求先情報</h6>
-                        <table class="table table-sm">
-                            <tr><td width="120">企業名:</td><td><strong>${invoice.billing_company_name}</strong></td></tr>
-                            <tr><td>担当者:</td><td>${invoice.billing_contact_person || '-'}</td></tr>
-                            <tr><td>メール:</td><td>${invoice.billing_email || '-'}</td></tr>
-                            <tr><td>住所:</td><td>${invoice.billing_address || '-'}</td></tr>
-                        </table>
-                    </div>
-                </div>
-                <div class="row mt-3">
-                    <div class="col-md-6">
-                        <h6><i class="fas fa-calculator me-2"></i>金額詳細</h6>
-                        <table class="table table-sm"><?php
-/**
- * 請求書一覧・管理画面
- * Smiley配食事業の請求書一覧表示、検索、ステータス管理
- * 
- * @author Claude
- * @version 1.0.0
- * @created 2025-08-26
- */
-
-require_once __DIR__ . '/../classes/Database.php';
-require_once __DIR__ . '/../classes/SecurityHelper.php';
-
-// セキュリティヘッダー設定
-SecurityHelper::setSecurityHeaders();
-
-$pageTitle = '請求書一覧 - Smiley配食事業システム';
-?>
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo htmlspecialchars($pageTitle); ?></title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
-    <style>
-        :root {
-            --smiley-primary: #ff6b35;
-            --smiley-secondary: #ffa500;
-            --smiley-accent: #ffeb3b;
-            --smiley-success: #4caf50;
-            --smiley-warning: #ff9800;
-            --smiley-danger: #f44336;
-        }
-
-        .smiley-header {
-            background: linear-gradient(135deg, var(--smiley-primary), var(--smiley-secondary));
-            color: white;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 2rem;
-        }
-
-        .filter-card {
-            border: none;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            border-radius: 12px;
-            margin-bottom: 2rem;
-        }
-
-        .filter-card .card-header {
-            background: linear-gradient(90deg, #f8f9fa, #e9ecef);
-            border-bottom: 2px solid var(--smiley-primary);
-            border-radius: 12px 12px 0 0 !important;
-            font-weight: 600;
-        }
-
-        .invoices-card {
-            border: none;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            border-radius: 12px;
-        }
-
-        .invoice-table {
-            margin-bottom: 0;
-        }
-
-        .invoice-table th {
-            background-color: #f8f9fa;
-            border-top: none;
-            font-weight: 600;
-            font-size: 0.9rem;
-        }
-
-        .invoice-table td {
-            vertical-align: middle;
-            font-size: 0.9rem;
-        }
-
-        .status-badge {
-            font-size: 0.8rem;
-            padding: 0.4em 0.8em;
-            border-radius: 15px;
-        }
-
-        .status-issued { background-color: #e3f2fd; color: #1976d2; }
-        .status-sent { background-color: #f3e5f5; color: #7b1fa2; }
-        .status-paid { background-color: #e8f5e8; color: #2e7d32; }
-        .status-overdue { background-color: #ffebee; color: #d32f2f; }
-        .status-cancelled { background-color: #f5f5f5; color: #616161; }
-        .status-draft { background-color: #fff3e0; color: #f57c00; }
-
-        .type-badge {
-            font-size: 0.8rem;
-            padding: 0.3em 0.6em;
-            border-radius: 10px;
-        }
-
-        .type-company_bulk { background-color: #e1f5fe; color: #0277bd; }
-        .type-department_bulk { background-color: #f1f8e9; color: #558b2f; }
-        .type-individual { background-color: #fce4ec; color: #c2185b; }
-        .type-mixed { background-color: #f3e5f5; color: #7b1fa2; }
-
-        .btn-action {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.8rem;
-            border-radius: 4px;
-        }
-
-        .statistics-row {
-            background: linear-gradient(135deg, #e3f2fd, #bbdefb);
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .stat-card {
-            text-align: center;
-            padding: 1rem;
-        }
-
-        .stat-value {
-            font-size: 1.8rem;
-            font-weight: bold;
-            margin-bottom: 0.5rem;
-        }
-
-        .stat-label {
-            font-size: 0.9rem;
-            color: #666;
-        }
-
-        .search-box {
-            position: relative;
-        }
-
-        .search-box .form-control {
-            padding-left: 2.5rem;
-        }
-
-        .search-box .fa-search {
-            position: absolute;
-            left: 0.75rem;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #6c757d;
-        }
-
-        .pagination .page-link {
-            color: var(--smiley-primary);
-            border-color: #dee2e6;
-        }
-
-        .pagination .page-link:hover {
-            color: var(--smiley-secondary);
-            background-color: rgba(255, 107, 53, 0.1);
-        }
-
-        .pagination .page-item.active .page-link {
-            background-color: var(--smiley-primary);
-            border-color: var(--smiley-primary);
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 3rem 1rem
