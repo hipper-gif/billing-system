@@ -658,75 +658,84 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
          * 請求書生成処理
          */
         async function generateInvoices() {
-            const generateButton = document.getElementById('generateButton');
-            const loadingSpinner = generateButton.querySelector('.loading-spinner');
-            const progressContainer = document.querySelector('.progress-container');
-            const resultContainer = document.querySelector('.result-container');
-            
-            try {
-                // バリデーション
-                const selectedTargets = Array.from(document.querySelectorAll('.target-checkbox:checked')).map(cb => cb.value);
-                if (selectedTargets.length === 0) {
-                    alert('請求書を生成する対象を選択してください。');
-                    return;
-                }
-                
-                const formData = new FormData(document.getElementById('invoiceGenerationForm'));
-                const periodStart = formData.get('period_start');
-                const periodEnd = formData.get('period_end');
-                
-                if (!periodStart || !periodEnd) {
-                    alert('請求期間を入力してください。');
-                    return;
-                }
-                
-                // UI状態更新
-                generateButton.disabled = true;
-                loadingSpinner.style.display = 'inline';
-                progressContainer.style.display = 'block';
-                resultContainer.style.display = 'none';
-                
-                // 請求書生成API呼び出し
-                const response = await fetch('../api/invoice.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        action: 'generate',
-                        invoice_type: formData.get('invoice_type'),
-                        period_start: periodStart,
-                        period_end: periodEnd,
-                        due_date: formData.get('due_date'),
-                        target_ids: selectedTargets,
-                        auto_generate_pdf: formData.get('auto_pdf') === 'on'
-                    })
-                });
-                
-                const result = await response.json();
-                
-                if (!result.success) {
-                    throw new Error(result.message || '請求書の生成に失敗しました');
-                }
-                
-                // 成功時の処理
-                showResult(true, result.message, result.data);
-                
-                // フォームリセット（オプション）
-                if (confirm('請求書の生成が完了しました。画面をリセットしますか？')) {
-                    location.reload();
-                }
-                
-            } catch (error) {
-                console.error('請求書生成エラー:', error);
-                showResult(false, error.message);
-            } finally {
-                // UI状態復元
-                generateButton.disabled = false;
-                loadingSpinner.style.display = 'none';
-                progressContainer.style.display = 'none';
-            }
+    const generateButton = document.getElementById('generateButton');
+    const loadingSpinner = generateButton.querySelector('.loading-spinner');
+    const progressContainer = document.querySelector('.progress-container');
+    const resultContainer = document.querySelector('.result-container');
+    
+    try {
+        // バリデーション
+        const selectedTargets = Array.from(document.querySelectorAll('.target-checkbox:checked')).map(cb => cb.value);
+        if (selectedTargets.length === 0) {
+            alert('請求書を生成する対象を選択してください。');
+            return;
         }
+        
+        const formData = new FormData(document.getElementById('invoiceGenerationForm'));
+        const periodStart = formData.get('period_start');
+        const periodEnd = formData.get('period_end');
+        
+        if (!periodStart || !periodEnd) {
+            alert('請求期間を入力してください。');
+            return;
+        }
+        
+        // UI状態更新
+        generateButton.disabled = true;
+        loadingSpinner.style.display = 'inline';
+        progressContainer.style.display = 'block';
+        resultContainer.style.display = 'none';
+        
+        // 既存のinvoices.php APIに合わせたFormData作成
+        const apiFormData = new FormData();
+        apiFormData.append('action', 'generate');
+        apiFormData.append('invoice_type', formData.get('invoice_type'));
+        apiFormData.append('period_start', periodStart);
+        apiFormData.append('period_end', periodEnd);
+        
+        if (formData.get('due_date')) {
+            apiFormData.append('due_date', formData.get('due_date'));
+        }
+        
+        // 対象IDsを配列として追加
+        selectedTargets.forEach(id => {
+            apiFormData.append('target_ids[]', id);
+        });
+        
+        if (formData.get('auto_pdf')) {
+            apiFormData.append('auto_generate_pdf', '1');
+        }
+        
+        // 既存のinvoices.php APIを呼び出し（修正済み）
+        const response = await fetch('../api/invoices.php', {
+            method: 'POST',
+            body: apiFormData
+        });
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || result.message || '請求書の生成に失敗しました');
+        }
+        
+        // 成功時の処理
+        showResult(true, result.message, result.data);
+        
+        // フォームリセット（オプション）
+        if (confirm('請求書の生成が完了しました。画面をリセットしますか？')) {
+            location.reload();
+        }
+        
+    } catch (error) {
+        console.error('請求書生成エラー:', error);
+        showResult(false, error.message);
+    } finally {
+        // UI状態復元
+        generateButton.disabled = false;
+        loadingSpinner.style.display = 'none';
+        progressContainer.style.display = 'none';
+    }
+}
 
         /**
          * 結果表示
