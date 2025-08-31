@@ -17,7 +17,8 @@ if (basename($_SERVER['PHP_SELF']) == basename(__FILE__)) {
 }
 
 try {
-    $db = new Database();
+    // Database Singleton パターンでの接続
+    $db = Database::getInstance();
     $receiptGenerator = new ReceiptGenerator($db);
 } catch (Exception $e) {
     error_log("Database connection error: " . $e->getMessage());
