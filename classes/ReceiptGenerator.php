@@ -24,9 +24,10 @@ class ReceiptGenerator
     // 領収書番号生成フォーマット
     const RECEIPT_NUMBER_FORMAT = 'RCP-%s-%04d';
     
-    public function __construct(Database $db) 
+    public function __construct($db = null) 
     {
-        $this->db = $db;
+        // Database Singleton パターン対応
+        $this->db = $db ?: Database::getInstance();
     }
     
     /**
