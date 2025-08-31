@@ -31,8 +31,8 @@ require_once '../classes/ReceiptGenerator.php';
 require_once '../classes/SecurityHelper.php';
 
 try {
-    // データベース接続
-    $db = new Database();
+    // Database Singleton パターンでの接続
+    $db = Database::getInstance();
     $receiptGenerator = new ReceiptGenerator($db);
     
     // リクエストメソッド別処理
