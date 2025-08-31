@@ -166,11 +166,14 @@ function getPriorityText($priority) {
             支払い管理センター
         </a>
         <div class="navbar-nav ms-auto">
-            <a class="nav-link" href="../dashboard.php">
+            <a class="nav-link" href="../index.php">
                 <i class="fas fa-tachometer-alt me-1"></i>ダッシュボード
             </a>
-            <a class="nav-link" href="../collection_flow.php">
-                <i class="fas fa-route me-1"></i>フローガイド
+            <a class="nav-link" href="../pages/invoices.php">
+                <i class="fas fa-file-invoice me-1"></i>請求書管理
+            </a>
+            <a class="nav-link" href="../pages/companies.php">
+                <i class="fas fa-building me-1"></i>企業管理
             </a>
         </div>
     </div>
