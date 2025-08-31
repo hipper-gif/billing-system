@@ -1,0 +1,172 @@
+/* 支払い管理センター専用CSS */
+
+.payment-card {
+    transition: all 0.3s ease;
+    border: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.payment-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.stats-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 15px;
+}
+
+.outstanding-card {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+    border-radius: 15px;
+}
+
+.alert-card {
+    background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+    color: #333;
+    border-radius: 15px;
+}
+
+.success-card {
+    background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+    color: #333;
+    border-radius: 15px;
+}
+
+.alert-card {
+    border-left: 4px solid;
+    border-radius: 0;
+}
+
+.alert-card.alert-danger-custom {
+    border-left-color: #dc3545;
+    background-color: #f8d7da;
+}
+
+.alert-card.alert-warning-custom {
+    border-left-color: #ffc107;
+    background-color: #fff3cd;
+}
+
+.alert-card.alert-info-custom {
+    border-left-color: #0dcaf0;
+    background-color: #d1ecf1;
+}
+
+.action-button {
+    min-height: 45px;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.action-button:hover {
+    transform: translateY(-2px);
+}
+
+.table-responsive {
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 0 20px rgba(0,0,0,0.1);
+}
+
+.modal-content {
+    border-radius: 15px;
+}
+
+.tab-content {
+    margin-top: 20px;
+}
+
+.nav-tabs .nav-link {
+    border-radius: 10px 10px 0 0;
+    margin-right: 5px;
+    border: none;
+    background: #f8f9fa;
+    font-weight: 600;
+}
+
+.nav-tabs .nav-link.active {
+    background: #007bff;
+    color: white;
+}
+
+.filter-section {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.outstanding-item {
+    border-left: 5px solid;
+    margin-bottom: 15px;
+    padding: 15px;
+    border-radius: 5px;
+    transition: all 0.3s ease;
+}
+
+.outstanding-item:hover {
+    transform: translateX(5px);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.outstanding-item.overdue {
+    border-left-color: #dc3545;
+    background-color: #f8d7da;
+}
+
+.outstanding-item.urgent {
+    border-left-color: #ffc107;
+    background-color: #fff3cd;
+}
+
+.outstanding-item.warning {
+    border-left-color: #0dcaf0;
+    background-color: #d1ecf1;
+}
+
+.outstanding-item.normal {
+    border-left-color: #28a745;
+    background-color: #d4edda;
+}
+
+/* アニメーション */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.card-animated {
+    animation: slideIn 0.5s ease-out;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+    .outstanding-item {
+        padding: 10px;
+    }
+    
+    .outstanding-item .row {
+        text-align: center;
+    }
+    
+    .outstanding-item .btn-group-vertical {
+        margin-top: 10px;
+    }
+    
+    .stats-card .card-body {
+        padding: 15px;
+    }
+    
+    .filter-section .row {
+        gap: 10px;
+    }
+}
