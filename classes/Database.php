@@ -198,6 +198,50 @@ class Database {
     }
     
     /**
+     * 🚨 緊急追加: PDO接続取得メソッド
+     * import.phpのエラー解決用
+     */
+    public function getConnection() {
+        return $this->pdo;
+    }
+    
+    /**
+     * PDO接続取得（別名）
+     */
+    public function getPdo() {
+        return $this->pdo;
+    }
+    
+    /**
+     * 実行（execute）メソッド - import.phpが期待している可能性
+     */
+    public function execute($sql, $params = []) {
+        return $this->query($sql, $params);
+    }
+    
+    /**
+     * prepare メソッド - 直接PDOのprepareを使いたい場合
+     */
+    public function prepare($sql) {
+        return $this->pdo->prepare($sql);
+    }
+    
+    /**
+     * errorInfo取得
+     */
+    public function errorInfo() {
+        return $this->pdo->errorInfo();
+    }
+    
+    /**
+     * 最後のエラー取得
+     */
+    public function getLastError() {
+        $errorInfo = $this->pdo->errorInfo();
+        return $errorInfo[2] ?? null;
+    }
+    
+    /**
      * システム状態取得
      */
     public function getSystemStatus() {
