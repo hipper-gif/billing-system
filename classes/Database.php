@@ -1,21 +1,22 @@
 <?php
 /**
- * Database.php - 簡潔修正版
- * 構文エラー完全修正・必須メソッドのみ実装
- * 
- * @version 2.2
- * @date 2025-08-31
+ * Database接続クラス (Singleton対応 + isConnected()メソッド追加版)
+ * CSVインポートエラー修復対応
  */
-
 class Database {
     private static $instance = null;
     private $pdo;
-    private $host;
-    private $database;
-    private $username;
-    private $password;
     
-    // Singletonパターン: インスタンス取得
+    /**
+     * コンストラクタ (private)
+     */
+    private function __construct() {
+        $this->connect();
+    }
+    
+    /**
+     * Singleton インスタンス取得
+     */
     public static function getInstance() {
         if (self::$instance === null) {
             self::$instance = new self();
@@ -23,95 +24,133 @@ class Database {
         return self::$instance;
     }
     
-    // コンストラクタをprivateに（Singletonパターン）
-    private function __construct() {
-        $this->host = DB_HOST;
-        $this->database = DB_NAME;
-        $this->username = DB_USER;
-        $this->password = DB_PASS;
-        
-        $this->connect();
-    }
-    
-    // クローンを防ぐ
-    private function __clone() {}
-    
     /**
      * データベース接続
      */
     private function connect() {
-        $dsn = "mysql:host={$this->host};dbname={$this->database};charset=utf8mb4";
-        $options = [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false
-        ];
-        
         try {
-            $this->pdo = new PDO($dsn, $this->username, $this->password, $options);
+            $host = defined('DB_HOST') ? DB_HOST : 'mysql1.php.xserver.jp';
+            $dbname = defined('DB_NAME') ? DB_NAME : 'twinklemark_billing';
+            $username = defined('DB_USER') ? DB_USER : 'twinklemark_billing';
+            $password = defined('DB_PASS') ? DB_PASS : 'billing2025';
+            
+            $dsn = "mysql:host={$host};dbname={$dbname};charset=utf8mb4";
+            
+            $options = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+                PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci"
+            ];
+            
+            $this->pdo = new PDO($dsn, $username, $password, $options);
+            
         } catch (PDOException $e) {
-            error_log("データベース接続エラー: " . $e->getMessage());
-            throw new Exception("データベース接続に失敗しました");
+            throw new Exception("データベース接続エラー: " . $e->getMessage());
         }
     }
     
     /**
-     * 単一行を取得
+     * 🚨 緊急追加: 接続状態確認メソッド
+     * import.phpのエラー解決用
      */
-    public function fetchOne($sql, $params = []) {
+    public function isConnected() {
         try {
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            return $result ?: null;
+            if ($this->pdo === null) {
+                return false;
+            }
+            
+            // 接続テスト実行
+            $stmt = $this->pdo->query('SELECT 1');
+            return $stmt !== false;
+            
         } catch (PDOException $e) {
-            error_log("fetchOne エラー: " . $e->getMessage() . " SQL: " . $sql);
-            throw new Exception("データの取得に失敗しました");
+            return false;
         }
     }
     
     /**
-     * 複数行を取得
+     * 接続テスト（詳細版）
      */
-    public function fetchAll($sql, $params = []) {
+    public function testConnection() {
         try {
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
-            $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            return $result ?: [];
-        } catch (PDOException $e) {
-            error_log("fetchAll エラー: " . $e->getMessage() . " SQL: " . $sql);
-            throw new Exception("データの取得に失敗しました");
-        }
-    }
-    
-    /**
-     * SQL実行
-     */
-    public function execute($sql, $params = []) {
-        try {
-            $stmt = $this->pdo->prepare($sql);
-            return $stmt->execute($params);
-        } catch (PDOException $e) {
-            error_log("execute エラー: " . $e->getMessage() . " SQL: " . $sql);
-            throw new Exception("SQLの実行に失敗しました");
+            $start = microtime(true);
+            $result = $this->pdo->query('SELECT 1 as test');
+            $end = microtime(true);
+            
+            return [
+                'connected' => true,
+                'test_result' => $result->fetch(),
+                'response_time_ms' => round(($end - $start) * 1000, 2)
+            ];
+            
+        } catch (Exception $e) {
+            return [
+                'connected' => false,
+                'error' => $e->getMessage()
+            ];
         }
     }
     
     /**
      * クエリ実行
      */
-    public function query($sql) {
+    public function query($sql, $params = []) {
         try {
-            return $this->pdo->query($sql);
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            return $stmt;
         } catch (PDOException $e) {
-            error_log("query エラー: " . $e->getMessage() . " SQL: " . $sql);
-            throw new Exception("クエリの実行に失敗しました");
+            throw new Exception("クエリ実行エラー: " . $e->getMessage());
         }
     }
     
     /**
-     * 最後に挿入されたIDを取得
+     * 1件取得
+     */
+    public function fetchOne($sql, $params = []) {
+        $stmt = $this->query($sql, $params);
+        return $stmt->fetch();
+    }
+    
+    /**
+     * 複数件取得
+     */
+    public function fetchAll($sql, $params = []) {
+        $stmt = $this->query($sql, $params);
+        return $stmt->fetchAll();
+    }
+    
+    /**
+     * テーブル存在確認
+     */
+    public function tableExists($tableName) {
+        try {
+            $sql = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES 
+                    WHERE TABLE_SCHEMA = DATABASE() 
+                    AND TABLE_NAME = ?";
+            $stmt = $this->query($sql, [$tableName]);
+            return $stmt->fetchColumn() > 0;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+    
+    /**
+     * テーブル情報取得
+     */
+    public function getTableInfo($tableName) {
+        if (!$this->tableExists($tableName)) {
+            return null;
+        }
+        
+        $sql = "SHOW COLUMNS FROM `{$tableName}`";
+        $stmt = $this->query($sql);
+        return $stmt->fetchAll();
+    }
+    
+    /**
+     * 最後の挿入ID
      */
     public function lastInsertId() {
         return $this->pdo->lastInsertId();
@@ -125,46 +164,67 @@ class Database {
     }
     
     /**
-     * トランザクションコミット
+     * コミット
      */
     public function commit() {
         return $this->pdo->commit();
     }
     
     /**
-     * トランザクションロールバック
+     * ロールバック
      */
     public function rollback() {
-        return $this->pdo->rollBack();
+        return $this->pdo->rollback();
     }
     
     /**
-     * テーブル存在確認
+     * レコード数取得
      */
-    public function tableExists($tableName) {
-        try {
-            $sql = "SELECT COUNT(*) as count 
-                    FROM INFORMATION_SCHEMA.TABLES 
-                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?";
-            $result = $this->fetchOne($sql, [$this->database, $tableName]);
-            return $result && $result['count'] > 0;
-        } catch (Exception $e) {
-            error_log("tableExists エラー: " . $e->getMessage());
-            return false;
+    public function getRecordCount($tableName, $conditions = []) {
+        $sql = "SELECT COUNT(*) FROM `{$tableName}`";
+        $params = [];
+        
+        if (!empty($conditions)) {
+            $whereClause = [];
+            foreach ($conditions as $field => $value) {
+                $whereClause[] = "`{$field}` = ?";
+                $params[] = $value;
+            }
+            $sql .= " WHERE " . implode(' AND ', $whereClause);
         }
+        
+        $stmt = $this->query($sql, $params);
+        return $stmt->fetchColumn();
     }
     
     /**
-     * 接続テスト
+     * システム状態取得
      */
-    public function testConnection() {
-        try {
-            $result = $this->fetchOne("SELECT 1 as test");
-            return $result && $result['test'] == 1;
-        } catch (Exception $e) {
-            error_log("testConnection エラー: " . $e->getMessage());
-            return false;
+    public function getSystemStatus() {
+        return [
+            'connected' => $this->isConnected(),
+            'connection_test' => $this->testConnection(),
+            'required_tables' => $this->checkRequiredTables(),
+            'timestamp' => date('Y-m-d H:i:s')
+        ];
+    }
+    
+    /**
+     * 必要テーブル存在確認
+     */
+    private function checkRequiredTables() {
+        $requiredTables = [
+            'companies', 'departments', 'users', 'products', 
+            'orders', 'invoices', 'invoice_details', 'payments', 
+            'receipts', 'import_logs'
+        ];
+        
+        $results = [];
+        foreach ($requiredTables as $table) {
+            $results[$table] = $this->tableExists($table);
         }
+        
+        return $results;
     }
 }
 ?>
