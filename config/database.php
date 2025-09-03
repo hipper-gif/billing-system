@@ -1,25 +1,25 @@
 <?php
 /**
- * データベース接続設定ファイル（Smiley配食システム用）
- * エックスサーバー環境自動判定対応
+ * データベース接続設定ファイル（シンプル版）
+ * $_SERVER['HTTP_HOST']を直接MySQLホスト名として使用
  * 
  * @author Claude
- * @version 2.0.0
+ * @version 2.1.0
  * @created 2025-09-03
- * @fixed データベース接続エラー根本解決版
+ * @approach シンプルな動的ホスト名使用
  */
 
-// エラーレポート設定（初期段階）
+// エラーレポート設定
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
-// 環境自動判定
+// 環境判定
 $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 
 if (strpos($host, 'twinklemark.xsrv.jp') !== false) {
     // === テスト環境（twinklemark） ===
-    define('DB_HOST', 'mysql1.xserver.jp');
+    define('DB_HOST', $host); // HTTP_HOSTをそのまま使用
     define('DB_NAME', 'twinklemark_billing');
     define('DB_USER', 'twinklemark_billing');
     define('DB_PASS', 'your_actual_password_here'); // ←実際のパスワードに変更
@@ -28,7 +28,7 @@ if (strpos($host, 'twinklemark.xsrv.jp') !== false) {
     
 } elseif (strpos($host, 'tw1nkle.com') !== false) {
     // === 本番環境（tw1nkle） ===
-    define('DB_HOST', 'mysql1.xserver.jp');
+    define('DB_HOST', $host); // HTTP_HOSTをそのまま使用
     define('DB_NAME', 'tw1nkle_billing');
     define('DB_USER', 'tw1nkle_billing');
     define('DB_PASS', 'your_production_password_here'); // ←実際のパスワードに変更
@@ -47,7 +47,7 @@ if (strpos($host, 'twinklemark.xsrv.jp') !== false) {
 
 // システム設定
 define('SYSTEM_NAME', 'Smiley配食 請求書管理システム');
-define('SYSTEM_VERSION', '2.0.0');
+define('SYSTEM_VERSION', '2.1.0');
 define('DEBUG_MODE', ENVIRONMENT !== 'production');
 
 // パス設定
@@ -96,7 +96,6 @@ mb_http_output('UTF-8');
 
 /**
  * 設定値検証関数
- * 必要な設定値がすべて定義されているかチェック
  */
 function validateDatabaseConfig() {
     $required_constants = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASS'];
@@ -123,31 +122,17 @@ function validateDatabaseConfig() {
 validateDatabaseConfig();
 
 /**
- * データベース接続テスト関数
- * 設定値でのデータベース接続が可能かテスト
+ * デバッグ情報出力（デバッグモードのみ）
  */
-function testDatabaseConnection() {
-    try {
-        $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4";
-        $options = [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-            PDO::ATTR_TIMEOUT => 5,
-        ];
-        
-        $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
-        return true;
-    } catch (PDOException $e) {
-        error_log('Database connection test failed: ' . $e->getMessage());
-        return false;
-    }
-}
-
-// 開発環境でのみ接続テスト実行
-if (DEBUG_MODE && ENVIRONMENT === 'local') {
-    if (!testDatabaseConnection()) {
-        error_log('Warning: Database connection test failed in local environment');
-    }
+if (DEBUG_MODE && isset($_GET['debug_db_config'])) {
+    echo "<pre>";
+    echo "=== データベース設定デバッグ情報 ===\n";
+    echo "HTTP_HOST: " . ($_SERVER['HTTP_HOST'] ?? 'N/A') . "\n";
+    echo "DB_HOST: " . (defined('DB_HOST') ? DB_HOST : 'N/A') . "\n";
+    echo "DB_NAME: " . (defined('DB_NAME') ? DB_NAME : 'N/A') . "\n";
+    echo "DB_USER: " . (defined('DB_USER') ? DB_USER : 'N/A') . "\n";
+    echo "ENVIRONMENT: " . (defined('ENVIRONMENT') ? ENVIRONMENT : 'N/A') . "\n";
+    echo "=============================================\n";
+    echo "</pre>";
 }
 ?>
