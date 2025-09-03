@@ -12,7 +12,7 @@ if (strpos($currentHost, 'twinklemark.xsrv.jp') !== false) {
     define('DB_HOST', 'localhost');              // MySQLサーバーホスト
     define('DB_NAME', 'twinklemark_billing');    // 実際のDB名
     define('DB_USER', 'twinklemark_bill');       // 実際のDBユーザー名（管理画面で確認済み）
-    define('DB_PASS', 'ACTUAL_PASSWORD_HERE');   // 実際のDBパスワード（要設定）
+    define('DB_PASS', 'Smiley2525');   // 実際のDBパスワード（要設定）
     define('ENVIRONMENT', 'test');
     define('BASE_URL', 'https://twinklemark.xsrv.jp/Smiley/meal-delivery/billing-system/');
     define('DEPLOY_HOST', 'sv16114.xserver.jp'); // デプロイ先サーバー（GitHub Actions用）
