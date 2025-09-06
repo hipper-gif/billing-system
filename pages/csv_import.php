@@ -755,8 +755,13 @@ $csrfToken = SecurityHelper::generateCSRFToken();
             healthResult.style.display = 'block';
             
             try {
-                // 既存のAPI確認ツールを活用
+                // 既存のAPI確認ツールを活用（エラーハンドリング強化）
                 const response = await fetch('../api/import.php?action=status');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const result = await response.json();
                 
                 if (result.success) {
@@ -767,6 +772,7 @@ $csrfToken = SecurityHelper::generateCSRFToken();
                                 <div><strong>データベース:</strong> ${result.data.database_connection ? '✅ 正常' : '❌ エラー'}</div>
                                 <div><strong>必要クラス:</strong> ${Object.values(result.data.required_classes || {}).every(Boolean) ? '✅ 正常' : '❌ エラー'}</div>
                                 <div><strong>テーブル:</strong> ${Object.values(result.data.tables || {}).filter(Boolean).length} 個確認済み</div>
+                                <div><strong>API バージョン:</strong> ${result.version || 'N/A'}</div>
                             </small>
                         </div>
                     `;
@@ -775,14 +781,25 @@ $csrfToken = SecurityHelper::generateCSRFToken();
                         <div class="alert alert-danger">
                             <h6><i class="fas fa-times-circle me-2"></i>システム異常</h6>
                             <p>${result.message}</p>
+                            <small>詳細: ${JSON.stringify(result.data || {})}</small>
                         </div>
                     `;
                 }
             } catch (error) {
+                console.error('システム診断エラー:', error);
                 healthResult.innerHTML = `
                     <div class="alert alert-warning">
                         <h6><i class="fas fa-exclamation-triangle me-2"></i>診断エラー</h6>
                         <p>システム診断中にエラーが発生しました</p>
+                        <small>エラー詳細: ${error.message}</small>
+                        <div class="mt-2">
+                            <strong>対処法:</strong>
+                            <ul class="mb-0">
+                                <li>ページを再読み込みしてください</li>
+                                <li>ブラウザのキャッシュをクリアしてください</li>
+                                <li>問題が継続する場合は管理者にお問い合わせください</li>
+                            </ul>
+                        </div>
                     </div>
                 `;
             }
