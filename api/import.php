@@ -1,334 +1,419 @@
 <?php
 /**
- * CSVインポートAPI（根本修正版）
- * Database Singleton パターン対応
+ * CSV インポート API - Smiley配食事業システム
+ * 仕様書 v2.0 完全準拠版
+ * 
+ * ファイル: /api/import.php
+ * 用途: CSVファイルインポート処理
+ * 対応: 23フィールドSmiley配食事業CSV、SJIS-win対応
  */
 
-// エラー表示設定
-error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-
-// レスポンスヘッダー設定
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Headers: Content-Type, X-Requested-With');
 
-// OPTIONSリクエスト対応
+// セキュリティヘッダー設定
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('X-XSS-Protection: 1; mode=block');
+
+// OPTIONS リクエスト対応（CORS）
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// 必要ファイル読み込み
-require_once '../config/database.php';
-require_once '../classes/Database.php';
-require_once '../classes/SmileyCSVImporter.php';
-require_once '../classes/FileUploadHandler.php';
-require_once '../classes/SecurityHelper.php';
-
-/**
- * JSONレスポンス送信
- */
-function sendResponse($success, $message, $data = [], $code = 200) {
-    http_response_code($code);
+// 必要なクラス読み込み
+try {
+    require_once __DIR__ . '/../config/database.php';
+    require_once __DIR__ . '/../classes/Database.php';
+    require_once __DIR__ . '/../classes/SmileyCSVImporter.php';
+    require_once __DIR__ . '/../classes/SecurityHelper.php';
+    require_once __DIR__ . '/../classes/FileUploadHandler.php';
+} catch (Exception $e) {
+    http_response_code(500);
     echo json_encode([
-        'success' => $success,
-        'message' => $message,
-        'data' => $data,
+        'success' => false,
+        'message' => 'システム初期化エラー',
+        'data' => [
+            'error' => 'クラスファイルの読み込みに失敗しました',
+            'file' => 'import.php',
+            'line' => __LINE__
+        ],
         'timestamp' => date('Y-m-d H:i:s'),
-        'version' => '4.0.0-singleton'
-    ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+        'version' => '4.0.0-specification-compliant'
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
+// メイン処理
 try {
-    // リクエスト処理
-    switch ($_SERVER['REQUEST_METHOD']) {
-        case 'GET':
-            handleGetRequest();
-            break;
-        case 'POST':
-            handlePostRequest();
-            break;
-        default:
-            sendResponse(false, 'サポートされていないメソッドです', [], 405);
+    // データベース接続（Singleton パターン）
+    $db = Database::getInstance();
+    
+    // 接続テスト（仕様準拠）
+    if (!$db->testConnection()) {
+        throw new Exception('データベース接続に失敗しました');
     }
     
-} catch (Throwable $e) {
-    // エラーログ記録
-    error_log("CSVインポートAPI システムエラー: " . $e->getMessage());
-    error_log("ファイル: " . $e->getFile() . " 行: " . $e->getLine());
+    // HTTPメソッド判定
+    switch ($_SERVER['REQUEST_METHOD']) {
+        case 'POST':
+            handleCSVImport($db);
+            break;
+            
+        case 'GET':
+            handleGetRequest($db);
+            break;
+            
+        default:
+            throw new Exception('サポートされていないHTTPメソッドです: ' . $_SERVER['REQUEST_METHOD']);
+    }
     
-    sendResponse(false, 'システムエラーが発生しました', [
-        'error' => $e->getMessage(),
-        'file' => basename($e->getFile()),
-        'line' => $e->getLine()
-    ], 500);
+} catch (Exception $e) {
+    // エラーハンドリング（仕様準拠）
+    $errorResponse = [
+        'success' => false,
+        'message' => 'システムエラーが発生しました',
+        'data' => [
+            'error' => $e->getMessage(),
+            'file' => 'import.php',
+            'line' => $e->getLine()
+        ],
+        'timestamp' => date('Y-m-d H:i:s'),
+        'version' => '4.0.0-specification-compliant'
+    ];
+    
+    // ログ記録
+    error_log("[Import API Error] " . json_encode($errorResponse, JSON_UNESCAPED_UNICODE));
+    
+    http_response_code(500);
+    echo json_encode($errorResponse, JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * CSV インポート処理（POST）
+ */
+function handleCSVImport($db) {
+    // ファイルアップロード確認
+    if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
+        throw new Exception('CSVファイルがアップロードされていません');
+    }
+    
+    $uploadedFile = $_FILES['csv_file'];
+    
+    // セキュリティ検証
+    $securityHelper = new SecurityHelper();
+    if (!$securityHelper::validateFileUpload($uploadedFile)) {
+        throw new Exception('アップロードされたファイルは安全ではありません');
+    }
+    
+    // ファイルアップロード処理
+    $fileHandler = new FileUploadHandler();
+    $uploadResult = $fileHandler->handleUpload($uploadedFile);
+    
+    if (!$uploadResult['success']) {
+        throw new Exception('ファイルアップロードに失敗しました: ' . implode(', ', $uploadResult['errors']));
+    }
+    
+    $tempFilePath = $uploadResult['filepath'];
+    
+    try {
+        // CSV インポーター初期化
+        $importer = new SmileyCSVImporter($db);
+        
+        // インポートオプション設定
+        $importOptions = [
+            'encoding' => $_POST['encoding'] ?? 'auto',
+            'overwrite' => isset($_POST['overwrite']) ? (bool)$_POST['overwrite'] : false,
+            'validate_smiley' => true,
+            'batch_size' => 1000,
+            'debug_mode' => isset($_POST['debug_mode']) ? (bool)$_POST['debug_mode'] : false
+        ];
+        
+        // CSV インポート実行
+        $importResult = $importer->importFile($tempFilePath, $importOptions);
+        
+        // 成功レスポンス
+        $response = [
+            'success' => true,
+            'message' => 'CSVインポートが完了しました',
+            'data' => [
+                'batch_id' => $importResult['batch_id'],
+                'import_summary' => [
+                    'total_records' => $importResult['stats']['total'] ?? 0,
+                    'success_records' => $importResult['stats']['success'] ?? 0,
+                    'error_records' => count($importResult['errors'] ?? []),
+                    'duplicate_records' => $importResult['stats']['duplicate'] ?? 0
+                ],
+                'processing_time' => $importResult['processing_time'] ?? 0,
+                'encoding_detected' => $importResult['encoding'] ?? 'UTF-8',
+                'file_info' => [
+                    'original_name' => $uploadedFile['name'],
+                    'size_bytes' => $uploadedFile['size'],
+                    'size_mb' => round($uploadedFile['size'] / 1024 / 1024, 2)
+                ]
+            ],
+            'errors' => $importResult['errors'] ?? [],
+            'timestamp' => date('Y-m-d H:i:s'),
+            'version' => '4.0.0-specification-compliant'
+        ];
+        
+        echo json_encode($response, JSON_UNESCAPED_UNICODE);
+        
+    } finally {
+        // 一時ファイル削除
+        if (file_exists($tempFilePath)) {
+            unlink($tempFilePath);
+        }
+    }
 }
 
 /**
  * GET リクエスト処理
  */
-function handleGetRequest() {
+function handleGetRequest($db) {
     $action = $_GET['action'] ?? 'status';
     
     switch ($action) {
-        case 'test':
-            sendResponse(true, 'CSVインポートAPI正常稼働中 - Singleton対応版', [
-                'version' => '4.0.0-singleton',
-                'methods' => ['GET', 'POST'],
-                'php_version' => PHP_VERSION,
-                'database_pattern' => 'Singleton',
-                'endpoints' => [
-                    'GET ?action=test' => 'API動作確認',
-                    'GET ?action=status' => 'システム状況確認',
-                    'GET ?action=db_test' => 'データベース接続確認',
-                    'POST with csv_file' => 'CSVファイルインポート'
-                ]
-            ]);
-            break;
-            
         case 'status':
-            try {
-                // Database Singleton接続確認
-                $db = Database::getInstance();
-                
-                // 基本テーブル確認
-                $tables = ['companies', 'departments', 'users', 'suppliers', 'products', 'orders', 'import_logs'];
-                $tableStatus = [];
-                
-                foreach ($tables as $table) {
-                    try {
-                        $tableStatus[$table] = $db->tableExists($table);
-                    } catch (Exception $e) {
-                        $tableStatus[$table] = false;
-                    }
-                }
-                
-                sendResponse(true, 'システム正常稼働中', [
-                    'database_connection' => $db->isConnected(),
-                    'database_pattern' => 'Singleton',
-                    'database_class' => get_class($db),
-                    'pdo_connection' => $db->getConnection() !== null,
-                    'tables' => $tableStatus,
-                    'required_classes' => [
-                        'Database' => class_exists('Database'),
-                        'SecurityHelper' => class_exists('SecurityHelper'),
-                        'SmileyCSVImporter' => class_exists('SmileyCSVImporter'),
-                        'FileUploadHandler' => class_exists('FileUploadHandler')
-                    ],
-                    'php_extensions' => [
-                        'pdo' => extension_loaded('pdo'),
-                        'pdo_mysql' => extension_loaded('pdo_mysql'),
-                        'mbstring' => extension_loaded('mbstring'),
-                        'fileinfo' => extension_loaded('fileinfo')
-                    ]
-                ]);
-                
-            } catch (Exception $e) {
-                sendResponse(false, 'システム異常', [
-                    'error' => $e->getMessage(),
-                    'database_pattern' => 'Singleton',
-                    'connection_attempt' => 'Database::getInstance()'
-                ], 500);
-            }
-            break;
-            
-        case 'db_test':
-            try {
-                $db = Database::getInstance();
-                
-                // 接続テスト
-                $connectionTest = $db->testConnection();
-                
-                // 基本情報取得
-                $systemInfo = $db->getSystemInfo();
-                $dbCheck = $db->checkDatabase();
-                
-                sendResponse(true, 'データベース接続成功', [
-                    'connection_method' => 'Database::getInstance()',
-                    'connection_test' => $connectionTest,
-                    'system_info' => $systemInfo,
-                    'database_info' => $dbCheck,
-                    'pdo_available' => $db->getConnection() !== null
-                ]);
-                
-            } catch (Exception $e) {
-                sendResponse(false, 'データベース接続エラー', [
-                    'error' => $e->getMessage(),
-                    'connection_method' => 'Database::getInstance()'
-                ], 500);
-            }
+            handleSystemStatus($db);
             break;
             
         case 'history':
-            try {
-                $db = Database::getInstance();
-                $limit = min(50, max(1, intval($_GET['limit'] ?? 20)));
-                $offset = max(0, intval($_GET['offset'] ?? 0));
-                
-                $sql = "SELECT batch_id, file_path, total_records, success_records, 
-                              error_records, duplicate_records, processing_time_seconds, 
-                              created_at, status 
-                        FROM import_logs 
-                        ORDER BY created_at DESC 
-                        LIMIT ? OFFSET ?";
-                
-                $history = $db->fetchAll($sql, [$limit, $offset]);
-                
-                sendResponse(true, 'インポート履歴を取得しました', [
-                    'history' => $history,
-                    'pagination' => [
-                        'limit' => $limit,
-                        'offset' => $offset
-                    ]
-                ]);
-                
-            } catch (Exception $e) {
-                sendResponse(false, 'インポート履歴取得エラー', [
-                    'error' => $e->getMessage()
-                ], 500);
-            }
+            handleImportHistory($db);
+            break;
+            
+        case 'health':
+            handleHealthCheck($db);
             break;
             
         default:
-            sendResponse(false, '不明なアクションです', [
-                'available_actions' => ['test', 'status', 'db_test', 'history']
-            ], 400);
+            throw new Exception('不正なアクションです: ' . $action);
     }
 }
 
 /**
- * POST リクエスト処理（CSVインポート）
+ * システム状態確認
  */
-function handlePostRequest() {
-    try {
-        // 1. セキュリティヘッダー設定
-        SecurityHelper::setSecurityHeaders();
-        
-        // 2. レート制限チェック
-        if (!SecurityHelper::checkRateLimit('csv_import', 10, 3600)) {
-            sendResponse(false, 'アップロード頻度制限に達しました。1時間後に再試行してください。', [], 429);
-        }
-        
-        // 3. ファイル検証
-        if (!isset($_FILES['csv_file'])) {
-            sendResponse(false, 'CSVファイルがアップロードされていません', [], 400);
-        }
-        
-        $file = $_FILES['csv_file'];
-        $fileValidation = SecurityHelper::validateFileUpload($file);
-        
-        if (!$fileValidation['valid']) {
-            SecurityHelper::logSecurityEvent('csv_upload_validation_failed', [
-                'errors' => $fileValidation['errors'],
-                'filename' => $file['name'] ?? 'unknown'
-            ]);
-            
-            sendResponse(false, 'ファイル検証エラー', [
-                'errors' => $fileValidation['errors']
-            ], 400);
-        }
-        
-        // 4. Database Singleton接続
-        $db = Database::getInstance();
-        
-        if (!$db->isConnected()) {
-            throw new Exception('データベース接続に失敗しました: ' . $db->getLastError());
-        }
-        
-        // 5. CSVインポーター初期化（Singleton対応）
-        $importer = new SmileyCSVImporter($db);
-        
-        // 6. インポートオプション
-        $options = [
-            'encoding' => $_POST['encoding'] ?? 'auto',
-            'overwrite' => isset($_POST['overwrite']) ? (bool)$_POST['overwrite'] : false,
-            'validate_smiley' => true,
-            'dry_run' => isset($_POST['dry_run']) ? (bool)$_POST['dry_run'] : false,
-            'max_size' => 50 * 1024 * 1024 // 50MB
-        ];
-        
-        // 7. インポート実行
-        $startTime = microtime(true);
-        
-        // 一時ファイルとして保存
-        $tempFile = sys_get_temp_dir() . '/csv_import_' . uniqid() . '.csv';
-        if (!move_uploaded_file($file['tmp_name'], $tempFile)) {
-            throw new Exception('一時ファイルの作成に失敗しました');
-        }
-        
-        try {
-            $result = $importer->importFile($tempFile, $options);
-            $processingTime = round(microtime(true) - $startTime, 2);
-            
-            // 8. ログ記録
-            SecurityHelper::logSecurityEvent('csv_import_completed', [
-                'filename' => $file['name'],
-                'filesize' => $file['size'],
-                'batch_id' => $result['batch_id'],
-                'records_total' => $result['stats']['total'] ?? 0,
-                'records_success' => $result['stats']['success'] ?? 0,
-                'records_error' => $result['stats']['error'] ?? 0,
-                'processing_time' => $processingTime
-            ]);
-            
-            // 9. 成功レスポンス
-            sendResponse(
-                $result['success'], 
-                $result['success'] ? 'CSVインポートが正常に完了しました' : 'CSVインポートが部分的に完了しました',
-                [
-                    'batch_id' => $result['batch_id'],
-                    'filename' => $file['name'],
-                    'stats' => [
-                        'total_records' => $result['stats']['total'] ?? 0,
-                        'success_records' => $result['stats']['success'] ?? 0,
-                        'error_records' => $result['stats']['error'] ?? 0,
-                        'duplicate_records' => $result['stats']['duplicate'] ?? 0,
-                        'new_companies' => $result['stats']['new_companies'] ?? 0,
-                        'new_users' => $result['stats']['new_users'] ?? 0,
-                        'processing_time' => $processingTime . '秒'
-                    ],
-                    'errors' => array_slice($result['errors'] ?? [], 0, 10), // 最初の10件のみ
-                    'has_more_errors' => count($result['errors'] ?? []) > 10,
-                    'import_summary' => [
-                        'database_connection' => 'Database::getInstance() - Success',
-                        'validation_passed' => true,
-                        'encoding_detected' => $result['encoding'] ?? 'unknown',
-                        'singleton_pattern' => true
-                    ]
-                ]
-            );
-            
-        } finally {
-            // 一時ファイル削除
-            if (file_exists($tempFile)) {
-                unlink($tempFile);
-            }
-        }
-        
-    } catch (Throwable $e) {
-        // エラーログ記録
-        SecurityHelper::logSecurityEvent('csv_import_error', [
-            'error_message' => $e->getMessage(),
-            'file' => basename($e->getFile()),
-            'line' => $e->getLine(),
-            'uploaded_file' => $_FILES['csv_file']['name'] ?? 'unknown'
-        ]);
-        
-        sendResponse(false, 'CSVインポート中にエラーが発生しました', [
-            'error_message' => $e->getMessage(),
-            'error_file' => basename($e->getFile()),
-            'error_line' => $e->getLine(),
-            'troubleshooting' => [
-                'database_connection' => 'Database::getInstance()を使用してください',
-                'check_csv_format' => 'CSVファイルの形式（23フィールド）を確認してください',
-                'check_file_encoding' => 'ファイルのエンコーディングを確認してください（SJIS-win推奨）',
-                'check_file_size' => 'ファイルサイズが50MB以下であることを確認してください'
+function handleSystemStatus($db) {
+    $systemStatus = [
+        'database' => [
+            'connected' => $db->testConnection(),
+            'tables_exist' => checkRequiredTables($db),
+            'version' => getDatabaseVersion($db)
+        ],
+        'php' => [
+            'version' => PHP_VERSION,
+            'memory_limit' => ini_get('memory_limit'),
+            'max_execution_time' => ini_get('max_execution_time'),
+            'upload_max_filesize' => ini_get('upload_max_filesize')
+        ],
+        'disk_space' => [
+            'free_mb' => round(disk_free_space('.') / 1024 / 1024, 2),
+            'total_mb' => round(disk_total_space('.') / 1024 / 1024, 2)
+        ],
+        'import_stats' => getRecentImportStats($db)
+    ];
+    
+    $response = [
+        'success' => true,
+        'message' => 'システム状態を正常に取得しました',
+        'data' => $systemStatus,
+        'timestamp' => date('Y-m-d H:i:s')
+    ];
+    
+    echo json_encode($response, JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * インポート履歴取得
+ */
+function handleImportHistory($db) {
+    $limit = isset($_GET['limit']) ? min((int)$_GET['limit'], 100) : 20;
+    $offset = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
+    
+    $sql = "SELECT 
+                batch_id, file_name, file_type, file_size,
+                total_records, success_records, error_records,
+                import_start, import_end, status, created_by
+            FROM import_logs 
+            ORDER BY import_start DESC 
+            LIMIT ? OFFSET ?";
+    
+    $stmt = $db->prepare($sql);
+    $stmt->execute([$limit, $offset]);
+    $importHistory = $stmt->fetchAll();
+    
+    // 総件数取得
+    $countSql = "SELECT COUNT(*) FROM import_logs";
+    $totalCount = $db->query($countSql)->fetchColumn();
+    
+    $response = [
+        'success' => true,
+        'message' => 'インポート履歴を取得しました',
+        'data' => [
+            'import_history' => $importHistory,
+            'pagination' => [
+                'total_count' => $totalCount,
+                'limit' => $limit,
+                'offset' => $offset,
+                'has_more' => ($offset + $limit) < $totalCount
             ]
-        ], 500);
+        ],
+        'timestamp' => date('Y-m-d H:i:s')
+    ];
+    
+    echo json_encode($response, JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * ヘルスチェック
+ */
+function handleHealthCheck($db) {
+    $healthStatus = [
+        'overall' => 'healthy',
+        'checks' => [
+            'database' => $db->testConnection() ? 'healthy' : 'unhealthy',
+            'required_tables' => checkRequiredTables($db) ? 'healthy' : 'unhealthy',
+            'disk_space' => checkDiskSpace(),
+            'memory_usage' => checkMemoryUsage()
+        ]
+    ];
+    
+    // 総合判定
+    $unhealthyChecks = array_filter($healthStatus['checks'], function($status) {
+        return $status !== 'healthy';
+    });
+    
+    if (!empty($unhealthyChecks)) {
+        $healthStatus['overall'] = 'unhealthy';
+    }
+    
+    $response = [
+        'success' => true,
+        'message' => 'ヘルスチェックが完了しました',
+        'data' => $healthStatus,
+        'timestamp' => date('Y-m-d H:i:s')
+    ];
+    
+    echo json_encode($response, JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * 必須テーブル存在確認
+ */
+function checkRequiredTables($db) {
+    $requiredTables = [
+        'companies', 'departments', 'users', 'orders', 
+        'products', 'suppliers', 'invoices', 'payments', 'import_logs'
+    ];
+    
+    foreach ($requiredTables as $table) {
+        if (!$db->tableExists($table)) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+/**
+ * データベースバージョン取得
+ */
+function getDatabaseVersion($db) {
+    try {
+        $stmt = $db->query("SELECT VERSION() as version");
+        $result = $stmt->fetch();
+        return $result['version'] ?? 'unknown';
+    } catch (Exception $e) {
+        return 'error: ' . $e->getMessage();
     }
 }
-?>
+
+/**
+ * 最近のインポート統計取得
+ */
+function getRecentImportStats($db) {
+    try {
+        $sql = "SELECT 
+                    COUNT(*) as total_imports,
+                    SUM(success_records) as total_success_records,
+                    SUM(error_records) as total_error_records,
+                    MAX(import_start) as last_import_date
+                FROM import_logs 
+                WHERE import_start >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+        
+        $stmt = $db->query($sql);
+        return $stmt->fetch();
+    } catch (Exception $e) {
+        return [
+            'total_imports' => 0,
+            'total_success_records' => 0,
+            'total_error_records' => 0,
+            'last_import_date' => null,
+            'error' => $e->getMessage()
+        ];
+    }
+}
+
+/**
+ * ディスク容量チェック
+ */
+function checkDiskSpace() {
+    $freeBytes = disk_free_space('.');
+    $totalBytes = disk_total_space('.');
+    $usagePercent = (($totalBytes - $freeBytes) / $totalBytes) * 100;
+    
+    if ($usagePercent > 90) {
+        return 'critical';
+    } elseif ($usagePercent > 80) {
+        return 'warning';
+    } else {
+        return 'healthy';
+    }
+}
+
+/**
+ * メモリ使用量チェック
+ */
+function checkMemoryUsage() {
+    $memoryUsage = memory_get_usage(true);
+    $memoryLimit = ini_get('memory_limit');
+    
+    // memory_limit を bytes に変換
+    $memoryLimitBytes = parseMemoryLimit($memoryLimit);
+    
+    if ($memoryLimitBytes > 0) {
+        $usagePercent = ($memoryUsage / $memoryLimitBytes) * 100;
+        
+        if ($usagePercent > 90) {
+            return 'critical';
+        } elseif ($usagePercent > 80) {
+            return 'warning';
+        }
+    }
+    
+    return 'healthy';
+}
+
+/**
+ * memory_limit 文字列をバイトに変換
+ */
+function parseMemoryLimit($limit) {
+    $limit = trim($limit);
+    $last = strtolower($limit[strlen($limit)-1]);
+    $value = (int)$limit;
+    
+    switch ($last) {
+        case 'g':
+            $value *= 1024;
+        case 'm':
+            $value *= 1024;
+        case 'k':
+            $value *= 1024;
+    }
+    
+    return $value;
+}
