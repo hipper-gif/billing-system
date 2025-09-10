@@ -325,8 +325,8 @@ function testDatabaseConnection() {
             throw new Exception("Database::getInstance() は成功したが、接続状態が false");
         }
         
-        // 接続テスト実行
-        $testResult = $db->fetchOne("SELECT 1 as test, NOW() as current_time, DATABASE() as db_name, VERSION() as version");
+        // 接続テスト実行（MariaDB対応）
+        $testResult = $db->fetchOne("SELECT 1 as test, NOW() as `current_datetime`, DATABASE() as `db_name`, VERSION() as `version`");
         
         if (!$testResult) {
             throw new Exception("データベーステストクエリの実行に失敗");
