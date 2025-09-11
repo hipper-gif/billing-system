@@ -1,26 +1,5 @@
 <?php
 /**
- * invoice_targets.php 修正パッチ
- * 
- * 問題: 38行目で new Database() を使用している
- * 解決: Database::getInstance() に変更
- * 
- * このファイルの内容で既存のinvoice_targets.phpを修正してください
- */
-
-// 修正前（エラーが発生する行）:
-// $db = new Database();
-
-// 修正後（正しいSingleton使用）:
-// $db = Database::getInstance();
-
-/**
- * 完全なinvoice_targets.php修正版
- * 既存ファイルをこの内容で完全に置き換えてください
- */
-?>
-<?php
-/**
  * 請求書対象選択API（修正版）
  * invoice_generate.php の対象一覧読み込み用APIエンドポイント
  * 
