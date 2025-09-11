@@ -1,12 +1,33 @@
 <?php
 /**
- * 請求書対象選択API
+ * invoice_targets.php 修正パッチ
+ * 
+ * 問題: 38行目で new Database() を使用している
+ * 解決: Database::getInstance() に変更
+ * 
+ * このファイルの内容で既存のinvoice_targets.phpを修正してください
+ */
+
+// 修正前（エラーが発生する行）:
+// $db = new Database();
+
+// 修正後（正しいSingleton使用）:
+// $db = Database::getInstance();
+
+/**
+ * 完全なinvoice_targets.php修正版
+ * 既存ファイルをこの内容で完全に置き換えてください
+ */
+?>
+<?php
+/**
+ * 請求書対象選択API（修正版）
  * invoice_generate.php の対象一覧読み込み用APIエンドポイント
  * 
- * JSON解析エラー対応版 - 純粋なJSON出力のみ
+ * Database Singleton対応版
  * 
  * @author Claude
- * @version 1.1.0
+ * @version 1.1.0 (Singleton対応)
  * @created 2025-09-11
  */
 
@@ -34,8 +55,8 @@ try {
     // 出力バッファリング開始（予期しない出力をキャッチ）
     ob_start();
     
-    // データベース接続
-    $db = new Database();
+    // ★★★ 重要: Singletonパターンでデータベース接続 ★★★
+    $db = Database::getInstance();
     
     // HTTPメソッドチェック
     if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
