@@ -4,12 +4,13 @@
  * Smiley配食事業専用の請求書生成インターフェース
  * 
  * @author Claude
- * @version 2.0.0 - 根本解決版
- * @created 2025-08-29
+ * @version 1.0.1 - 根本修正版
+ * @modified 2025-09-11
  */
 
 require_once __DIR__ . '/../classes/Database.php';
 require_once __DIR__ . '/../classes/SecurityHelper.php';
+require_once __DIR__ . '/../classes/InvoiceGenerator.php'; // ← 重要: 追加
 
 // セキュリティヘッダー設定
 SecurityHelper::setSecurityHeaders();
@@ -23,7 +24,7 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo htmlspecialchars($pageTitle); ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
     <style>
         :root {
@@ -57,13 +58,16 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
             font-weight: 600;
         }
 
+        /* PC操作不慣れ対応 - 仕様書準拠の大型ボタン */
         .btn-generate {
             background: linear-gradient(135deg, var(--smiley-primary), var(--smiley-secondary));
             border: none;
             color: white;
-            padding: 12px 30px;
+            padding: 20px 40px; /* 大型化 */
             border-radius: 25px;
             font-weight: 600;
+            font-size: 24px; /* 仕様書準拠: 24px以上 */
+            min-height: 80px; /* 仕様書準拠: 80px以上 */
             transition: all 0.3s ease;
         }
 
@@ -79,65 +83,75 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
             box-shadow: none;
         }
 
-        .btn-preview {
-            background: linear-gradient(135deg, #007bff, #0056b3);
-            border: none;
-            color: white;
-            padding: 8px 20px;
-            border-radius: 20px;
-            font-weight: 500;
-            transition: all 0.3s ease;
-        }
-
-        .btn-preview:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
-            color: white;
-        }
-
+        /* PC操作不慣れ対応 - 大型選択カード */
         .invoice-type-card {
-            border: 2px solid #e9ecef;
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 1rem;
+            border: 3px solid #e9ecef; /* 太い境界線 */
+            border-radius: 12px;
+            padding: 20px; /* 大型化 */
+            margin-bottom: 15px; /* 間隔拡大 */
             cursor: pointer;
             transition: all 0.3s ease;
+            min-height: 100px; /* 最小高さ確保 */
         }
 
         .invoice-type-card:hover {
             border-color: var(--smiley-primary);
-            box-shadow: 0 2px 8px rgba(255, 107, 53, 0.1);
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.2);
+            transform: translateY(-2px);
         }
 
         .invoice-type-card.selected {
             border-color: var(--smiley-primary);
-            background: rgba(255, 107, 53, 0.05);
+            background: rgba(255, 107, 53, 0.1);
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+        }
+
+        /* PC操作不慣れ対応 - 大型入力フィールド */
+        .form-control {
+            min-height: 50px; /* 大型化 */
+            font-size: 18px; /* 大きな文字 */
+            padding: 15px 20px;
+        }
+
+        .form-check-input {
+            width: 24px; /* 大型チェックボックス */
+            height: 24px;
+        }
+
+        .form-check-label {
+            font-size: 18px; /* 大きな文字 */
+            margin-left: 10px;
         }
 
         .target-selector {
-            min-height: 200px;
+            min-height: 250px; /* 高さ拡大 */
             max-height: 400px;
             overflow-y: auto;
-            border: 1px solid #dee2e6;
-            border-radius: 8px;
-            padding: 1rem;
+            border: 2px solid #dee2e6; /* 太い境界線 */
+            border-radius: 12px;
+            padding: 20px; /* パディング拡大 */
         }
 
         .target-item {
-            padding: 8px 12px;
-            border-radius: 6px;
-            margin-bottom: 5px;
+            padding: 15px 20px; /* 大型化 */
+            border-radius: 8px;
+            margin-bottom: 10px; /* 間隔拡大 */
             cursor: pointer;
             transition: background-color 0.2s ease;
+            font-size: 16px; /* 文字サイズ */
+            border: 2px solid transparent;
         }
 
         .target-item:hover {
             background-color: #f8f9fa;
+            border-color: var(--smiley-primary);
         }
 
         .target-item.selected {
             background-color: var(--smiley-accent);
             color: #333;
+            border-color: var(--smiley-primary);
+            font-weight: bold;
         }
 
         .progress-container {
@@ -153,18 +167,25 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
         .result-success {
             border-left: 4px solid var(--smiley-success);
             background: rgba(76, 175, 80, 0.1);
+            padding: 20px;
+            border-radius: 8px;
+            font-size: 18px;
         }
 
         .result-error {
             border-left: 4px solid var(--smiley-danger);
             background: rgba(244, 67, 54, 0.1);
+            padding: 20px;
+            border-radius: 8px;
+            font-size: 18px;
         }
 
         .statistics-card {
             background: linear-gradient(135deg, #e3f2fd, #bbdefb);
-            border-radius: 8px;
-            padding: 1rem;
+            border-radius: 12px;
+            padding: 20px; /* パディング拡大 */
             margin-bottom: 1rem;
+            border: 2px solid #2196f3;
         }
 
         .form-check-input:checked {
@@ -177,12 +198,128 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
         }
 
         .preview-table {
-            font-size: 0.9rem;
+            font-size: 16px; /* 大きな文字 */
         }
 
         .badge-invoice-type {
-            font-size: 0.8rem;
-            padding: 0.4em 0.8em;
+            font-size: 14px; /* 大きな文字 */
+            padding: 8px 16px; /* 大型化 */
+        }
+
+        /* 操作ガイド - PC操作不慣れ対応 */
+        .operation-guide {
+            background: linear-gradient(135deg, #e8f5e8, #c8e6c8);
+            border: 3px solid var(--smiley-success);
+            border-radius: 15px;
+            padding: 25px;
+            margin: 25px 0;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .step-indicator {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin: 15px 0;
+        }
+
+        .step-number {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--smiley-primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .step-arrow {
+            font-size: 24px;
+            color: var(--smiley-primary);
+        }
+
+        /* 期間テンプレートボタン - 大型化 */
+        .btn-template {
+            min-height: 60px;
+            font-size: 16px;
+            padding: 15px 25px;
+            margin: 5px;
+        }
+
+        /* 確認モーダル - PC操作不慣れ対応 */
+        .confirmation-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .confirmation-content {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            margin: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+
+        .confirmation-title {
+            font-size: 28px;
+            font-weight: bold;
+            color: var(--smiley-danger);
+            margin-bottom: 20px;
+        }
+
+        .confirmation-details {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+            font-size: 18px;
+        }
+
+        .confirmation-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+
+        .btn-confirm {
+            min-height: 80px;
+            font-size: 20px;
+            padding: 20px 40px;
+            border-radius: 15px;
+            font-weight: bold;
+            min-width: 160px;
+        }
+
+        /* レスポンシブ対応 */
+        @media (max-width: 768px) {
+            .btn-generate {
+                width: 100%;
+                margin: 20px 0;
+            }
+            
+            .invoice-type-card {
+                margin-bottom: 20px;
+            }
+            
+            .confirmation-buttons {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -204,6 +341,26 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
     </nav>
 
     <div class="container mt-4">
+        <!-- 操作ガイド - PC操作不慣れ対応 -->
+        <div class="operation-guide">
+            <div style="font-size: 24px; margin-bottom: 20px;">
+                📋 現在の作業: 請求書生成
+            </div>
+            <div class="step-indicator">
+                <div class="step-number">1</div>
+                <span>請求書タイプ選択</span>
+                <span class="step-arrow">→</span>
+                <div class="step-number">2</div>
+                <span>期間設定</span>
+                <span class="step-arrow">→</span>
+                <div class="step-number">3</div>
+                <span>対象選択</span>
+                <span class="step-arrow">→</span>
+                <div class="step-number">4</div>
+                <span>生成実行</span>
+            </div>
+        </div>
+
         <!-- ヘッダー -->
         <div class="smiley-header text-center">
             <h1><i class="fas fa-file-invoice-dollar me-3"></i>請求書生成</h1>
@@ -222,9 +379,9 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                         <div class="col-md-6">
                             <h6 class="mb-3"><i class="fas fa-layer-group me-2"></i>請求書タイプ</h6>
                             
-                            <div class="invoice-type-card" data-type="company_bulk" onclick="selectInvoiceType('company_bulk')">
+                            <div class="invoice-type-card" data-type="company">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="invoice_type" id="type_company" value="company_bulk" checked>
+                                    <input class="form-check-input" type="radio" name="billing_type" id="type_company" value="company" checked>
                                     <label class="form-check-label" for="type_company">
                                         <strong>企業一括請求</strong>
                                         <small class="d-block text-muted">配達先企業ごとに一括で請求書を生成</small>
@@ -232,9 +389,9 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                                 </div>
                             </div>
 
-                            <div class="invoice-type-card" data-type="department_bulk" onclick="selectInvoiceType('department_bulk')">
+                            <div class="invoice-type-card" data-type="department">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="invoice_type" id="type_department" value="department_bulk">
+                                    <input class="form-check-input" type="radio" name="billing_type" id="type_department" value="department">
                                     <label class="form-check-label" for="type_department">
                                         <strong>部署別一括請求</strong>
                                         <small class="d-block text-muted">部署ごとに分けて請求書を生成</small>
@@ -242,9 +399,9 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                                 </div>
                             </div>
 
-                            <div class="invoice-type-card" data-type="individual" onclick="selectInvoiceType('individual')">
+                            <div class="invoice-type-card" data-type="individual">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="invoice_type" id="type_individual" value="individual">
+                                    <input class="form-check-input" type="radio" name="billing_type" id="type_individual" value="individual">
                                     <label class="form-check-label" for="type_individual">
                                         <strong>個人請求</strong>
                                         <small class="d-block text-muted">利用者個人ごとに請求書を生成</small>
@@ -252,9 +409,9 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                                 </div>
                             </div>
 
-                            <div class="invoice-type-card" data-type="mixed" onclick="selectInvoiceType('mixed')">
+                            <div class="invoice-type-card" data-type="mixed">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="invoice_type" id="type_mixed" value="mixed">
+                                    <input class="form-check-input" type="radio" name="billing_type" id="type_mixed" value="mixed">
                                     <label class="form-check-label" for="type_mixed">
                                         <strong>混合請求（自動判定）</strong>
                                         <small class="d-block text-muted">企業設定に基づいて最適な請求方法を自動選択</small>
@@ -270,17 +427,17 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                             <div class="row mb-3">
                                 <div class="col-md-6">
                                     <label for="period_start" class="form-label">開始日</label>
-                                    <input type="text" class="form-control" id="period_start" name="period_start" required>
+                                    <input type="date" class="form-control" id="period_start" name="period_start" required>
                                 </div>
                                 <div class="col-md-6">
                                     <label for="period_end" class="form-label">終了日</label>
-                                    <input type="text" class="form-control" id="period_end" name="period_end" required>
+                                    <input type="date" class="form-control" id="period_end" name="period_end" required>
                                 </div>
                             </div>
 
                             <div class="mb-3">
                                 <label for="due_date" class="form-label">支払期限日</label>
-                                <input type="text" class="form-control" id="due_date" name="due_date" placeholder="自動計算（期間終了日+30日）">
+                                <input type="date" class="form-control" id="due_date" name="due_date" placeholder="自動計算（期間終了日+30日）">
                             </div>
 
                             <div class="mb-3">
@@ -295,11 +452,11 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                             <!-- 期間テンプレート -->
                             <div class="mb-3">
                                 <label class="form-label">期間テンプレート</label>
-                                <div class="btn-group d-block" role="group">
-                                    <button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="setPeriodTemplate('this_month')">今月</button>
-                                    <button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="setPeriodTemplate('last_month')">先月</button>
-                                    <button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="setPeriodTemplate('this_quarter')">今四半期</button>
-                                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="setPeriodTemplate('custom_range')">過去30日</button>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <button type="button" class="btn btn-outline-primary btn-template" onclick="setPeriodTemplate('this_month')">今月</button>
+                                    <button type="button" class="btn btn-outline-primary btn-template" onclick="setPeriodTemplate('last_month')">先月</button>
+                                    <button type="button" class="btn btn-outline-primary btn-template" onclick="setPeriodTemplate('this_quarter')">今四半期</button>
+                                    <button type="button" class="btn btn-outline-primary btn-template" onclick="setPeriodTemplate('custom_range')">過去30日</button>
                                 </div>
                             </div>
                         </div>
@@ -331,10 +488,7 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                                     </div>
                                     <div class="mt-3">
                                         <button type="button" class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="selectAll()">全選択</button>
-                                        <button type="button" class="btn btn-outline-secondary btn-sm w-100 mb-2" onclick="selectNone()">選択解除</button>
-                                        <button type="button" class="btn btn-preview btn-sm w-100" onclick="showPreview()">
-                                            <i class="fas fa-eye me-1"></i>プレビュー
-                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm w-100" onclick="selectNone()">選択解除</button>
                                     </div>
                                 </div>
                             </div>
@@ -350,577 +504,484 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                             </span>
                         </button>
                     </div>
+
+                    <!-- プログレス表示 -->
+                    <div class="progress-container" id="progressContainer">
+                        <h6><i class="fas fa-clock me-2"></i>処理中...</h6>
+                        <div class="progress mb-3" style="height: 30px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 role="progressbar" style="width: 0%" id="progressBar">0%</div>
+                        </div>
+                        <p class="text-center text-muted" id="progressMessage">請求書を生成しています...</p>
+                    </div>
+
+                    <!-- 結果表示 -->
+                    <div class="result-container" id="resultContainer">
+                        <div id="resultContent"></div>
+                    </div>
                 </form>
             </div>
         </div>
+    </div>
 
-        <!-- プログレスバー -->
-        <div class="progress-container">
-            <div class="card">
-                <div class="card-body">
-                    <h6><i class="fas fa-cog fa-spin me-2"></i>請求書生成中...</h6>
-                    <div class="progress">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
-                    </div>
-                    <small class="text-muted">しばらくお待ちください</small>
-                </div>
+    <!-- 確認モーダル -->
+    <div class="confirmation-modal" id="confirmationModal">
+        <div class="confirmation-content">
+            <div class="confirmation-title">
+                ⚠️ 本当に請求書を作成しますか？
+            </div>
+            
+            <div class="confirmation-details" id="confirmationDetails">
+                <!-- JavaScript で動的に設定 -->
+            </div>
+            
+            <div style="color: #666; margin: 20px 0; font-size: 16px;">
+                この操作は取り消すことができません。<br>
+                内容をよく確認してから実行してください。
+            </div>
+            
+            <div class="confirmation-buttons">
+                <button class="btn btn-success btn-confirm" onclick="executeGeneration()">
+                    <i class="fas fa-check me-2"></i>はい、作成する
+                </button>
+                <button class="btn btn-danger btn-confirm" onclick="closeConfirmation()">
+                    <i class="fas fa-times me-2"></i>いいえ、やめる
+                </button>
             </div>
         </div>
-
-        <!-- 結果表示エリア -->
-        <div class="result-container"></div>
     </div>
 
     <!-- JavaScript -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ja.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script>
-        // グローバル変数
-        let currentInvoiceType = 'company_bulk';
+        let selectedTargets = [];
+        let allTargets = [];
+        let currentBillingType = 'company';
 
+        // 初期化
         document.addEventListener('DOMContentLoaded', function() {
-            // Flatpickr初期化（日付選択）
+            initializeDatePickers();
+            loadTargets();
+            setupEventListeners();
+            setPeriodTemplate('this_month'); // デフォルトで今月を設定
+        });
+
+        // 日付ピッカー初期化
+        function initializeDatePickers() {
             flatpickr("#period_start", {
                 dateFormat: "Y-m-d",
-                defaultDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-                locale: "ja"
+                maxDate: "today"
             });
             
             flatpickr("#period_end", {
                 dateFormat: "Y-m-d",
-                defaultDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0),
-                locale: "ja"
+                maxDate: "today"
             });
             
             flatpickr("#due_date", {
                 dateFormat: "Y-m-d",
-                locale: "ja"
+                minDate: "today"
             });
-
-            // 初期読み込み
-            updateInvoiceTypeSelection('company_bulk');
-            loadTargetList('company_bulk');
-
-            // フォーム送信処理
-            document.getElementById('invoiceGenerationForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                generateInvoices();
-            });
-        });
-
-        /**
-         * 請求書タイプ選択
-         */
-        function selectInvoiceType(type) {
-            // ラジオボタンを選択
-            document.getElementById('type_' + type.split('_')[0]).checked = true;
-            
-            // 視覚的更新
-            updateInvoiceTypeSelection(type);
-            
-            // 対象一覧読み込み
-            loadTargetList(type);
-            
-            currentInvoiceType = type;
         }
 
-        /**
-         * 請求書タイプ選択の視覚的更新
-         */
-        function updateInvoiceTypeSelection(selectedType) {
-            // すべてのカードから選択状態を削除
+        // イベントリスナー設定
+        function setupEventListeners() {
+            // 請求書タイプ変更
+            document.querySelectorAll('input[name="billing_type"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    currentBillingType = this.value;
+                    updateInvoiceTypeCards();
+                    loadTargets();
+                });
+            });
+
+            // 請求書タイプカードクリック
+            document.querySelectorAll('.invoice-type-card').forEach(card => {
+                card.addEventListener('click', function() {
+                    const type = this.getAttribute('data-type');
+                    const radio = document.getElementById('type_' + type);
+                    if (radio) {
+                        radio.checked = true;
+                        currentBillingType = type;
+                        updateInvoiceTypeCards();
+                        loadTargets();
+                    }
+                });
+            });
+
+            // フォーム送信
+            document.getElementById('invoiceGenerationForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                showConfirmation();
+            });
+        }
+
+        // 請求書タイプカードの表示更新
+        function updateInvoiceTypeCards() {
             document.querySelectorAll('.invoice-type-card').forEach(card => {
                 card.classList.remove('selected');
             });
             
-            // 選択されたカードに選択状態を追加
-            const selectedCard = document.querySelector(`[data-type="${selectedType}"]`);
+            const selectedCard = document.querySelector(`.invoice-type-card[data-type="${currentBillingType}"]`);
             if (selectedCard) {
                 selectedCard.classList.add('selected');
             }
         }
 
-        /**
-         * 対象一覧の読み込み
-         */
-        async function loadTargetList(invoiceType) {
+        // 対象一覧読み込み
+        function loadTargets() {
             const targetList = document.getElementById('targetList');
-            const selectedCount = document.getElementById('selectedCount');
-            const totalCount = document.getElementById('totalCount');
-            
-            try {
-                // ローディング表示
-                targetList.innerHTML = '<div class="text-center text-muted"><i class="fas fa-spinner fa-spin me-2"></i>読み込み中...</div>';
-                
-                // APIエンドポイントの決定
-                let action = '';
-                switch (invoiceType) {
-                    case 'company_bulk':
-                        action = 'companies';
-                        break;
-                    case 'department_bulk':
-                        action = 'departments';
-                        break;
-                    case 'individual':
-                        action = 'users';
-                        break;
-                    case 'mixed':
-                        action = 'mixed';
-                        break;
-                    default:
-                        action = 'companies';
-                }
-                
-                // API呼び出し
-                const response = await fetch(`../api/invoice_targets.php?action=${action}&invoice_type=${invoiceType}`);
-                const data = await response.json();
-                
-                if (!data.success) {
-                    throw new Error(data.message || 'データの読み込みに失敗しました');
-                }
-                
-                // データの取得
-                const targets = data.data[action] || data.data.companies || [];
-                const total = data.data.total_count || 0;
-                
-                // HTML生成
-                let html = '';
-                if (targets.length === 0) {
-                    html = '<div class="text-center text-muted">対象データがありません</div>';
-                } else {
-                    targets.forEach(target => {
-                        const targetInfo = getTargetInfo(target, invoiceType);
-                        html += `
-                            <div class="target-item" data-id="${target.id}" onclick="toggleTargetSelection(this)">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <div class="form-check">
-                                            <input class="form-check-input target-checkbox" type="checkbox" id="target_${target.id}" value="${target.id}">
-                                            <label class="form-check-label" for="target_${target.id}">
-                                                <strong>${targetInfo.name}</strong>
-                                                ${targetInfo.subtitle ? `<br><small class="text-muted">${targetInfo.subtitle}</small>` : ''}
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="text-end">
-                                        <div class="small text-muted">
-                                            ${targetInfo.stats}
-                                        </div>
-                                    </div>
-                                </div>
+            targetList.innerHTML = '<div class="text-center text-muted"><i class="fas fa-spinner fa-spin me-2"></i>読み込み中...</div>';
+
+            let action = 'companies';
+            if (currentBillingType === 'department') action = 'departments';
+            if (currentBillingType === 'individual') action = 'users';
+            if (currentBillingType === 'mixed') action = 'mixed';
+
+            fetch(`../api/invoice_targets.php?action=${action}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displayTargets(data.data);
+                    } else {
+                        throw new Error(data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading targets:', error);
+                    targetList.innerHTML = `<div class="alert alert-danger">対象一覧の読み込みに失敗しました。<br>${error.message}</div>`;
+                });
+        }
+
+        // 対象一覧表示
+        function displayTargets(data) {
+            const targetList = document.getElementById('targetList');
+            const targets = data.companies || data.departments || data.users || [];
+            allTargets = targets;
+            selectedTargets = [];
+
+            if (targets.length === 0) {
+                targetList.innerHTML = '<div class="alert alert-warning">対象が見つかりません。</div>';
+                updateSelectionStats();
+                return;
+            }
+
+            let html = '';
+            targets.forEach(target => {
+                const name = target.company_name || target.department_name || target.user_name || '名前不明';
+                const subtitle = getTargetSubtitle(target);
+                const stats = getTargetStats(target);
+
+                html += `
+                    <div class="target-item" data-id="${target.id}" onclick="toggleTarget(${target.id})">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>${name}</strong>
+                                ${subtitle ? `<small class="d-block text-muted">${subtitle}</small>` : ''}
                             </div>
-                        `;
-                    });
-                }
-                
-                targetList.innerHTML = html;
-                
-                // 統計情報更新
-                totalCount.textContent = total;
-                selectedCount.textContent = '0';
-                
-            } catch (error) {
-                console.error('対象一覧の読み込みエラー:', error);
-                targetList.innerHTML = `
-                    <div class="text-center text-danger">
-                        <i class="fas fa-exclamation-triangle me-2"></i>
-                        対象一覧の読み込みに失敗しました<br>
-                        <small>${error.message}</small>
+                            <div class="text-end">
+                                <small class="text-muted">${stats}</small>
+                            </div>
+                        </div>
                     </div>
                 `;
-            }
+            });
+
+            targetList.innerHTML = html;
+            updateSelectionStats();
         }
 
-        /**
-         * 対象情報の整形
-         */
-        function getTargetInfo(target, invoiceType) {
-            let name = '';
-            let subtitle = '';
-            let stats = '';
-            
-            switch (invoiceType) {
-                case 'company_bulk':
-                case 'mixed':
-                    name = target.company_name;
-                    subtitle = `企業コード: ${target.company_code}`;
-                    stats = `利用者: ${target.user_count || 0}名 | 最近90日: ${target.recent_orders || 0}件 (¥${Number(target.recent_amount || 0).toLocaleString()})`;
-                    if (invoiceType === 'mixed') {
-                        stats += ` | ${target.billing_type_label || '企業一括'}`;
-                    }
-                    break;
-                    
-                case 'department_bulk':
-                    name = target.department_name;
-                    subtitle = `${target.company_name} - ${target.department_code}`;
-                    stats = `利用者: ${target.user_count || 0}名 | 最近90日: ${target.recent_orders || 0}件 (¥${Number(target.recent_amount || 0).toLocaleString()})`;
-                    break;
-                    
-                case 'individual':
-                    name = target.user_name;
-                    subtitle = `${target.company_name || ''} ${target.department_name || ''} (${target.user_code})`;
-                    stats = `最近90日: ${target.recent_orders || 0}件 (¥${Number(target.recent_amount || 0).toLocaleString()})`;
-                    if (target.last_order_date) {
-                        stats += ` | 最終注文: ${target.last_order_date}`;
-                    }
-                    break;
+        // 対象のサブタイトル取得
+        function getTargetSubtitle(target) {
+            if (target.company_name && target.department_name) {
+                return `${target.company_name} - ${target.department_name}`;
             }
-            
-            return { name, subtitle, stats };
+            if (target.company_name && target.user_name) {
+                return target.company_name;
+            }
+            return target.company_code || target.department_code || target.user_code || '';
         }
 
-        /**
-         * 対象選択の切り替え
-         */
-        function toggleTargetSelection(element) {
-            const checkbox = element.querySelector('.target-checkbox');
-            checkbox.checked = !checkbox.checked;
-            
-            if (checkbox.checked) {
-                element.classList.add('selected');
+        // 対象の統計情報取得
+        function getTargetStats(target) {
+            const userCount = target.user_count || 0;
+            const recentOrders = target.recent_orders || 0;
+            const recentAmount = target.recent_amount || 0;
+
+            if (currentBillingType === 'individual') {
+                return `${recentOrders}件 (¥${Number(recentAmount).toLocaleString()})`;
             } else {
-                element.classList.remove('selected');
+                return `${userCount}名 ${recentOrders}件 (¥${Number(recentAmount).toLocaleString()})`;
             }
-            
-            updateSelectionCount();
         }
 
-        /**
-         * 選択数の更新
-         */
-        function updateSelectionCount() {
-            const selectedCheckboxes = document.querySelectorAll('.target-checkbox:checked');
-            document.getElementById('selectedCount').textContent = selectedCheckboxes.length;
+        // 対象選択切り替え
+        function toggleTarget(targetId) {
+            const index = selectedTargets.indexOf(targetId);
+            const targetElement = document.querySelector(`[data-id="${targetId}"]`);
+
+            if (index > -1) {
+                selectedTargets.splice(index, 1);
+                targetElement.classList.remove('selected');
+            } else {
+                selectedTargets.push(targetId);
+                targetElement.classList.add('selected');
+            }
+
+            updateSelectionStats();
         }
 
-        /**
-         * 全選択
-         */
+        // 全選択
         function selectAll() {
-            document.querySelectorAll('.target-checkbox').forEach(checkbox => {
-                checkbox.checked = true;
-                checkbox.closest('.target-item').classList.add('selected');
+            selectedTargets = allTargets.map(target => target.id);
+            document.querySelectorAll('.target-item').forEach(item => {
+                item.classList.add('selected');
             });
-            updateSelectionCount();
+            updateSelectionStats();
         }
 
-        /**
-         * 選択解除
-         */
+        // 選択解除
         function selectNone() {
-            document.querySelectorAll('.target-checkbox').forEach(checkbox => {
-                checkbox.checked = false;
-                checkbox.closest('.target-item').classList.remove('selected');
+            selectedTargets = [];
+            document.querySelectorAll('.target-item').forEach(item => {
+                item.classList.remove('selected');
             });
-            updateSelectionCount();
+            updateSelectionStats();
         }
 
-        /**
-         * 期間テンプレートの設定
-         */
-        function setPeriodTemplate(template) {
-            const periodStart = document.getElementById('period_start');
-            const periodEnd = document.getElementById('period_end');
+        // 選択状況更新
+        function updateSelectionStats() {
+            document.getElementById('selectedCount').textContent = selectedTargets.length;
+            document.getElementById('totalCount').textContent = allTargets.length;
+        }
+
+        // 期間テンプレート設定
+        function setPeriodTemplate(templateType) {
             const today = new Date();
             let startDate, endDate;
-            
-            switch (template) {
+
+            switch (templateType) {
                 case 'this_month':
                     startDate = new Date(today.getFullYear(), today.getMonth(), 1);
                     endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
                     break;
-                    
                 case 'last_month':
                     startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
                     endDate = new Date(today.getFullYear(), today.getMonth(), 0);
                     break;
-                    
                 case 'this_quarter':
                     const quarter = Math.floor(today.getMonth() / 3);
                     startDate = new Date(today.getFullYear(), quarter * 3, 1);
                     endDate = new Date(today.getFullYear(), quarter * 3 + 3, 0);
                     break;
-                    
                 case 'custom_range':
+                    endDate = new Date(today);
                     startDate = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-                    endDate = today;
                     break;
+                default:
+                    return;
             }
-            
-            if (startDate && endDate) {
-                periodStart.value = startDate.toISOString().split('T')[0];
-                periodEnd.value = endDate.toISOString().split('T')[0];
-            }
+
+            document.getElementById('period_start').value = formatDate(startDate);
+            document.getElementById('period_end').value = formatDate(endDate);
+
+            // 支払期限日を自動計算（終了日+30日）
+            const dueDate = new Date(endDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+            document.getElementById('due_date').value = formatDate(dueDate);
         }
 
-        /**
-         * 請求書生成処理
-         */
-        async function generateInvoices() {
-    const generateButton = document.getElementById('generateButton');
-    const loadingSpinner = generateButton.querySelector('.loading-spinner');
-    const progressContainer = document.querySelector('.progress-container');
-    const resultContainer = document.querySelector('.result-container');
-    
-    try {
-        // バリデーション
-        const selectedTargets = Array.from(document.querySelectorAll('.target-checkbox:checked')).map(cb => cb.value);
-        if (selectedTargets.length === 0) {
-            alert('請求書を生成する対象を選択してください。');
-            return;
-        }
-        
-        const formData = new FormData(document.getElementById('invoiceGenerationForm'));
-        const periodStart = formData.get('period_start');
-        const periodEnd = formData.get('period_end');
-        
-        if (!periodStart || !periodEnd) {
-            alert('請求期間を入力してください。');
-            return;
-        }
-        
-        // UI状態更新
-        generateButton.disabled = true;
-        loadingSpinner.style.display = 'inline';
-        progressContainer.style.display = 'block';
-        resultContainer.style.display = 'none';
-        
-        // 既存のinvoices.php APIに合わせたFormData作成
-        const apiFormData = new FormData();
-        apiFormData.append('action', 'generate');
-        apiFormData.append('invoice_type', formData.get('invoice_type'));
-        apiFormData.append('period_start', periodStart);
-        apiFormData.append('period_end', periodEnd);
-        
-        if (formData.get('due_date')) {
-            apiFormData.append('due_date', formData.get('due_date'));
-        }
-        
-        // 対象IDsを配列として追加
-        selectedTargets.forEach(id => {
-            apiFormData.append('target_ids[]', id);
-        });
-        
-        if (formData.get('auto_pdf')) {
-            apiFormData.append('auto_generate_pdf', '1');
-        }
-        
-        // 既存のinvoices.php APIを呼び出し（修正済み）
-        const response = await fetch('../api/invoices.php', {
-            method: 'POST',
-            body: apiFormData
-        });
-        
-        const result = await response.json();
-        
-        if (!result.success) {
-            throw new Error(result.error || result.message || '請求書の生成に失敗しました');
-        }
-        
-        // 成功時の処理
-        showResult(true, result.message, result.data);
-        
-        // フォームリセット（オプション）
-        if (confirm('請求書の生成が完了しました。画面をリセットしますか？')) {
-            location.reload();
-        }
-        
-    } catch (error) {
-        console.error('請求書生成エラー:', error);
-        showResult(false, error.message);
-    } finally {
-        // UI状態復元
-        generateButton.disabled = false;
-        loadingSpinner.style.display = 'none';
-        progressContainer.style.display = 'none';
-    }
-}
-
-        /**
-         * 結果表示
-         */
-        function showResult(success, message, data = null) {
-            const resultContainer = document.querySelector('.result-container');
-            const resultClass = success ? 'result-success' : 'result-error';
-            const iconClass = success ? 'fas fa-check-circle text-success' : 'fas fa-exclamation-circle text-danger';
-            
-            let resultHtml = `
-                <div class="card ${resultClass}">
-                    <div class="card-body">
-                        <h5><i class="${iconClass} me-2"></i>${success ? '生成完了' : 'エラー'}</h5>
-                        <p class="mb-0">${message}</p>
-            `;
-            
-            if (success && data) {
-                resultHtml += `
-                        <div class="mt-3">
-                            <div class="row text-center">
-                                <div class="col-md-3">
-                                    <div class="fw-bold text-primary">${data.generated_invoices || 0}</div>
-                                    <div class="small text-muted">生成件数</div>
-                                </div>
-                                <div class="col-md-3">
-                                    <div class="fw-bold text-success">¥${Number(data.total_amount || 0).toLocaleString()}</div>
-                                    <div class="small text-muted">総金額</div>
-                                </div>
-                                <div class="col-md-3">
-                                    <div class="fw-bold text-info">${(data.invoice_ids || []).length}</div>
-                                    <div class="small text-muted">請求書ID数</div>
-                                </div>
-                                <div class="col-md-3">
-                                    <a href="../pages/invoices.php" class="btn btn-outline-primary btn-sm">
-                                        <i class="fas fa-list me-1"></i>一覧確認
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                `;
-            }
-            
-            resultHtml += `
-                    </div>
-                </div>
-            `;
-            
-            resultContainer.innerHTML = resultHtml;
-            resultContainer.style.display = 'block';
-            
-            // 結果エリアにスクロール
-            resultContainer.scrollIntoView({ behavior: 'smooth' });
+        // 日付フォーマット
+        function formatDate(date) {
+            return date.getFullYear() + '-' + 
+                   String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+                   String(date.getDate()).padStart(2, '0');
         }
 
-        /**
-         * プレビュー機能
-         */
-        async function showPreview() {
-            const selectedTargets = Array.from(document.querySelectorAll('.target-checkbox:checked')).map(cb => cb.value);
-            const periodStart = document.getElementById('period_start').value;
-            const periodEnd = document.getElementById('period_end').value;
-            
-            if (selectedTargets.length === 0 || !periodStart || !periodEnd) {
-                alert('対象と期間を選択してください。');
+        // 確認モーダル表示
+        function showConfirmation() {
+            const formData = new FormData(document.getElementById('invoiceGenerationForm'));
+            const periodStart = formData.get('period_start');
+            const periodEnd = formData.get('period_end');
+            const dueDate = formData.get('due_date');
+            const autoPdf = formData.get('auto_pdf') ? 'あり' : 'なし';
+
+            // 入力値検証
+            if (!periodStart || !periodEnd) {
+                alert('請求期間の開始日と終了日を入力してください。');
                 return;
             }
-            
-            try {
-                let targetType = '';
-                switch (currentInvoiceType) {
-                    case 'company_bulk':
-                    case 'mixed':
-                        targetType = 'companies';
-                        break;
-                    case 'department_bulk':
-                        targetType = 'departments';
-                        break;
-                    case 'individual':
-                        targetType = 'users';
-                        break;
-                }
-                
-                const response = await fetch(`../api/invoice_targets.php?action=preview&target_type=${targetType}&target_ids=${JSON.stringify(selectedTargets)}&period_start=${periodStart}&period_end=${periodEnd}`);
-                const data = await response.json();
-                
-                if (!data.success) {
-                    throw new Error(data.message || 'プレビューの取得に失敗しました');
-                }
-                
-                // プレビューモーダル表示
-                showPreviewModal(data.data);
-                
-            } catch (error) {
-                console.error('プレビューエラー:', error);
-                alert('プレビューの表示に失敗しました: ' + error.message);
+
+            if (selectedTargets.length === 0) {
+                alert('請求対象を選択してください。');
+                return;
             }
+
+            const billingTypeNames = {
+                'company': '企業一括請求',
+                'department': '部署別請求',
+                'individual': '個人請求',
+                'mixed': '混合請求（自動判定）'
+            };
+
+            const confirmationDetails = `
+                <div><strong>請求書タイプ:</strong> ${billingTypeNames[currentBillingType]}</div>
+                <div><strong>対象:</strong> ${selectedTargets.length}件</div>
+                <div><strong>期間:</strong> ${periodStart} ～ ${periodEnd}</div>
+                <div><strong>支払期限:</strong> ${dueDate || '自動計算'}</div>
+                <div><strong>PDF自動生成:</strong> ${autoPdf}</div>
+            `;
+
+            document.getElementById('confirmationDetails').innerHTML = confirmationDetails;
+            document.getElementById('confirmationModal').style.display = 'flex';
         }
 
-        /**
-         * プレビューモーダル表示
-         */
-        function showPreviewModal(previewData) {
-            // 既存のモーダルを削除
-            const existingModal = document.getElementById('previewModal');
-            if (existingModal) {
-                existingModal.remove();
-            }
+        // 確認モーダル閉じる
+        function closeConfirmation() {
+            document.getElementById('confirmationModal').style.display = 'none';
+        }
+
+        // 請求書生成実行
+        function executeGeneration() {
+            closeConfirmation();
             
-            // モーダルHTML生成
-            let tableRows = '';
-            previewData.preview.forEach(item => {
-                tableRows += `
-                    <tr>
-                        <td>${item.target_name}</td>
-                        <td><span class="badge bg-secondary">${item.target_type}</span></td>
-                        <td class="text-end">${item.order_count}件</td>
-                        <td class="text-end">¥${Number(item.total_amount).toLocaleString()}</td>
-                        <td class="text-end">${item.user_count}名</td>
-                    </tr>
-                `;
+            const formData = new FormData(document.getElementById('invoiceGenerationForm'));
+            const generateButton = document.getElementById('generateButton');
+            const progressContainer = document.getElementById('progressContainer');
+            const resultContainer = document.getElementById('resultContainer');
+
+            // UI状態更新
+            generateButton.disabled = true;
+            generateButton.querySelector('.loading-spinner').style.display = 'inline';
+            progressContainer.style.display = 'block';
+            resultContainer.style.display = 'none';
+
+            // リクエストデータ準備
+            const requestData = {
+                billing_type: currentBillingType,
+                period_start: formData.get('period_start'),
+                period_end: formData.get('period_end'),
+                due_date: formData.get('due_date'),
+                auto_generate_pdf: formData.get('auto_pdf') ? true : false,
+                company_ids: currentBillingType === 'company' ? selectedTargets : undefined,
+                department_ids: currentBillingType === 'department' ? selectedTargets : undefined,
+                user_ids: currentBillingType === 'individual' ? selectedTargets : undefined,
+                invoice_date: new Date().toISOString().split('T')[0]
+            };
+
+            // プログレス更新開始
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress += 10;
+                updateProgress(progress, '請求書を生成しています...');
+                if (progress >= 90) {
+                    clearInterval(progressInterval);
+                }
+            }, 200);
+
+            // API呼び出し
+            fetch('../api/invoices.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                clearInterval(progressInterval);
+                updateProgress(100, '完了しました！');
+                
+                setTimeout(() => {
+                    showResult(data);
+                    resetForm();
+                }, 1000);
+            })
+            .catch(error => {
+                clearInterval(progressInterval);
+                console.error('Error generating invoices:', error);
+                showResult({
+                    success: false,
+                    message: '請求書生成中にエラーが発生しました: ' + error.message
+                });
+                resetForm();
             });
+        }
+
+        // プログレス更新
+        function updateProgress(percent, message) {
+            const progressBar = document.getElementById('progressBar');
+            const progressMessage = document.getElementById('progressMessage');
             
-            const modalHtml = `
-                <div class="modal fade" id="previewModal" tabindex="-1">
-                    <div class="modal-dialog modal-lg">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title"><i class="fas fa-eye me-2"></i>請求書生成プレビュー</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            progressBar.style.width = percent + '%';
+            progressBar.textContent = percent + '%';
+            progressMessage.textContent = message;
+        }
+
+        // 結果表示
+        function showResult(data) {
+            const resultContainer = document.getElementById('resultContainer');
+            const resultContent = document.getElementById('resultContent');
+            
+            let html = '';
+            if (data.success) {
+                html = `
+                    <div class="result-success">
+                        <h5><i class="fas fa-check-circle me-2"></i>請求書生成完了</h5>
+                        <p><strong>${data.message || '請求書が正常に生成されました'}</strong></p>
+                        ${data.data ? `
+                            <div class="mt-3">
+                                <div>生成件数: ${data.data.total_invoices || data.generated_invoices || 0}件</div>
+                                <div>総金額: ¥${Number(data.data.total_amount || data.total_amount || 0).toLocaleString()}</div>
                             </div>
-                            <div class="modal-body">
-                                <div class="row mb-3">
-                                    <div class="col-md-3 text-center">
-                                        <div class="h4 text-primary">${previewData.summary.total_targets}</div>
-                                        <div class="small text-muted">対象数</div>
-                                    </div>
-                                    <div class="col-md-3 text-center">
-                                        <div class="h4 text-success">¥${Number(previewData.summary.total_amount).toLocaleString()}</div>
-                                        <div class="small text-muted">総請求額</div>
-                                    </div>
-                                    <div class="col-md-3 text-center">
-                                        <div class="h4 text-info">${previewData.summary.total_orders}</div>
-                                        <div class="small text-muted">総注文数</div>
-                                    </div>
-                                    <div class="col-md-3 text-center">
-                                        <div class="h4 text-warning">${previewData.summary.total_users}</div>
-                                        <div class="small text-muted">利用者数</div>
-                                    </div>
-                                </div>
-                                
-                                <div class="table-responsive">
-                                    <table class="table table-sm">
-                                        <thead>
-                                            <tr>
-                                                <th>対象名</th>
-                                                <th>タイプ</th>
-                                                <th class="text-end">注文数</th>
-                                                <th class="text-end">請求額</th>
-                                                <th class="text-end">利用者</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            ${tableRows}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
-                                <button type="button" class="btn btn-primary" data-bs-dismiss="modal" onclick="generateInvoices()">
-                                    <i class="fas fa-magic me-1"></i>請求書生成実行
-                                </button>
-                            </div>
+                        ` : ''}
+                        <div class="mt-3">
+                            <a href="../pages/invoices.php" class="btn btn-primary">
+                                <i class="fas fa-list me-2"></i>請求書一覧を確認
+                            </a>
                         </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else {
+                html = `
+                    <div class="result-error">
+                        <h5><i class="fas fa-exclamation-triangle me-2"></i>エラーが発生しました</h5>
+                        <p><strong>${data.message || '請求書生成に失敗しました'}</strong></p>
+                        <div class="mt-3">
+                            <button class="btn btn-warning" onclick="location.reload()">
+                                <i class="fas fa-redo me-2"></i>ページを更新
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
             
-            // 新しいモーダルを追加
-            document.body.insertAdjacentHTML('beforeend', modalHtml);
-            
-            // モーダル表示
-            const modal = new bootstrap.Modal(document.getElementById('previewModal'));
-            modal.show();
+            resultContent.innerHTML = html;
+            resultContainer.style.display = 'block';
         }
+
+        // フォームリセット
+        function resetForm() {
+            const generateButton = document.getElementById('generateButton');
+            const progressContainer = document.getElementById('progressContainer');
+            
+            generateButton.disabled = false;
+            generateButton.querySelector('.loading-spinner').style.display = 'none';
+            
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+            }, 2000);
+        }
+
+        // エラーハンドリング
+        window.addEventListener('error', function(e) {
+            console.error('JavaScript Error:', e.error);
+        });
+
+        // 未処理のPromise拒否をキャッチ
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('Unhandled Promise Rejection:', e.reason);
+        });
     </script>
 </body>
 </html>
