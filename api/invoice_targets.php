@@ -1,275 +1,228 @@
 <?php
 /**
- * 請求書生成対象取得API（修正版）
- * invoice_generate.phpが期待するパラメータ形式に対応
+ * 請求書対象選択API
+ * 請求書生成時の対象（企業・部署・利用者）一覧を取得
+ * 
+ * @author Claude
+ * @version 1.0.0
+ * @created 2025-09-12
  */
 
-require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../classes/Database.php';
-require_once __DIR__ . '/../classes/SecurityHelper.php';
+// 出力バッファリング制御
+ob_start();
 
-header('Content-Type: application/json; charset=utf-8');
-header('Cache-Control: no-cache, must-revalidate');
-
-// セキュリティヘッダー設定
-SecurityHelper::setSecurityHeaders();
+// エラー出力制御
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
 
 try {
+    // 必要なファイルを読み込み
+    require_once __DIR__ . '/../config/database.php';
+    require_once __DIR__ . '/../classes/Database.php';
+    
+    // ヘッダー設定
+    header('Content-Type: application/json; charset=utf-8');
+    
+    // 出力バッファをクリア
+    ob_clean();
+    
+    // Databaseインスタンス取得（Singletonパターン）
     $db = Database::getInstance();
     
-    if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-        throw new Exception('GETメソッドのみ対応しています');
-    }
-    
-    // invoice_generate.phpからのパラメータに対応
-    $invoiceType = $_GET['invoice_type'] ?? 'company_bulk';
-    $searchTerm = $_GET['search'] ?? '';
-    
-    $result = [];
-    
-    switch ($invoiceType) {
-        case 'company_bulk':
-            // 企業一括請求用：企業一覧
-            $sql = "SELECT 
-                        c.id,
-                        c.company_code,
-                        c.company_name,
-                        c.payment_method,
-                        c.billing_method,
-                        (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.is_active = 1) as user_count,
-                        (SELECT COUNT(*) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE u.company_id = c.id AND o.delivery_date >= CURDATE() - INTERVAL 90 DAY) as recent_orders,
-                        (SELECT COALESCE(SUM(o.total_amount), 0) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE u.company_id = c.id AND o.delivery_date >= CURDATE() - INTERVAL 90 DAY) as recent_amount
-                    FROM companies c 
-                    WHERE c.is_active = 1";
-            
-            $params = [];
-            if (!empty($searchTerm)) {
-                $sql .= " AND (c.company_name LIKE ? OR c.company_code LIKE ?)";
-                $params[] = "%{$searchTerm}%";
-                $params[] = "%{$searchTerm}%";
-            }
-            
-            $sql .= " ORDER BY c.company_name";
-            
-            $companies = $db->fetchAll($sql, $params);
-            
-            // invoice_generate.phpが期待する形式に変換
-            $targets = [];
-            foreach ($companies as $company) {
-                $targets[] = [
-                    'id' => (int)$company['id'],
-                    'type' => 'company',
-                    'code' => $company['company_code'],
-                    'name' => $company['company_name'],
-                    'description' => "利用者: {$company['user_count']}名 | 注文: {$company['recent_orders']}件",
-                    'user_count' => (int)$company['user_count'],
-                    'order_count' => (int)$company['recent_orders'],
-                    'total_amount' => (float)$company['recent_amount']
-                ];
-            }
-            
-            $result = [
-                'success' => true,
-                'data' => [
-                    'targets' => $targets,
-                    'total_count' => count($targets),
-                    'invoice_type' => 'company_bulk'
-                ]
-            ];
-            break;
-            
-        case 'department_bulk':
-            // 部署別請求用：部署一覧
-            $sql = "SELECT 
-                        d.id,
-                        d.department_code,
-                        d.department_name,
-                        d.company_id,
-                        c.company_name,
-                        d.separate_billing,
-                        (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id AND u.is_active = 1) as user_count,
-                        (SELECT COUNT(*) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE u.department_id = d.id AND o.delivery_date >= CURDATE() - INTERVAL 90 DAY) as recent_orders,
-                        (SELECT COALESCE(SUM(o.total_amount), 0) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE u.department_id = d.id AND o.delivery_date >= CURDATE() - INTERVAL 90 DAY) as recent_amount
-                    FROM departments d 
-                    INNER JOIN companies c ON d.company_id = c.id
-                    WHERE d.is_active = 1";
-            
-            $params = [];
-            if (!empty($searchTerm)) {
-                $sql .= " AND (d.department_name LIKE ? OR d.department_code LIKE ? OR c.company_name LIKE ?)";
-                $params[] = "%{$searchTerm}%";
-                $params[] = "%{$searchTerm}%";
-                $params[] = "%{$searchTerm}%";
-            }
-            
-            $sql .= " ORDER BY c.company_name, d.department_name";
-            
-            $departments = $db->fetchAll($sql, $params);
-            
-            $targets = [];
-            foreach ($departments as $dept) {
-                $targets[] = [
-                    'id' => (int)$dept['id'],
-                    'type' => 'department',
-                    'code' => $dept['department_code'],
-                    'name' => $dept['department_name'],
-                    'description' => "{$dept['company_name']} | 利用者: {$dept['user_count']}名 | 注文: {$dept['recent_orders']}件",
-                    'company_name' => $dept['company_name'],
-                    'user_count' => (int)$dept['user_count'],
-                    'order_count' => (int)$dept['recent_orders'],
-                    'total_amount' => (float)$dept['recent_amount']
-                ];
-            }
-            
-            $result = [
-                'success' => true,
-                'data' => [
-                    'targets' => $targets,
-                    'total_count' => count($targets),
-                    'invoice_type' => 'department_bulk'
-                ]
-            ];
-            break;
-            
-        case 'individual':
-            // 個人請求用：利用者一覧
-            $sql = "SELECT 
-                        u.id,
-                        u.user_code,
-                        u.user_name,
-                        u.company_id,
-                        u.department_id,
-                        c.company_name,
-                        d.department_name,
-                        u.payment_method,
-                        (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id AND o.delivery_date >= CURDATE() - INTERVAL 90 DAY) as recent_orders,
-                        (SELECT COALESCE(SUM(o.total_amount), 0) FROM orders o WHERE o.user_id = u.id AND o.delivery_date >= CURDATE() - INTERVAL 90 DAY) as recent_amount,
-                        (SELECT MAX(o.delivery_date) FROM orders o WHERE o.user_id = u.id) as last_order_date
-                    FROM users u 
-                    LEFT JOIN companies c ON u.company_id = c.id
-                    LEFT JOIN departments d ON u.department_id = d.id
-                    WHERE u.is_active = 1";
-            
-            $params = [];
-            if (!empty($searchTerm)) {
-                $sql .= " AND (u.user_name LIKE ? OR u.user_code LIKE ? OR c.company_name LIKE ?)";
-                $params[] = "%{$searchTerm}%";
-                $params[] = "%{$searchTerm}%";
-                $params[] = "%{$searchTerm}%";
-            }
-            
-            $sql .= " ORDER BY c.company_name, d.department_name, u.user_name";
-            
-            $users = $db->fetchAll($sql, $params);
-            
-            $targets = [];
-            foreach ($users as $user) {
-                $description = $user['company_name'];
-                if (!empty($user['department_name'])) {
-                    $description .= " - " . $user['department_name'];
-                }
-                $description .= " | 注文: {$user['recent_orders']}件";
-                if ($user['recent_amount'] > 0) {
-                    $description .= " | 金額: ¥" . number_format($user['recent_amount']);
-                }
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        
+        $invoiceType = $_GET['invoice_type'] ?? 'company_bulk';
+        
+        switch ($invoiceType) {
+            case 'company_bulk':
+                // 企業一括請求の対象取得
+                $sql = "SELECT 
+                            c.id,
+                            'company' as type,
+                            c.company_code as code,
+                            c.company_name as name,
+                            CONCAT(
+                                '利用者: ', COALESCE(user_stats.user_count, 0), '名 | ',
+                                '注文: ', COALESCE(order_stats.order_count, 0), '件'
+                            ) as description,
+                            COALESCE(user_stats.user_count, 0) as user_count,
+                            COALESCE(order_stats.order_count, 0) as order_count,
+                            COALESCE(order_stats.total_amount, 0) as total_amount
+                        FROM companies c
+                        LEFT JOIN (
+                            SELECT 
+                                company_id, 
+                                COUNT(*) as user_count 
+                            FROM users 
+                            WHERE is_active = 1 
+                            GROUP BY company_id
+                        ) user_stats ON c.id = user_stats.company_id
+                        LEFT JOIN (
+                            SELECT 
+                                u.company_id,
+                                COUNT(o.id) as order_count,
+                                SUM(o.quantity * o.unit_price) as total_amount
+                            FROM orders o
+                            JOIN users u ON o.user_id = u.id
+                            WHERE o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
+                            AND o.is_active = 1
+                            GROUP BY u.company_id
+                        ) order_stats ON c.id = order_stats.company_id
+                        WHERE c.is_active = 1
+                        ORDER BY c.company_name";
+                break;
                 
-                $targets[] = [
-                    'id' => (int)$user['id'],
-                    'type' => 'user',
-                    'code' => $user['user_code'],
-                    'name' => $user['user_name'],
-                    'description' => $description,
-                    'company_name' => $user['company_name'],
-                    'department_name' => $user['department_name'],
-                    'order_count' => (int)$user['recent_orders'],
-                    'total_amount' => (float)$user['recent_amount'],
-                    'last_order_date' => $user['last_order_date']
-                ];
-            }
-            
-            $result = [
-                'success' => true,
-                'data' => [
-                    'targets' => $targets,
-                    'total_count' => count($targets),
-                    'invoice_type' => 'individual'
+            case 'department_bulk':
+                // 部署別一括請求の対象取得
+                $sql = "SELECT 
+                            d.id,
+                            'department' as type,
+                            d.department_code as code,
+                            CONCAT(c.company_name, ' - ', d.department_name) as name,
+                            CONCAT(
+                                '利用者: ', COALESCE(user_stats.user_count, 0), '名 | ',
+                                '注文: ', COALESCE(order_stats.order_count, 0), '件'
+                            ) as description,
+                            COALESCE(user_stats.user_count, 0) as user_count,
+                            COALESCE(order_stats.order_count, 0) as order_count,
+                            COALESCE(order_stats.total_amount, 0) as total_amount
+                        FROM departments d
+                        JOIN companies c ON d.company_id = c.id
+                        LEFT JOIN (
+                            SELECT 
+                                department_id, 
+                                COUNT(*) as user_count 
+                            FROM users 
+                            WHERE is_active = 1 
+                            GROUP BY department_id
+                        ) user_stats ON d.id = user_stats.department_id
+                        LEFT JOIN (
+                            SELECT 
+                                u.department_id,
+                                COUNT(o.id) as order_count,
+                                SUM(o.quantity * o.unit_price) as total_amount
+                            FROM orders o
+                            JOIN users u ON o.user_id = u.id
+                            WHERE o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
+                            AND o.is_active = 1
+                            AND u.department_id IS NOT NULL
+                            GROUP BY u.department_id
+                        ) order_stats ON d.id = order_stats.department_id
+                        WHERE d.is_active = 1 AND c.is_active = 1
+                        ORDER BY c.company_name, d.department_name";
+                break;
+                
+            case 'individual':
+                // 個人請求の対象取得
+                $sql = "SELECT 
+                            u.id,
+                            'user' as type,
+                            u.user_code as code,
+                            CONCAT(u.user_name, ' (', c.company_name, ')') as name,
+                            CONCAT(
+                                '注文: ', COALESCE(order_stats.order_count, 0), '件 | ',
+                                '合計: ¥', FORMAT(COALESCE(order_stats.total_amount, 0), 0)
+                            ) as description,
+                            1 as user_count,
+                            COALESCE(order_stats.order_count, 0) as order_count,
+                            COALESCE(order_stats.total_amount, 0) as total_amount
+                        FROM users u
+                        JOIN companies c ON u.company_id = c.id
+                        LEFT JOIN (
+                            SELECT 
+                                user_id,
+                                COUNT(id) as order_count,
+                                SUM(quantity * unit_price) as total_amount
+                            FROM orders 
+                            WHERE delivery_date >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
+                            AND is_active = 1
+                            GROUP BY user_id
+                        ) order_stats ON u.id = order_stats.user_id
+                        WHERE u.is_active = 1 AND c.is_active = 1
+                        ORDER BY c.company_name, u.user_name";
+                break;
+                
+            case 'mixed':
+                // 混合請求（企業一括と同じデータを返す）
+                $sql = "SELECT 
+                            c.id,
+                            'company' as type,
+                            c.company_code as code,
+                            c.company_name as name,
+                            '自動判定対象' as description,
+                            COALESCE(user_stats.user_count, 0) as user_count,
+                            COALESCE(order_stats.order_count, 0) as order_count,
+                            COALESCE(order_stats.total_amount, 0) as total_amount
+                        FROM companies c
+                        LEFT JOIN (
+                            SELECT 
+                                company_id, 
+                                COUNT(*) as user_count 
+                            FROM users 
+                            WHERE is_active = 1 
+                            GROUP BY company_id
+                        ) user_stats ON c.id = user_stats.company_id
+                        LEFT JOIN (
+                            SELECT 
+                                u.company_id,
+                                COUNT(o.id) as order_count,
+                                SUM(o.quantity * o.unit_price) as total_amount
+                            FROM orders o
+                            JOIN users u ON o.user_id = u.id
+                            WHERE o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
+                            AND o.is_active = 1
+                            GROUP BY u.company_id
+                        ) order_stats ON c.id = order_stats.company_id
+                        WHERE c.is_active = 1
+                        ORDER BY c.company_name";
+                break;
+                
+            default:
+                throw new Exception('不正な請求書タイプです: ' . $invoiceType);
+        }
+        
+        $stmt = $db->prepare($sql);
+        $stmt->execute();
+        $targets = $stmt->fetchAll();
+        
+        // 統計情報の計算
+        $totalTargets = count($targets);
+        $totalUsers = array_sum(array_column($targets, 'user_count'));
+        $totalOrders = array_sum(array_column($targets, 'order_count'));
+        $totalAmount = array_sum(array_column($targets, 'total_amount'));
+        
+        echo json_encode([
+            'success' => true,
+            'data' => [
+                'targets' => $targets,
+                'statistics' => [
+                    'total_targets' => $totalTargets,
+                    'total_users' => $totalUsers,
+                    'total_orders' => $totalOrders,
+                    'total_amount' => $totalAmount,
+                    'invoice_type' => $invoiceType
                 ]
-            ];
-            break;
-            
-        case 'mixed':
-            // 混合請求用：企業設定に基づく自動判定
-            $sql = "SELECT 
-                        c.id,
-                        c.company_code,
-                        c.company_name,
-                        c.billing_method,
-                        c.payment_method,
-                        CASE 
-                            WHEN c.billing_method = 'company' THEN '企業一括'
-                            WHEN c.billing_method = 'department' THEN '部署別'
-                            WHEN c.billing_method = 'individual' THEN '個人別'
-                            ELSE '混合'
-                        END as billing_type_label,
-                        (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.is_active = 1) as user_count,
-                        (SELECT COUNT(*) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE u.company_id = c.id AND o.delivery_date >= CURDATE() - INTERVAL 90 DAY) as recent_orders,
-                        (SELECT COALESCE(SUM(o.total_amount), 0) FROM orders o INNER JOIN users u ON o.user_id = u.id WHERE u.company_id = c.id AND o.delivery_date >= CURDATE() - INTERVAL 90 DAY) as recent_amount
-                    FROM companies c 
-                    WHERE c.is_active = 1";
-            
-            $params = [];
-            if (!empty($searchTerm)) {
-                $sql .= " AND (c.company_name LIKE ? OR c.company_code LIKE ?)";
-                $params[] = "%{$searchTerm}%";
-                $params[] = "%{$searchTerm}%";
-            }
-            
-            $sql .= " ORDER BY c.company_name";
-            
-            $companies = $db->fetchAll($sql, $params);
-            
-            $targets = [];
-            foreach ($companies as $company) {
-                $targets[] = [
-                    'id' => (int)$company['id'],
-                    'type' => 'mixed',
-                    'code' => $company['company_code'],
-                    'name' => $company['company_name'],
-                    'description' => "請求方式: {$company['billing_type_label']} | 利用者: {$company['user_count']}名 | 注文: {$company['recent_orders']}件",
-                    'preferred_type' => $company['billing_method'],
-                    'user_count' => (int)$company['user_count'],
-                    'order_count' => (int)$company['recent_orders'],
-                    'total_amount' => (float)$company['recent_amount']
-                ];
-            }
-            
-            $result = [
-                'success' => true,
-                'data' => [
-                    'targets' => $targets,
-                    'total_count' => count($targets),
-                    'invoice_type' => 'mixed'
-                ]
-            ];
-            break;
-            
-        default:
-            throw new Exception('サポートされていない請求書タイプです: ' . $invoiceType);
+            ]
+        ], JSON_UNESCAPED_UNICODE);
+        
+    } else {
+        throw new Exception('サポートされていないHTTPメソッドです: ' . $_SERVER['REQUEST_METHOD']);
     }
-    
-    echo json_encode($result, JSON_UNESCAPED_UNICODE);
     
 } catch (Exception $e) {
+    // エラー時の出力制御
+    ob_clean();
+    
     http_response_code(500);
     echo json_encode([
         'success' => false,
-        'error' => [
-            'message' => $e->getMessage(),
-            'code' => $e->getCode()
-        ],
-        'data' => [
-            'targets' => [],
-            'total_count' => 0
-        ]
+        'message' => $e->getMessage(),
+        'error_type' => get_class($e),
+        'file' => basename($e->getFile()),
+        'line' => $e->getLine()
     ], JSON_UNESCAPED_UNICODE);
+} finally {
+    // 出力バッファ終了
+    ob_end_flush();
 }
+?>
