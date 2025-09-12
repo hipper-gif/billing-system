@@ -191,17 +191,13 @@ try {
         $totalOrders = array_sum(array_column($targets, 'order_count'));
         $totalAmount = array_sum(array_column($targets, 'total_amount'));
         
+        // 仕様書通りのレスポンス形式
         echo json_encode([
             'success' => true,
             'data' => [
                 'targets' => $targets,
-                'statistics' => [
-                    'total_targets' => $totalTargets,
-                    'total_users' => $totalUsers,
-                    'total_orders' => $totalOrders,
-                    'total_amount' => $totalAmount,
-                    'invoice_type' => $invoiceType
-                ]
+                'total_count' => $totalTargets,
+                'invoice_type' => $invoiceType
             ]
         ], JSON_UNESCAPED_UNICODE);
         
@@ -210,19 +206,25 @@ try {
     }
     
 } catch (Exception $e) {
-    // エラー時の出力制御
+    // エラー時の出力制御（仕様書通り）
     ob_clean();
     
     http_response_code(500);
+    
+    // 仕様書通りのエラーレスポンス形式
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage(),
-        'error_type' => get_class($e),
-        'file' => basename($e->getFile()),
-        'line' => $e->getLine()
+        'error' => [
+            'message' => $e->getMessage(),
+            'code' => 500
+        ],
+        'data' => [
+            'targets' => [],
+            'total_count' => 0
+        ]
     ], JSON_UNESCAPED_UNICODE);
 } finally {
-    // 出力バッファ終了
+    // 出力バッファ終了（仕様書通り）
     ob_end_flush();
 }
 ?>
