@@ -1,949 +1,797 @@
 <?php
 /**
- * PaymentManager.php - 支払い管理システム
- * 支払い記録・未回収金額管理・統計情報・アラート機能を提供
- * 
- * @author Smiley配食事業システム
- * @version 2.0 - Fatal Error解決・根本対応版
- * @date 2025-09-04
+ * PaymentManager.php - 満額入金リスト対応版
+ * 月末締めの入金管理を劇的に効率化する機能を実装
  */
 
+require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/Database.php';
 
-class PaymentManager 
-{
+class PaymentManager {
     private $db;
-    
+
     public function __construct() {
-        $this->db = Database::getInstance()->getConnection();
+        $this->db = Database::getInstance();
     }
-    
+
     /**
-     * 支払い方法の選択肢配列を取得
-     * @return array 支払い方法配列
+     * 満額入金リスト取得 - 月末締め特化
+     * 期限切れ、期限間近、通常案件を優先度順で返却
      */
-    public static function getPaymentMethods() {
-        return [
-            'cash' => '現金',
-            'bank_transfer' => '銀行振込', 
-            'account_debit' => '口座引き落とし',
-            'paypay' => 'PayPay',
-            'mixed' => '混合',
-            'other' => 'その他'
-        ];
-    }
-    
-    /**
-     * 支払い一覧を取得（フィルター・ページネーション対応）
-     * @param array $filters フィルター条件
-     * @param int $page ページ番号
-     * @param int $limit 1ページあたりの件数
-     * @return array 支払い一覧データ
-     */
-    public function getPaymentsList($filters = [], $page = 1, $limit = 50) {
+    public function getFullPaymentList($filters = []) {
         try {
-            // WHERE条件とパラメータの構築
-            $whereConditions = ['1=1'];
-            $params = [];
-            
-            // フィルター条件の構築
-            if (!empty($filters['company_id'])) {
-                $whereConditions[] = 'c.id = :company_id';
-                $params[':company_id'] = $filters['company_id'];
-            }
-            
-            if (!empty($filters['payment_method'])) {
-                $whereConditions[] = 'p.payment_method = :payment_method';
-                $params[':payment_method'] = $filters['payment_method'];
-            }
-            
-            if (!empty($filters['date_from'])) {
-                $whereConditions[] = 'p.payment_date >= :date_from';
-                $params[':date_from'] = $filters['date_from'];
-            }
-            
-            if (!empty($filters['date_to'])) {
-                $whereConditions[] = 'p.payment_date <= :date_to';
-                $params[':date_to'] = $filters['date_to'];
-            }
-            
-            if (!empty($filters['invoice_id'])) {
-                $whereConditions[] = 'p.invoice_id = :invoice_id';
-                $params[':invoice_id'] = $filters['invoice_id'];
-            }
-            
-            // OFFSET計算
-            $offset = ($page - 1) * $limit;
-            
-            // メインクエリ
-            $sql = "SELECT 
-                        p.id,
-                        p.invoice_id,
-                        p.payment_date,
-                        p.amount,
-                        p.payment_method,
-                        p.payment_status,
-                        p.reference_number,
-                        p.notes,
-                        p.created_at,
-                        i.invoice_number,
-                        i.total_amount as invoice_amount,
-                        i.status as invoice_status,
-                        c.company_name,
-                        c.company_code,
-                        u.user_name,
-                        u.user_code
-                    FROM payments p
-                    LEFT JOIN invoices i ON p.invoice_id = i.id
-                    LEFT JOIN users u ON i.user_id = u.id 
-                    LEFT JOIN companies c ON u.company_id = c.id
-                    WHERE " . implode(' AND ', $whereConditions) . "
-                    ORDER BY p.payment_date DESC, p.created_at DESC
-                    LIMIT :limit OFFSET :offset";
-            
+            $sql = "
+                SELECT 
+                    i.id as invoice_id,
+                    i.invoice_number,
+                    i.total_amount,
+                    i.due_date,
+                    i.status,
+                    i.created_at as invoice_date,
+                    c.company_name,
+                    c.contact_phone,
+                    c.payment_method as preferred_payment_method,
+                    c.is_vip,
+                    CASE 
+                        WHEN i.status = 'paid' THEN 0
+                        WHEN i.due_date < CURDATE() THEN 
+                            (DATEDIFF(CURDATE(), i.due_date) * 10) + (i.total_amount / 1000)
+                        WHEN DATEDIFF(i.due_date, CURDATE()) <= 7 THEN 
+                            (8 - DATEDIFF(i.due_date, CURDATE())) * 5 + (i.total_amount / 2000)
+                        ELSE 1
+                    END as priority_score,
+                    CASE 
+                        WHEN i.status = 'paid' THEN 'paid'
+                        WHEN i.due_date < CURDATE() THEN 'overdue'
+                        WHEN DATEDIFF(i.due_date, CURDATE()) <= 7 THEN 'due_soon'
+                        ELSE 'pending'
+                    END as payment_status,
+                    DATEDIFF(CURDATE(), i.due_date) as overdue_days,
+                    DATEDIFF(i.due_date, CURDATE()) as days_until_due,
+                    COALESCE(SUM(p.payment_amount), 0) as paid_amount,
+                    (i.total_amount - COALESCE(SUM(p.payment_amount), 0)) as outstanding_amount
+                FROM invoices i
+                LEFT JOIN companies c ON i.company_id = c.id
+                LEFT JOIN payments p ON i.id = p.invoice_id AND p.payment_status = 'completed'
+                WHERE i.is_active = 1
+                    AND (i.total_amount - COALESCE(SUM(p.payment_amount), 0)) > 0
+                GROUP BY i.id
+                ORDER BY priority_score DESC, i.total_amount DESC
+            ";
+
             $stmt = $this->db->prepare($sql);
-            
-            // パラメータバインド
-            foreach ($params as $key => $value) {
-                $stmt->bindValue($key, $value);
-            }
-            $stmt->bindValue(':limit', (int)$limit, PDO::PARAM_INT);
-            $stmt->bindValue(':offset', (int)$offset, PDO::PARAM_INT);
-            
             $stmt->execute();
-            $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            // 総件数取得
-            $countSql = "SELECT COUNT(*) as total
-                        FROM payments p
-                        LEFT JOIN invoices i ON p.invoice_id = i.id
-                        LEFT JOIN users u ON i.user_id = u.id 
-                        LEFT JOIN companies c ON u.company_id = c.id
-                        WHERE " . implode(' AND ', $whereConditions);
-            
-            $countStmt = $this->db->prepare($countSql);
-            foreach ($params as $key => $value) {
-                $countStmt->bindValue($key, $value);
-            }
-            $countStmt->execute();
-            $totalCount = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
-            
-            // 支払い方法の日本語変換
-            $paymentMethods = self::getPaymentMethods();
-            foreach ($payments as &$payment) {
-                $payment['payment_method_label'] = $paymentMethods[$payment['payment_method']] ?? $payment['payment_method'];
-                $payment['amount_formatted'] = number_format($payment['amount']);
-            }
-            
+            $invoices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // 統計情報を計算
+            $stats = $this->calculatePaymentListStats($invoices);
+
             return [
-                'payments' => $payments,
-                'pagination' => [
-                    'current_page' => $page,
-                    'total_count' => (int)$totalCount,
-                    'total_pages' => ceil($totalCount / $limit),
-                    'limit' => $limit,
-                    'has_next' => $page < ceil($totalCount / $limit),
-                    'has_prev' => $page > 1
+                'success' => true,
+                'data' => [
+                    'invoices' => $invoices,
+                    'stats' => $stats
                 ]
             ];
-            
+
         } catch (Exception $e) {
-            error_log("PaymentManager::getPaymentsList Error: " . $e->getMessage());
+            error_log("満額入金リスト取得エラー: " . $e->getMessage());
             return [
-                'payments' => [],
-                'pagination' => [
-                    'current_page' => 1,
-                    'total_count' => 0,
-                    'total_pages' => 0,
-                    'limit' => $limit,
-                    'has_next' => false,
-                    'has_prev' => false
-                ]
+                'success' => false,
+                'error' => '入金リストの取得中にエラーが発生しました: ' . $e->getMessage()
             ];
         }
     }
-    
+
     /**
-     * 未回収金額を取得（フィルター対応）
-     * @param array $filters フィルター条件
-     * @return array 未回収金額データ
+     * 満額入金記録 - ワンクリック処理
      */
-    public function getOutstandingAmounts($filters = []) {
-        try {
-            $whereConditions = ['i.status IN ("issued", "overdue", "partial_paid")'];
-            $params = [];
-            
-            // フィルター条件の構築
-            if (!empty($filters['company_id'])) {
-                $whereConditions[] = 'c.id = :company_id';
-                $params[':company_id'] = $filters['company_id'];
-            }
-            
-            if (!empty($filters['overdue_only'])) {
-                $whereConditions[] = 'i.due_date < CURDATE()';
-            }
-            
-            $sql = "SELECT 
-                        c.id as company_id,
-                        c.company_name,
-                        c.company_code,
-                        COUNT(DISTINCT i.id) as outstanding_invoices,
-                        SUM(i.total_amount) as total_invoiced,
-                        COALESCE(SUM(paid.amount), 0) as total_paid,
-                        (SUM(i.total_amount) - COALESCE(SUM(paid.amount), 0)) as outstanding_amount,
-                        COUNT(CASE WHEN i.due_date < CURDATE() THEN 1 END) as overdue_count,
-                        AVG(DATEDIFF(CURDATE(), i.due_date)) as avg_days_overdue
-                    FROM invoices i
-                    JOIN users u ON i.user_id = u.id
-                    JOIN companies c ON u.company_id = c.id
-                    LEFT JOIN (
-                        SELECT invoice_id, SUM(amount) as amount
-                        FROM payments 
-                        WHERE payment_status = 'completed'
-                        GROUP BY invoice_id
-                    ) paid ON i.id = paid.invoice_id
-                    WHERE " . implode(' AND ', $whereConditions) . "
-                    GROUP BY c.id, c.company_name, c.company_code
-                    HAVING outstanding_amount > 0
-                    ORDER BY outstanding_amount DESC";
-            
-            $stmt = $this->db->prepare($sql);
-            foreach ($params as $key => $value) {
-                $stmt->bindValue($key, $value);
-            }
-            $stmt->execute();
-            
-            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            // 金額フォーマット処理
-            foreach ($results as &$result) {
-                $result['total_invoiced_formatted'] = number_format($result['total_invoiced']);
-                $result['total_paid_formatted'] = number_format($result['total_paid']);
-                $result['outstanding_amount_formatted'] = number_format($result['outstanding_amount']);
-                $result['avg_days_overdue'] = round($result['avg_days_overdue'], 1);
-            }
-            
-            return $results;
-            
-        } catch (Exception $e) {
-            error_log("PaymentManager::getOutstandingAmounts Error: " . $e->getMessage());
-            return [];
-        }
-    }
-    
-    /**
-     * 支払い統計情報を取得
-     * @param string $period 期間('current_month', 'last_month', 'current_year')
-     * @return array 統計データ
-     */
-    public function getPaymentStatistics($period = 'current_month') {
-        try {
-            $dateCondition = '';
-            switch ($period) {
-                case 'current_month':
-                    $dateCondition = "DATE_FORMAT(p.payment_date, '%Y-%m') = DATE_FORMAT(CURDATE(), '%Y-%m')";
-                    break;
-                case 'last_month':
-                    $dateCondition = "DATE_FORMAT(p.payment_date, '%Y-%m') = DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%Y-%m')";
-                    break;
-                case 'current_year':
-                    $dateCondition = "YEAR(p.payment_date) = YEAR(CURDATE())";
-                    break;
-                default:
-                    $dateCondition = "1=1";
-            }
-            
-            // 基本統計
-            $basicStatsSql = "SELECT 
-                                COUNT(*) as total_payments,
-                                SUM(p.amount) as total_amount,
-                                AVG(p.amount) as average_amount,
-                                MIN(p.amount) as min_amount,
-                                MAX(p.amount) as max_amount,
-                                COUNT(DISTINCT c.id) as companies_count
-                              FROM payments p
-                              LEFT JOIN invoices i ON p.invoice_id = i.id
-                              LEFT JOIN users u ON i.user_id = u.id
-                              LEFT JOIN companies c ON u.company_id = c.id
-                              WHERE p.payment_status = 'completed' AND {$dateCondition}";
-            
-            $stmt = $this->db->prepare($basicStatsSql);
-            $stmt->execute();
-            $basicStats = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            // 支払い方法別統計
-            $methodStatsSql = "SELECT 
-                                  p.payment_method,
-                                  COUNT(*) as count,
-                                  SUM(p.amount) as total_amount,
-                                  ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM payments WHERE payment_status = 'completed' AND {$dateCondition}), 1) as percentage
-                               FROM payments p
-                               WHERE p.payment_status = 'completed' AND {$dateCondition}
-                               GROUP BY p.payment_method
-                               ORDER BY total_amount DESC";
-            
-            $stmt = $this->db->prepare($methodStatsSql);
-            $stmt->execute();
-            $methodStats = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            // 支払い方法ラベル追加
-            $paymentMethods = self::getPaymentMethods();
-            foreach ($methodStats as &$stat) {
-                $stat['method_label'] = $paymentMethods[$stat['payment_method']] ?? $stat['payment_method'];
-                $stat['total_amount_formatted'] = number_format($stat['total_amount']);
-            }
-            
-            // 日別統計（当月のみ）
-            $dailyStatsSql = "SELECT 
-                                DATE(p.payment_date) as payment_date,
-                                COUNT(*) as count,
-                                SUM(p.amount) as amount
-                              FROM payments p
-                              WHERE p.payment_status = 'completed' 
-                                AND DATE_FORMAT(p.payment_date, '%Y-%m') = DATE_FORMAT(CURDATE(), '%Y-%m')
-                              GROUP BY DATE(p.payment_date)
-                              ORDER BY payment_date";
-            
-            $stmt = $this->db->prepare($dailyStatsSql);
-            $stmt->execute();
-            $dailyStats = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            return [
-                'basic' => array_merge($basicStats, [
-                    'total_amount_formatted' => number_format($basicStats['total_amount'] ?? 0),
-                    'average_amount_formatted' => number_format($basicStats['average_amount'] ?? 0),
-                    'min_amount_formatted' => number_format($basicStats['min_amount'] ?? 0),
-                    'max_amount_formatted' => number_format($basicStats['max_amount'] ?? 0)
-                ]),
-                'by_method' => $methodStats,
-                'daily' => $dailyStats,
-                'period' => $period
-            ];
-            
-        } catch (Exception $e) {
-            error_log("PaymentManager::getPaymentStatistics Error: " . $e->getMessage());
-            return [
-                'basic' => ['total_payments' => 0, 'total_amount' => 0],
-                'by_method' => [],
-                'daily' => [],
-                'period' => $period
-            ];
-        }
-    }
-    
-    /**
-     * 支払いアラート情報を取得
-     * @return array アラート情報
-     */
-    public function getPaymentAlerts() {
-        try {
-            $alerts = [];
-            
-            // 期限超過請求書アラート
-            $overdueSql = "SELECT 
-                              COUNT(*) as count,
-                              SUM(i.total_amount - COALESCE(paid.amount, 0)) as amount
-                           FROM invoices i
-                           LEFT JOIN (
-                               SELECT invoice_id, SUM(amount) as amount
-                               FROM payments WHERE payment_status = 'completed'
-                               GROUP BY invoice_id
-                           ) paid ON i.id = paid.invoice_id
-                           WHERE i.status IN ('issued', 'overdue') 
-                             AND i.due_date < CURDATE()
-                             AND (i.total_amount - COALESCE(paid.amount, 0)) > 0";
-            
-            $stmt = $this->db->prepare($overdueSql);
-            $stmt->execute();
-            $overdueData = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($overdueData['count'] > 0) {
-                $alerts[] = [
-                    'type' => 'danger',
-                    'title' => '期限超過',
-                    'message' => "期限超過の請求書が{$overdueData['count']}件あります（未回収額：" . number_format($overdueData['amount']) . "円）",
-                    'count' => $overdueData['count'],
-                    'amount' => $overdueData['amount']
-                ];
-            }
-            
-            // 期限間近アラート（7日以内）
-            $dueSoonSql = "SELECT 
-                              COUNT(*) as count,
-                              SUM(i.total_amount - COALESCE(paid.amount, 0)) as amount
-                           FROM invoices i
-                           LEFT JOIN (
-                               SELECT invoice_id, SUM(amount) as amount
-                               FROM payments WHERE payment_status = 'completed'
-                               GROUP BY invoice_id
-                           ) paid ON i.id = paid.invoice_id
-                           WHERE i.status IN ('issued') 
-                             AND i.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
-                             AND (i.total_amount - COALESCE(paid.amount, 0)) > 0";
-            
-            $stmt = $this->db->prepare($dueSoonSql);
-            $stmt->execute();
-            $dueSoonData = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($dueSoonData['count'] > 0) {
-                $alerts[] = [
-                    'type' => 'warning',
-                    'title' => '期限間近',
-                    'message' => "7日以内に期限を迎える請求書が{$dueSoonData['count']}件あります（金額：" . number_format($dueSoonData['amount']) . "円）",
-                    'count' => $dueSoonData['count'],
-                    'amount' => $dueSoonData['amount']
-                ];
-            }
-            
-            // 高額未回収アラート（10万円以上）
-            $highAmountSql = "SELECT 
-                                 c.company_name,
-                                 SUM(i.total_amount - COALESCE(paid.amount, 0)) as amount
-                              FROM invoices i
-                              JOIN users u ON i.user_id = u.id
-                              JOIN companies c ON u.company_id = c.id
-                              LEFT JOIN (
-                                  SELECT invoice_id, SUM(amount) as amount
-                                  FROM payments WHERE payment_status = 'completed'
-                                  GROUP BY invoice_id
-                              ) paid ON i.id = paid.invoice_id
-                              WHERE i.status IN ('issued', 'overdue')
-                                AND (i.total_amount - COALESCE(paid.amount, 0)) > 0
-                              GROUP BY c.id, c.company_name
-                              HAVING amount >= 100000
-                              ORDER BY amount DESC";
-            
-            $stmt = $this->db->prepare($highAmountSql);
-            $stmt->execute();
-            $highAmountData = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            foreach ($highAmountData as $data) {
-                $alerts[] = [
-                    'type' => 'info',
-                    'title' => '高額未回収',
-                    'message' => "{$data['company_name']}の未回収額が" . number_format($data['amount']) . "円です",
-                    'company' => $data['company_name'],
-                    'amount' => $data['amount']
-                ];
-            }
-            
-            return $alerts;
-            
-        } catch (Exception $e) {
-            error_log("PaymentManager::getPaymentAlerts Error: " . $e->getMessage());
-            return [];
-        }
-    }
-    
-    /**
-     * 支払いを記録
-     * @param int $invoiceId 請求書ID
-     * @param array $paymentData 支払いデータ
-     * @return array 処理結果
-     */
-    public function recordPayment($invoiceId, $paymentData) {
+    public function recordFullPayment($invoiceId, $paymentData) {
         try {
             $this->db->beginTransaction();
-            
-            // 請求書の存在確認
-            $invoiceCheckSql = "SELECT id, total_amount, status FROM invoices WHERE id = :invoice_id";
-            $stmt = $this->db->prepare($invoiceCheckSql);
-            $stmt->bindValue(':invoice_id', $invoiceId, PDO::PARAM_INT);
-            $stmt->execute();
-            $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
-            
+
+            // 請求書情報を取得
+            $invoice = $this->getInvoiceDetails($invoiceId);
             if (!$invoice) {
-                throw new Exception("請求書が見つかりません (ID: {$invoiceId})");
+                throw new Exception('請求書が見つかりません');
             }
-            
-            // 支払い記録の挿入
-            $insertSql = "INSERT INTO payments (
-                            invoice_id, payment_date, amount, payment_method,
-                            payment_status, reference_number, notes, created_by
-                          ) VALUES (
-                            :invoice_id, :payment_date, :amount, :payment_method,
-                            :payment_status, :reference_number, :notes, :created_by
-                          )";
-            
-            $stmt = $this->db->prepare($insertSql);
-            $stmt->bindValue(':invoice_id', $invoiceId, PDO::PARAM_INT);
-            $stmt->bindValue(':payment_date', $paymentData['payment_date']);
-            $stmt->bindValue(':amount', $paymentData['amount'], PDO::PARAM_STR);
-            $stmt->bindValue(':payment_method', $paymentData['payment_method']);
-            $stmt->bindValue(':payment_status', $paymentData['payment_status'] ?? 'completed');
-            $stmt->bindValue(':reference_number', $paymentData['reference_number'] ?? '');
-            $stmt->bindValue(':notes', $paymentData['notes'] ?? '');
-            $stmt->bindValue(':created_by', $paymentData['created_by'] ?? 'system');
-            
-            $stmt->execute();
-            $paymentId = $this->db->lastInsertId();
-            
-            // 請求書ステータス更新の判定
-            $totalPaidSql = "SELECT COALESCE(SUM(amount), 0) as total_paid 
-                            FROM payments 
-                            WHERE invoice_id = :invoice_id AND payment_status = 'completed'";
-            $stmt = $this->db->prepare($totalPaidSql);
-            $stmt->bindValue(':invoice_id', $invoiceId, PDO::PARAM_INT);
-            $stmt->execute();
-            $totalPaid = $stmt->fetch(PDO::FETCH_ASSOC)['total_paid'];
-            
-            // ステータス判定と更新
-            $newStatus = 'issued';
-            if ($totalPaid >= $invoice['total_amount']) {
-                $newStatus = 'paid';
-            } elseif ($totalPaid > 0) {
-                $newStatus = 'partial_paid';
+
+            // 既に支払済みかチェック
+            if ($invoice['status'] === 'paid') {
+                throw new Exception('この請求書は既に支払済みです');
             }
+
+            // 未払い金額を計算
+            $outstandingAmount = $this->calculateOutstandingAmount($invoiceId);
             
-            $updateInvoiceSql = "UPDATE invoices SET status = :status, updated_at = CURRENT_TIMESTAMP WHERE id = :invoice_id";
-            $stmt = $this->db->prepare($updateInvoiceSql);
-            $stmt->bindValue(':status', $newStatus);
-            $stmt->bindValue(':invoice_id', $invoiceId, PDO::PARAM_INT);
-            $stmt->execute();
-            
-            $this->db->commit();
-            
-            return [
-                'success' => true,
-                'payment_id' => $paymentId,
+            // 満額入金として記録
+            $paymentId = $this->insertPaymentRecord([
                 'invoice_id' => $invoiceId,
-                'amount' => $paymentData['amount'],
-                'new_status' => $newStatus,
-                'total_paid' => $totalPaid,
-                'remaining_amount' => max(0, $invoice['total_amount'] - $totalPaid),
-                'message' => '支払いを正常に記録しました'
-            ];
-            
-        } catch (Exception $e) {
-            $this->db->rollback();
-            error_log("PaymentManager::recordPayment Error: " . $e->getMessage());
-            return [
-                'success' => false,
-                'message' => 'エラーが発生しました: ' . $e->getMessage()
-            ];
-        }
-    }
-    
-    /**
-     * 支払いをキャンセル
-     * @param int $paymentId 支払いID
-     * @param string $reason キャンセル理由
-     * @return array 処理結果
-     */
-    public function cancelPayment($paymentId, $reason) {
-        try {
-            $this->db->beginTransaction();
-            
-            // 支払い情報の取得
-            $paymentSql = "SELECT id, invoice_id, amount, payment_status FROM payments WHERE id = :payment_id";
-            $stmt = $this->db->prepare($paymentSql);
-            $stmt->bindValue(':payment_id', $paymentId, PDO::PARAM_INT);
-            $stmt->execute();
-            $payment = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if (!$payment) {
-                throw new Exception("支払い記録が見つかりません (ID: {$paymentId})");
-            }
-            
-            if ($payment['payment_status'] === 'cancelled') {
-                throw new Exception("この支払いは既にキャンセル済みです");
-            }
-            
-            // 支払いステータス更新
-            $updateSql = "UPDATE payments 
-                         SET payment_status = 'cancelled', 
-                             notes = CONCAT(COALESCE(notes, ''), '\n[キャンセル理由: {$reason}]'),
-                             updated_at = CURRENT_TIMESTAMP 
-                         WHERE id = :payment_id";
-            
-            $stmt = $this->db->prepare($updateSql);
-            $stmt->bindValue(':payment_id', $paymentId, PDO::PARAM_INT);
-            $stmt->execute();
-            
-            // 請求書ステータスの再計算
-            $totalPaidSql = "SELECT 
-                                i.total_amount,
-                                COALESCE(SUM(p.amount), 0) as total_paid
-                             FROM invoices i
-                             LEFT JOIN payments p ON i.id = p.invoice_id AND p.payment_status = 'completed'
-                             WHERE i.id = :invoice_id
-                             GROUP BY i.id, i.total_amount";
-            
-            $stmt = $this->db->prepare($totalPaidSql);
-            $stmt->bindValue(':invoice_id', $payment['invoice_id'], PDO::PARAM_INT);
-            $stmt->execute();
-            $invoiceData = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            // 新しいステータスの判定
-            $newStatus = 'issued';
-            if ($invoiceData['total_paid'] >= $invoiceData['total_amount']) {
-                $newStatus = 'paid';
-            } elseif ($invoiceData['total_paid'] > 0) {
-                $newStatus = 'partial_paid';
-            }
-            
-            // 請求書ステータス更新
-            $updateInvoiceSql = "UPDATE invoices SET status = :status WHERE id = :invoice_id";
-            $stmt = $this->db->prepare($updateInvoiceSql);
-            $stmt->bindValue(':status', $newStatus);
-            $stmt->bindValue(':invoice_id', $payment['invoice_id'], PDO::PARAM_INT);
-            $stmt->execute();
-            
+                'payment_amount' => $outstandingAmount,
+                'payment_date' => $paymentData['payment_date'] ?? date('Y-m-d'),
+                'payment_method' => $paymentData['payment_method'] ?? 'cash',
+                'reference_number' => $paymentData['reference_number'] ?? '',
+                'notes' => $paymentData['notes'] ?? '満額入金処理',
+                'payment_status' => 'completed'
+            ]);
+
+            // 請求書ステータスを「paid」に更新
+            $this->updateInvoiceStatus($invoiceId, 'paid');
+
+            // 入金履歴ログを記録
+            $this->logPaymentActivity($invoiceId, $paymentId, 'full_payment_recorded', [
+                'amount' => $outstandingAmount,
+                'method' => $paymentData['payment_method'] ?? 'cash'
+            ]);
+
             $this->db->commit();
-            
+
             return [
                 'success' => true,
-                'payment_id' => $paymentId,
-                'cancelled_amount' => $payment['amount'],
-                'new_invoice_status' => $newStatus,
-                'message' => '支払いを正常にキャンセルしました'
+                'message' => '満額入金を記録しました',
+                'data' => [
+                    'payment_id' => $paymentId,
+                    'invoice_id' => $invoiceId,
+                    'amount' => $outstandingAmount,
+                    'company_name' => $invoice['company_name']
+                ]
             ];
-            
+
         } catch (Exception $e) {
             $this->db->rollback();
-            error_log("PaymentManager::cancelPayment Error: " . $e->getMessage());
+            error_log("満額入金記録エラー: " . $e->getMessage());
             return [
                 'success' => false,
-                'message' => 'エラーが発生しました: ' . $e->getMessage()
+                'error' => '入金記録中にエラーが発生しました: ' . $e->getMessage()
             ];
         }
     }
-    
+
     /**
-     * PayPay支払い用の特別処理
-     * @param array $paymentData 支払いデータ
-     * @return array 処理結果
+     * 一括満額入金処理 - 複数請求書の同時処理
      */
-    public function processPayPayPayment($paymentData) {
-        // PayPay固有の処理（将来的にQRコード生成等）
-        // 現在は通常の支払い記録として処理
-        $paymentData['payment_method'] = 'paypay';
-        return $this->recordPayment($paymentData['invoice_id'], $paymentData);
-    }
-    
-    /**
-     * 企業別支払い履歴統計
-     * @param int $companyId 企業ID
-     * @param string $period 期間
-     * @return array 統計データ
-     */
-    public function getCompanyPaymentHistory($companyId, $period = 'last_6_months') {
-        try {
-            $dateCondition = '';
-            switch ($period) {
-                case 'last_6_months':
-                    $dateCondition = "p.payment_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)";
-                    break;
-                case 'current_year':
-                    $dateCondition = "YEAR(p.payment_date) = YEAR(CURDATE())";
-                    break;
-                case 'last_year':
-                    $dateCondition = "YEAR(p.payment_date) = YEAR(CURDATE()) - 1";
-                    break;
-                default:
-                    $dateCondition = "1=1";
-            }
-            
-            $sql = "SELECT 
-                        DATE_FORMAT(p.payment_date, '%Y-%m') as month,
-                        COUNT(*) as payment_count,
-                        SUM(p.amount) as total_amount,
-                        AVG(p.amount) as average_amount,
-                        COUNT(DISTINCT p.payment_method) as method_variety
-                    FROM payments p
-                    JOIN invoices i ON p.invoice_id = i.id
-                    JOIN users u ON i.user_id = u.id
-                    WHERE u.company_id = :company_id
-                      AND p.payment_status = 'completed'
-                      AND {$dateCondition}
-                    GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m')
-                    ORDER BY month DESC";
-            
-            $stmt = $this->db->prepare($sql);
-            $stmt->bindValue(':company_id', $companyId, PDO::PARAM_INT);
-            $stmt->execute();
-            
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-        } catch (Exception $e) {
-            error_log("PaymentManager::getCompanyPaymentHistory Error: " . $e->getMessage());
-            return [];
-        }
-    }
-    
-    /**
-     * 一括支払い記録（複数請求書同時処理）
-     * @param array $payments 支払いデータ配列
-     * @return array 処理結果
-     */
-    public function recordBulkPayments($payments) {
+    public function recordBulkFullPayments($invoiceIds, $commonPaymentData = []) {
         try {
             $this->db->beginTransaction();
             
-            $results = [];
             $successCount = 0;
-            $errorCount = 0;
+            $failCount = 0;
+            $results = [];
             
-            foreach ($payments as $paymentData) {
-                try {
-                    $result = $this->recordPayment($paymentData['invoice_id'], $paymentData);
-                    if ($result['success']) {
-                        $successCount++;
-                        $results[] = $result;
-                    } else {
-                        $errorCount++;
-                        $results[] = $result;
-                    }
-                } catch (Exception $e) {
-                    $errorCount++;
+            foreach ($invoiceIds as $invoiceId) {
+                $result = $this->recordFullPayment($invoiceId, $commonPaymentData);
+                
+                if ($result['success']) {
+                    $successCount++;
                     $results[] = [
-                        'success' => false,
-                        'invoice_id' => $paymentData['invoice_id'] ?? 'unknown',
-                        'message' => $e->getMessage()
+                        'invoice_id' => $invoiceId,
+                        'status' => 'success',
+                        'payment_id' => $result['data']['payment_id'],
+                        'amount' => $result['data']['amount']
+                    ];
+                } else {
+                    $failCount++;
+                    $results[] = [
+                        'invoice_id' => $invoiceId,
+                        'status' => 'failed',
+                        'error' => $result['error']
                     ];
                 }
             }
-            
-            if ($errorCount === 0) {
-                $this->db->commit();
-            } else {
+
+            if ($failCount > 0) {
+                // 一部失敗がある場合はロールバック
                 $this->db->rollback();
+                return [
+                    'success' => false,
+                    'message' => '一括処理中にエラーが発生しました',
+                    'data' => [
+                        'total' => count($invoiceIds),
+                        'success' => $successCount,
+                        'failed' => $failCount,
+                        'results' => $results
+                    ]
+                ];
             }
-            
+
+            $this->db->commit();
+
             return [
-                'success' => $errorCount === 0,
-                'processed' => $successCount,
-                'errors' => $errorCount,
-                'details' => $results,
-                'message' => "{$successCount}件の支払いを処理しました（エラー: {$errorCount}件）"
+                'success' => true,
+                'message' => "{$successCount}件の満額入金を記録しました",
+                'data' => [
+                    'processed' => $successCount,
+                    'results' => $results
+                ]
             ];
-            
+
         } catch (Exception $e) {
             $this->db->rollback();
-            error_log("PaymentManager::recordBulkPayments Error: " . $e->getMessage());
+            error_log("一括満額入金エラー: " . $e->getMessage());
             return [
                 'success' => false,
-                'processed' => 0,
-                'errors' => count($payments),
-                'message' => 'バッチ処理でエラーが発生しました: ' . $e->getMessage()
+                'error' => '一括入金処理中にエラーが発生しました: ' . $e->getMessage()
             ];
         }
     }
-    
+
     /**
-     * 支払い詳細情報を取得
-     * @param int $paymentId 支払いID
-     * @return array|null 支払い詳細
+     * 入金統計情報取得 - ダッシュボード用
      */
-    public function getPaymentDetail($paymentId) {
+    public function getPaymentStatistics($period = 'current_month') {
         try {
-            $sql = "SELECT 
-                        p.*,
-                        i.invoice_number,
-                        i.total_amount as invoice_amount,
-                        i.invoice_date,
-                        i.due_date,
-                        i.status as invoice_status,
-                        c.company_name,
-                        c.company_code,
-                        u.user_name,
-                        u.user_code
-                    FROM payments p
-                    JOIN invoices i ON p.invoice_id = i.id
-                    JOIN users u ON i.user_id = u.id
-                    JOIN companies c ON u.company_id = c.id
-                    WHERE p.id = :payment_id";
+            $dateCondition = $this->getDateCondition($period);
             
+            $sql = "
+                SELECT 
+                    COUNT(DISTINCT i.id) as total_invoices,
+                    COUNT(DISTINCT CASE WHEN i.status = 'paid' THEN i.id END) as paid_invoices,
+                    COUNT(DISTINCT CASE WHEN i.status != 'paid' THEN i.id END) as unpaid_invoices,
+                    COUNT(DISTINCT CASE WHEN i.due_date < CURDATE() AND i.status != 'paid' THEN i.id END) as overdue_invoices,
+                    COALESCE(SUM(CASE WHEN i.status = 'paid' THEN i.total_amount END), 0) as total_collected,
+                    COALESCE(SUM(CASE WHEN i.status != 'paid' THEN i.total_amount END), 0) as total_outstanding,
+                    COALESCE(SUM(CASE WHEN i.due_date < CURDATE() AND i.status != 'paid' THEN i.total_amount END), 0) as overdue_amount,
+                    ROUND(
+                        CASE 
+                            WHEN SUM(i.total_amount) > 0 
+                            THEN (SUM(CASE WHEN i.status = 'paid' THEN i.total_amount END) / SUM(i.total_amount)) * 100
+                            ELSE 0 
+                        END, 1
+                    ) as collection_rate
+                FROM invoices i
+                LEFT JOIN companies c ON i.company_id = c.id
+                WHERE i.is_active = 1 {$dateCondition}
+            ";
+
             $stmt = $this->db->prepare($sql);
-            $stmt->bindValue(':payment_id', $paymentId, PDO::PARAM_INT);
             $stmt->execute();
+            $stats = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // 支払方法別統計
+            $paymentMethodStats = $this->getPaymentMethodStatistics($period);
+
+            return [
+                'success' => true,
+                'data' => [
+                    'summary' => $stats,
+                    'payment_methods' => $paymentMethodStats,
+                    'period' => $period,
+                    'generated_at' => date('Y-m-d H:i:s')
+                ]
+            ];
+
+        } catch (Exception $e) {
+            error_log("入金統計取得エラー: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => '統計データの取得中にエラーが発生しました'
+            ];
+        }
+    }
+
+    /**
+     * 緊急回収アラート取得
+     */
+    public function getUrgentCollectionAlerts() {
+        try {
+            $sql = "
+                SELECT 
+                    i.id as invoice_id,
+                    i.invoice_number,
+                    i.total_amount,
+                    i.due_date,
+                    c.company_name,
+                    c.contact_phone,
+                    c.contact_email,
+                    DATEDIFF(CURDATE(), i.due_date) as overdue_days,
+                    CASE 
+                        WHEN i.total_amount >= 100000 AND DATEDIFF(CURDATE(), i.due_date) >= 30 THEN 'critical'
+                        WHEN i.total_amount >= 50000 OR DATEDIFF(CURDATE(), i.due_date) >= 14 THEN 'high'
+                        WHEN DATEDIFF(CURDATE(), i.due_date) > 0 THEN 'medium'
+                        ELSE 'low'
+                    END as alert_level
+                FROM invoices i
+                LEFT JOIN companies c ON i.company_id = c.id
+                WHERE i.status != 'paid' 
+                    AND i.is_active = 1
+                    AND (
+                        i.due_date < CURDATE() OR 
+                        DATEDIFF(i.due_date, CURDATE()) <= 3
+                    )
+                ORDER BY 
+                    CASE alert_level
+                        WHEN 'critical' THEN 1
+                        WHEN 'high' THEN 2
+                        WHEN 'medium' THEN 3
+                        ELSE 4
+                    END,
+                    i.total_amount DESC
+            ";
+
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute();
+            $alerts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            return [
+                'success' => true,
+                'data' => [
+                    'alerts' => $alerts,
+                    'urgent_count' => count(array_filter($alerts, function($alert) {
+                        return in_array($alert['alert_level'], ['critical', 'high']);
+                    })),
+                    'total_overdue_amount' => array_sum(array_column($alerts, 'total_amount'))
+                ]
+            ];
+
+        } catch (Exception $e) {
+            error_log("緊急回収アラート取得エラー: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => 'アラートデータの取得中にエラーが発生しました'
+            ];
+        }
+    }
+
+    /**
+     * 支払い方法の選択肢を取得（PayPay対応）
+     */
+    public static function getPaymentMethods() {
+        return [
+            'cash' => '💵 現金',
+            'bank_transfer' => '🏦 銀行振込',
+            'paypay' => '📱 PayPay',
+            'account_debit' => '🏦 口座引き落とし',
+            'mixed' => '💳 混合',
+            'other' => '💼 その他'
+        ];
+    }
+
+    /**
+     * 部分入金記録
+     */
+    public function recordPartialPayment($invoiceId, $amount, $paymentData) {
+        try {
+            $this->db->beginTransaction();
+
+            // 請求書情報を取得
+            $invoice = $this->getInvoiceDetails($invoiceId);
+            if (!$invoice) {
+                throw new Exception('請求書が見つかりません');
+            }
+
+            // 未払い金額を確認
+            $outstandingAmount = $this->calculateOutstandingAmount($invoiceId);
             
+            if ($amount > $outstandingAmount) {
+                throw new Exception('入金金額が未払い金額を超えています');
+            }
+
+            // 部分入金として記録
+            $paymentId = $this->insertPaymentRecord([
+                'invoice_id' => $invoiceId,
+                'payment_amount' => $amount,
+                'payment_date' => $paymentData['payment_date'] ?? date('Y-m-d'),
+                'payment_method' => $paymentData['payment_method'] ?? 'cash',
+                'reference_number' => $paymentData['reference_number'] ?? '',
+                'notes' => $paymentData['notes'] ?? '部分入金',
+                'payment_status' => 'completed'
+            ]);
+
+            // 残額がゼロになった場合は請求書ステータスを「paid」に更新
+            $remainingAmount = $outstandingAmount - $amount;
+            if ($remainingAmount <= 0) {
+                $this->updateInvoiceStatus($invoiceId, 'paid');
+            } else {
+                $this->updateInvoiceStatus($invoiceId, 'partial_paid');
+            }
+
+            $this->logPaymentActivity($invoiceId, $paymentId, 'partial_payment_recorded', [
+                'amount' => $amount,
+                'remaining' => $remainingAmount
+            ]);
+
+            $this->db->commit();
+
+            return [
+                'success' => true,
+                'message' => '部分入金を記録しました',
+                'data' => [
+                    'payment_id' => $paymentId,
+                    'invoice_id' => $invoiceId,
+                    'paid_amount' => $amount,
+                    'remaining_amount' => $remainingAmount,
+                    'is_fully_paid' => ($remainingAmount <= 0)
+                ]
+            ];
+
+        } catch (Exception $e) {
+            $this->db->rollback();
+            error_log("部分入金記録エラー: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => '部分入金記録中にエラーが発生しました: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * 請求書の支払い詳細取得
+     */
+    public function getInvoicePaymentDetails($invoiceId) {
+        try {
+            $sql = "
+                SELECT 
+                    i.*,
+                    c.company_name,
+                    c.contact_phone,
+                    c.contact_email,
+                    COALESCE(SUM(p.payment_amount), 0) as paid_amount,
+                    (i.total_amount - COALESCE(SUM(p.payment_amount), 0)) as outstanding_amount
+                FROM invoices i
+                LEFT JOIN companies c ON i.company_id = c.id
+                LEFT JOIN payments p ON i.id = p.invoice_id AND p.payment_status = 'completed'
+                WHERE i.id = ? AND i.is_active = 1
+                GROUP BY i.id
+            ";
+
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([$invoiceId]);
+            $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$invoice) {
+                throw new Exception('請求書が見つかりません');
+            }
+
+            // 支払い履歴を取得
+            $paymentHistory = $this->getPaymentHistory($invoiceId);
+
+            return [
+                'success' => true,
+                'data' => [
+                    'invoice' => $invoice,
+                    'payment_history' => $paymentHistory
+                ]
+            ];
+
+        } catch (Exception $e) {
+            return [
+                'success' => false,
+                'error' => '請求書詳細の取得中にエラーが発生しました: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * 支払い履歴取得
+     */
+    public function getPaymentHistory($invoiceId) {
+        $sql = "
+            SELECT 
+                p.*,
+                DATE_FORMAT(p.payment_date, '%Y/%m/%d') as formatted_date,
+                DATE_FORMAT(p.created_at, '%Y/%m/%d %H:%i') as recorded_at
+            FROM payments p
+            WHERE p.invoice_id = ?
+            ORDER BY p.payment_date DESC, p.created_at DESC
+        ";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$invoiceId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * 支払いステータス更新
+     */
+    public function updatePaymentStatus($paymentId, $status, $notes = '') {
+        try {
+            $this->db->beginTransaction();
+
+            $sql = "UPDATE payments SET payment_status = ?, notes = ?, updated_at = NOW() WHERE id = ?";
+            $stmt = $this->db->prepare($sql);
+            $result = $stmt->execute([$status, $notes, $paymentId]);
+
+            if (!$result) {
+                throw new Exception('支払いステータスの更新に失敗しました');
+            }
+
+            $this->db->commit();
+
+            return [
+                'success' => true,
+                'message' => '支払いステータスを更新しました'
+            ];
+
+        } catch (Exception $e) {
+            $this->db->rollback();
+            return [
+                'success' => false,
+                'error' => 'ステータス更新中にエラーが発生しました: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * 支払い期限変更
+     */
+    public function rescheduleDueDate($invoiceId, $newDueDate, $reason = '') {
+        try {
+            $this->db->beginTransaction();
+
+            $sql = "UPDATE invoices SET due_date = ?, updated_at = NOW() WHERE id = ?";
+            $stmt = $this->db->prepare($sql);
+            $result = $stmt->execute([$newDueDate, $invoiceId]);
+
+            if (!$result) {
+                throw new Exception('支払期限の更新に失敗しました');
+            }
+
+            // 変更ログを記録
+            $this->logPaymentActivity($invoiceId, null, 'due_date_rescheduled', [
+                'new_due_date' => $newDueDate,
+                'reason' => $reason
+            ]);
+
+            $this->db->commit();
+
+            return [
+                'success' => true,
+                'message' => '支払期限を変更しました'
+            ];
+
+        } catch (Exception $e) {
+            $this->db->rollback();
+            return [
+                'success' => false,
+                'error' => '期限変更中にエラーが発生しました: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * 入金記録キャンセル
+     */
+    public function cancelPayment($paymentId, $reason = '') {
+        try {
+            $this->db->beginTransaction();
+
+            // 支払い情報を取得
+            $sql = "SELECT * FROM payments WHERE id = ?";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([$paymentId]);
             $payment = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($payment) {
-                // 支払い方法の日本語化
-                $paymentMethods = self::getPaymentMethods();
-                $payment['payment_method_label'] = $paymentMethods[$payment['payment_method']] ?? $payment['payment_method'];
-                $payment['amount_formatted'] = number_format($payment['amount']);
-                $payment['invoice_amount_formatted'] = number_format($payment['invoice_amount']);
+
+            if (!$payment) {
+                throw new Exception('支払い記録が見つかりません');
             }
-            
-            return $payment;
-            
-        } catch (Exception $e) {
-            error_log("PaymentManager::getPaymentDetail Error: " . $e->getMessage());
-            return null;
-        }
-    }
-    
-    /**
-     * 支払い方法別集計データ取得
-     * @param array $filters フィルター条件
-     * @return array 集計データ
-     */
-    public function getPaymentMethodSummary($filters = []) {
-        try {
-            $whereConditions = ['p.payment_status = "completed"'];
-            $params = [];
-            
-            if (!empty($filters['date_from'])) {
-                $whereConditions[] = 'p.payment_date >= :date_from';
-                $params[':date_from'] = $filters['date_from'];
-            }
-            
-            if (!empty($filters['date_to'])) {
-                $whereConditions[] = 'p.payment_date <= :date_to';
-                $params[':date_to'] = $filters['date_to'];
-            }
-            
-            $sql = "SELECT 
-                        p.payment_method,
-                        COUNT(*) as count,
-                        SUM(p.amount) as total_amount,
-                        AVG(p.amount) as average_amount,
-                        MIN(p.amount) as min_amount,
-                        MAX(p.amount) as max_amount
-                    FROM payments p
-                    WHERE " . implode(' AND ', $whereConditions) . "
-                    GROUP BY p.payment_method
-                    ORDER BY total_amount DESC";
-            
+
+            // 支払い記録を削除（論理削除）
+            $sql = "UPDATE payments SET payment_status = 'cancelled', notes = ?, updated_at = NOW() WHERE id = ?";
             $stmt = $this->db->prepare($sql);
-            foreach ($params as $key => $value) {
-                $stmt->bindValue($key, $value);
-            }
-            $stmt->execute();
-            
-            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            $paymentMethods = self::getPaymentMethods();
-            
-            foreach ($results as &$result) {
-                $result['method_label'] = $paymentMethods[$result['payment_method']] ?? $result['payment_method'];
-                $result['total_amount_formatted'] = number_format($result['total_amount']);
-                $result['average_amount_formatted'] = number_format($result['average_amount']);
-                $result['min_amount_formatted'] = number_format($result['min_amount']);
-                $result['max_amount_formatted'] = number_format($result['max_amount']);
-            }
-            
-            return $results;
-            
+            $stmt->execute([$reason, $paymentId]);
+
+            // 請求書ステータスを再計算
+            $this->recalculateInvoiceStatus($payment['invoice_id']);
+
+            // キャンセルログを記録
+            $this->logPaymentActivity($payment['invoice_id'], $paymentId, 'payment_cancelled', [
+                'reason' => $reason,
+                'cancelled_amount' => $payment['payment_amount']
+            ]);
+
+            $this->db->commit();
+
+            return [
+                'success' => true,
+                'message' => '入金記録をキャンセルしました'
+            ];
+
         } catch (Exception $e) {
-            error_log("PaymentManager::getPaymentMethodSummary Error: " . $e->getMessage());
-            return [];
+            $this->db->rollback();
+            return [
+                'success' => false,
+                'error' => 'キャンセル処理中にエラーが発生しました: ' . $e->getMessage()
+            ];
         }
     }
-    
+
     /**
-     * 督促対象の請求書リストを取得
-     * @param int $daysOverdue 期限超過日数（デフォルト: 7日）
-     * @return array 督促対象リスト
+     * 月次サマリー取得
      */
-    public function getDunningTargets($daysOverdue = 7) {
+    public function getMonthlySummary($year, $month) {
         try {
-            $sql = "SELECT 
-                        i.id as invoice_id,
-                        i.invoice_number,
-                        i.total_amount,
-                        i.due_date,
-                        DATEDIFF(CURDATE(), i.due_date) as days_overdue,
-                        (i.total_amount - COALESCE(paid.amount, 0)) as outstanding_amount,
-                        c.company_name,
-                        c.contact_person,
-                        c.contact_email,
-                        c.contact_phone,
-                        u.user_name
-                    FROM invoices i
-                    JOIN users u ON i.user_id = u.id
-                    JOIN companies c ON u.company_id = c.id
-                    LEFT JOIN (
-                        SELECT invoice_id, SUM(amount) as amount
-                        FROM payments 
-                        WHERE payment_status = 'completed'
-                        GROUP BY invoice_id
-                    ) paid ON i.id = paid.invoice_id
-                    WHERE i.status IN ('issued', 'overdue')
-                      AND DATEDIFF(CURDATE(), i.due_date) >= :days_overdue
-                      AND (i.total_amount - COALESCE(paid.amount, 0)) > 0
-                    ORDER BY days_overdue DESC, outstanding_amount DESC";
-            
+            $sql = "
+                SELECT 
+                    COUNT(DISTINCT i.id) as total_invoices,
+                    SUM(i.total_amount) as total_billed,
+                    COUNT(DISTINCT CASE WHEN i.status = 'paid' THEN i.id END) as paid_invoices,
+                    SUM(CASE WHEN i.status = 'paid' THEN i.total_amount END) as total_collected,
+                    COUNT(DISTINCT CASE WHEN i.status != 'paid' THEN i.id END) as unpaid_invoices,
+                    SUM(CASE WHEN i.status != 'paid' THEN i.total_amount END) as total_outstanding,
+                    AVG(DATEDIFF(p.payment_date, i.due_date)) as avg_payment_delay
+                FROM invoices i
+                LEFT JOIN payments p ON i.id = p.invoice_id AND p.payment_status = 'completed'
+                WHERE YEAR(i.created_at) = ? AND MONTH(i.created_at) = ?
+                    AND i.is_active = 1
+            ";
+
             $stmt = $this->db->prepare($sql);
-            $stmt->bindValue(':days_overdue', $daysOverdue, PDO::PARAM_INT);
-            $stmt->execute();
-            
-            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            foreach ($results as &$result) {
-                $result['total_amount_formatted'] = number_format($result['total_amount']);
-                $result['outstanding_amount_formatted'] = number_format($result['outstanding_amount']);
-                $result['urgency_level'] = $this->calculateUrgencyLevel($result['days_overdue'], $result['outstanding_amount']);
-            }
-            
-            return $results;
-            
+            $stmt->execute([$year, $month]);
+            $summary = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            return [
+                'success' => true,
+                'data' => [
+                    'year' => $year,
+                    'month' => $month,
+                    'summary' => $summary
+                ]
+            ];
+
         } catch (Exception $e) {
-            error_log("PaymentManager::getDunningTargets Error: " . $e->getMessage());
-            return [];
+            return [
+                'success' => false,
+                'error' => '月次サマリー取得中にエラーが発生しました: ' . $e->getMessage()
+            ];
         }
     }
-    
+
     /**
-     * 督促緊急度を計算
-     * @param int $daysOverdue 期限超過日数
-     * @param float $amount 未回収金額
-     * @return string 緊急度レベル
+     * 請求書ステータス再計算
      */
-    private function calculateUrgencyLevel($daysOverdue, $amount) {
-        if ($daysOverdue >= 30 || $amount >= 500000) {
-            return 'critical';
-        } elseif ($daysOverdue >= 14 || $amount >= 100000) {
-            return 'high';
-        } elseif ($daysOverdue >= 7 || $amount >= 50000) {
-            return 'medium';
-        } else {
-            return 'low';
+    private function recalculateInvoiceStatus($invoiceId) {
+        $outstandingAmount = $this->calculateOutstandingAmount($invoiceId);
+        
+        if ($outstandingAmount <= 0) {
+            $status = 'paid';
+        } elseif ($outstandingAmount > 0) {
+            // 支払い記録があるかチェック
+            $sql = "SELECT COUNT(*) as payment_count FROM payments WHERE invoice_id = ? AND payment_status = 'completed'";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([$invoiceId]);
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            $status = $result['payment_count'] > 0 ? 'partial_paid' : 'issued';
+        }
+
+        $this->updateInvoiceStatus($invoiceId, $status);
+    }
+
+    private function calculatePaymentListStats($invoices) {
+        $stats = [
+            'total_companies' => 0,
+            'total_outstanding' => 0,
+            'overdue_count' => 0,
+            'overdue_amount' => 0,
+            'due_soon_count' => 0,
+            'due_soon_amount' => 0,
+            'paid_count' => 0,
+            'paid_amount' => 0
+        ];
+
+        $companies = [];
+        
+        foreach ($invoices as $invoice) {
+            $companies[$invoice['invoice_id']] = true;
+            
+            switch ($invoice['payment_status']) {
+                case 'overdue':
+                    $stats['overdue_count']++;
+                    $stats['overdue_amount'] += $invoice['outstanding_amount'];
+                    $stats['total_outstanding'] += $invoice['outstanding_amount'];
+                    break;
+                case 'due_soon':
+                    $stats['due_soon_count']++;
+                    $stats['due_soon_amount'] += $invoice['outstanding_amount'];
+                    $stats['total_outstanding'] += $invoice['outstanding_amount'];
+                    break;
+                case 'paid':
+                    $stats['paid_count']++;
+                    $stats['paid_amount'] += $invoice['total_amount'];
+                    break;
+                default:
+                    $stats['total_outstanding'] += $invoice['outstanding_amount'];
+            }
+        }
+
+        $stats['total_companies'] = count($companies);
+        $stats['collection_rate'] = $stats['paid_amount'] > 0 ? 
+            round(($stats['paid_amount'] / ($stats['paid_amount'] + $stats['total_outstanding'])) * 100, 1) : 0;
+
+        return $stats;
+    }
+
+    private function getInvoiceDetails($invoiceId) {
+        $sql = "
+            SELECT i.*, c.company_name 
+            FROM invoices i 
+            LEFT JOIN companies c ON i.company_id = c.id 
+            WHERE i.id = ? AND i.is_active = 1
+        ";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$invoiceId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    private function calculateOutstandingAmount($invoiceId) {
+        $sql = "
+            SELECT 
+                i.total_amount - COALESCE(SUM(p.payment_amount), 0) as outstanding
+            FROM invoices i
+            LEFT JOIN payments p ON i.id = p.invoice_id AND p.payment_status = 'completed'
+            WHERE i.id = ?
+            GROUP BY i.id
+        ";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$invoiceId]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result ? $result['outstanding'] : 0;
+    }
+
+    private function insertPaymentRecord($paymentData) {
+        $sql = "
+            INSERT INTO payments (
+                invoice_id, payment_amount, payment_date, payment_method,
+                reference_number, notes, payment_status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+        ";
+        
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([
+            $paymentData['invoice_id'],
+            $paymentData['payment_amount'],
+            $paymentData['payment_date'],
+            $paymentData['payment_method'],
+            $paymentData['reference_number'],
+            $paymentData['notes'],
+            $paymentData['payment_status']
+        ]);
+        
+        return $this->db->lastInsertId();
+    }
+
+    private function updateInvoiceStatus($invoiceId, $status) {
+        $sql = "UPDATE invoices SET status = ?, updated_at = NOW() WHERE id = ?";
+        $stmt = $this->db->prepare($sql);
+        return $stmt->execute([$status, $invoiceId]);
+    }
+
+    private function logPaymentActivity($invoiceId, $paymentId, $action, $data = []) {
+        // ログ記録（将来の監査用）
+        error_log("Payment Activity: {$action} - Invoice: {$invoiceId}, Payment: {$paymentId}, Data: " . json_encode($data));
+    }
+
+    private function getDateCondition($period) {
+        switch ($period) {
+            case 'current_month':
+                return "AND DATE_FORMAT(i.created_at, '%Y-%m') = DATE_FORMAT(NOW(), '%Y-%m')";
+            case 'last_month':
+                return "AND DATE_FORMAT(i.created_at, '%Y-%m') = DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 1 MONTH), '%Y-%m')";
+            case 'current_year':
+                return "AND YEAR(i.created_at) = YEAR(NOW())";
+            default:
+                return "";
         }
     }
-    
-    /**
-     * 月別支払い推移データを取得
-     * @param int $months 取得月数（デフォルト: 12ヶ月）
-     * @return array 月別推移データ
-     */
-    public function getMonthlyPaymentTrends($months = 12) {
-        try {
-            $sql = "SELECT 
-                        DATE_FORMAT(p.payment_date, '%Y-%m') as month,
-                        DATE_FORMAT(p.payment_date, '%Y年%m月') as month_label,
-                        COUNT(*) as payment_count,
-                        SUM(p.amount) as total_amount,
-                        COUNT(DISTINCT c.id) as company_count,
-                        AVG(p.amount) as average_payment
-                    FROM payments p
-                    JOIN invoices i ON p.invoice_id = i.id
-                    JOIN users u ON i.user_id = u.id
-                    JOIN companies c ON u.company_id = c.id
-                    WHERE p.payment_status = 'completed'
-                      AND p.payment_date >= DATE_SUB(CURDATE(), INTERVAL :months MONTH)
-                    GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m')
-                    ORDER BY month ASC";
-            
-            $stmt = $this->db->prepare($sql);
-            $stmt->bindValue(':months', $months, PDO::PARAM_INT);
-            $stmt->execute();
-            
-            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            foreach ($results as &$result) {
-                $result['total_amount_formatted'] = number_format($result['total_amount']);
-                $result['average_payment_formatted'] = number_format($result['average_payment']);
-            }
-            
-            return $results;
-            
-        } catch (Exception $e) {
-            error_log("PaymentManager::getMonthlyPaymentTrends Error: " . $e->getMessage());
-            return [];
-        }
+
+    private function getPaymentMethodStatistics($period) {
+        $dateCondition = $this->getDateCondition($period);
+        
+        $sql = "
+            SELECT 
+                p.payment_method,
+                COUNT(*) as count,
+                SUM(p.payment_amount) as total_amount
+            FROM payments p
+            LEFT JOIN invoices i ON p.invoice_id = i.id
+            WHERE p.payment_status = 'completed' {$dateCondition}
+            GROUP BY p.payment_method
+            ORDER BY total_amount DESC
+        ";
+        
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }
 ?>
