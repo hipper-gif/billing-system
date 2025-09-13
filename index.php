@@ -772,21 +772,12 @@ foreach ($urgentCollections as $collection) {
             </h2>
         </div>
 
-        <div class="collection-action-grid">
-            <!-- 緊急入金処理 -->
-            <div class="collection-action-card urgent animate-fade-in" onclick="quickPaymentEntry()">
-                <div class="action-icon">
-                    <span class="material-icons">priority_high</span>
-                </div>
-                <div class="action-title">緊急入金処理</div>
-                <div class="action-description">
-                    期限切れ・大口案件の即座入金記録
-                </div>
-                <div class="btn btn-light btn-lg">
-                    <span class="material-icons me-1">add_circle</span>
-                    今すぐ処理
-                </div>
-            </div>
+<div class="mega-button">
+    <a href="pages/bulk_payment_list.php" class="btn btn-warning btn-lg">
+        <i class="material-icons">account_balance_wallet</i>
+        月末締め - 満額入金リスト
+    </a>
+</div>
 
             <!-- 一部入金・分割対応 -->
             <a href="pages/payments.php?mode=partial" class="collection-action-card animate-fade-in">
