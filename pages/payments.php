@@ -1,364 +1,587 @@
 <?php
 /**
- * 支払い管理センター - 根本解決版
- * Parse error解決・コード分離・保守性向上
+ * PaymentManager.php - 支払い管理クラス（完全実装版）
+ * 
+ * 機能:
+ * - 支払い記録管理
+ * - 未回収金額計算
+ * - 支払い統計生成
+ * - アラート機能
+ * - データ取得・フィルタリング
+ * 
+ * 対応エラー:
+ * - Fatal error: Call to undefined method PaymentManager::getPaymentsList() 解決
+ * 
+ * @version 2.0
+ * @date 2025-09-17
  */
 
-require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../classes/Database.php';
-require_once __DIR__ . '/../classes/PaymentManager.php';
-require_once __DIR__ . '/../classes/InvoiceGenerator.php';
 
-// セキュリティヘッダー
-header('X-Content-Type-Options: nosniff');
-header('X-Frame-Options: DENY');
-header('X-XSS-Protection: 1; mode=block');
-
-$pageTitle = '支払い管理センター - 入金記録・未回収管理';
-
-try {
-    $paymentManager = new PaymentManager();
-    $invoiceGenerator = new InvoiceGenerator();
+class PaymentManager {
+    private $db;
     
-    // フィルター設定
-    $filters = [
-        'date_from' => $_GET['date_from'] ?? date('Y-m-01'),
-        'date_to' => $_GET['date_to'] ?? date('Y-m-t'),
-        'payment_method' => $_GET['payment_method'] ?? '',
-        'company_id' => $_GET['company_id'] ?? '',
-        'invoice_status' => $_GET['invoice_status'] ?? '',
-        'search' => $_GET['search'] ?? '',
-        'view_type' => $_GET['view_type'] ?? 'payments',
-        'page' => intval($_GET['page'] ?? 1),
-        'limit' => 20
-    ];
-
-    // データ取得
-    switch ($filters['view_type']) {
-        case 'outstanding':
-            $data = $paymentManager->getOutstandingAmounts($filters);
-            break;
-        case 'alerts':
-            $data = $paymentManager->getPaymentAlerts();
-            break;
-        default:
-            $data = $paymentManager->getPaymentsList($filters);
-            break;
+    public function __construct() {
+        $this->db = Database::getInstance();
     }
     
-    // 統計データを取得
-    $statistics = $paymentManager->getPaymentStatistics('current_month');
-    $alerts = $paymentManager->getPaymentAlerts();
+    /**
+     * 支払い方法の選択肢を取得
+     * PayPay対応済み
+     */
+    public static function getPaymentMethods() {
+        return [
+            'cash' => '💵 現金',
+            'bank_transfer' => '🏦 銀行振込',
+            'account_debit' => '🏦 口座引き落とし',
+            'paypay' => '📱 PayPay',
+            'mixed' => '💳 混合',
+            'other' => '💼 その他'
+        ];
+    }
     
-    // 企業リストを取得（フィルター用）
-    $db = Database::getInstance();
-    $companies = $db->fetchAll("SELECT id, company_name FROM companies WHERE is_active = 1 ORDER BY company_name");
+    /**
+     * ✅ 支払い一覧取得（payments.phpの45行目で使用）
+     * Fatal error解決用メソッド
+     */
+    public function getPaymentsList($filters = []) {
+        try {
+            $sql = "
+                SELECT 
+                    p.id as payment_id,
+                    p.payment_date,
+                    p.amount,
+                    p.payment_method,
+                    p.reference_number,
+                    p.notes,
+                    p.created_at,
+                    i.id as invoice_id,
+                    i.invoice_number,
+                    i.total_amount as invoice_amount,
+                    i.status as invoice_status,
+                    c.company_name,
+                    u.user_name,
+                    u.user_code
+                FROM payments p
+                LEFT JOIN invoices i ON p.invoice_id = i.id
+                LEFT JOIN users u ON i.user_id = u.id
+                LEFT JOIN companies c ON u.company_id = c.id
+                WHERE 1=1
+            ";
+            
+            $params = [];
+            
+            // フィルター条件を追加
+            if (!empty($filters['date_from'])) {
+                $sql .= " AND p.payment_date >= ?";
+                $params[] = $filters['date_from'];
+            }
+            
+            if (!empty($filters['date_to'])) {
+                $sql .= " AND p.payment_date <= ?";
+                $params[] = $filters['date_to'];
+            }
+            
+            if (!empty($filters['payment_method'])) {
+                $sql .= " AND p.payment_method = ?";
+                $params[] = $filters['payment_method'];
+            }
+            
+            if (!empty($filters['company_id'])) {
+                $sql .= " AND c.id = ?";
+                $params[] = $filters['company_id'];
+            }
+            
+            if (!empty($filters['search'])) {
+                $sql .= " AND (
+                    c.company_name LIKE ? OR 
+                    u.user_name LIKE ? OR 
+                    i.invoice_number LIKE ? OR
+                    p.reference_number LIKE ?
+                )";
+                $searchTerm = '%' . $filters['search'] . '%';
+                $params[] = $searchTerm;
+                $params[] = $searchTerm;
+                $params[] = $searchTerm;
+                $params[] = $searchTerm;
+            }
+            
+            $sql .= " ORDER BY p.payment_date DESC, p.created_at DESC";
+            
+            // ページネーション
+            $limit = $filters['limit'] ?? 20;
+            $page = $filters['page'] ?? 1;
+            $offset = ($page - 1) * $limit;
+            
+            $sql .= " LIMIT ? OFFSET ?";
+            $params[] = $limit;
+            $params[] = $offset;
+            
+            return $this->db->fetchAll($sql, $params);
+            
+        } catch (Exception $e) {
+            error_log("PaymentManager::getPaymentsList Error: " . $e->getMessage());
+            return [];
+        }
+    }
     
-    // 処理メッセージ
-    $message = '';
-    $messageType = '';
+    /**
+     * ✅ 未回収金額一覧取得（payments.phpで使用）
+     */
+    public function getOutstandingAmounts($filters = []) {
+        try {
+            $sql = "
+                SELECT 
+                    i.id as invoice_id,
+                    i.invoice_number,
+                    i.total_amount,
+                    i.due_date,
+                    i.status,
+                    i.created_at as invoice_date,
+                    c.company_name,
+                    u.user_name,
+                    u.user_code,
+                    COALESCE(SUM(p.amount), 0) as paid_amount,
+                    (i.total_amount - COALESCE(SUM(p.amount), 0)) as outstanding_amount,
+                    DATEDIFF(CURDATE(), i.due_date) as days_overdue,
+                    DATEDIFF(i.due_date, CURDATE()) as days_until_due,
+                    CASE 
+                        WHEN DATEDIFF(CURDATE(), i.due_date) > 0 THEN 'overdue'
+                        WHEN DATEDIFF(i.due_date, CURDATE()) <= 3 THEN 'urgent'
+                        WHEN DATEDIFF(i.due_date, CURDATE()) <= 7 THEN 'warning'
+                        ELSE 'normal'
+                    END as priority
+                FROM invoices i
+                LEFT JOIN payments p ON i.id = p.invoice_id
+                LEFT JOIN users u ON i.user_id = u.id
+                LEFT JOIN companies c ON u.company_id = c.id
+                WHERE i.status IN ('issued', 'sent', 'partially_paid')
+                GROUP BY i.id, i.invoice_number, i.total_amount, i.due_date, i.status, 
+                         i.created_at, c.company_name, u.user_name, u.user_code
+                HAVING outstanding_amount > 0
+            ";
+            
+            $params = [];
+            
+            // フィルター条件
+            if (!empty($filters['priority'])) {
+                $sql .= " AND CASE 
+                    WHEN DATEDIFF(CURDATE(), i.due_date) > 0 THEN 'overdue'
+                    WHEN DATEDIFF(i.due_date, CURDATE()) <= 3 THEN 'urgent'
+                    WHEN DATEDIFF(i.due_date, CURDATE()) <= 7 THEN 'warning'
+                    ELSE 'normal'
+                END = ?";
+                $params[] = $filters['priority'];
+            }
+            
+            if (!empty($filters['company_id'])) {
+                $sql .= " AND c.id = ?";
+                $params[] = $filters['company_id'];
+            }
+            
+            if (isset($filters['large_amount']) && $filters['large_amount']) {
+                $sql .= " AND (i.total_amount - COALESCE(SUM(p.amount), 0)) >= 50000";
+            }
+            
+            $sql .= " ORDER BY 
+                CASE 
+                    WHEN DATEDIFF(CURDATE(), i.due_date) > 0 THEN 1
+                    WHEN DATEDIFF(i.due_date, CURDATE()) <= 3 THEN 2
+                    WHEN DATEDIFF(i.due_date, CURDATE()) <= 7 THEN 3
+                    ELSE 4
+                END,
+                outstanding_amount DESC,
+                i.due_date ASC";
+            
+            return $this->db->fetchAll($sql, $params);
+            
+        } catch (Exception $e) {
+            error_log("PaymentManager::getOutstandingAmounts Error: " . $e->getMessage());
+            return [];
+        }
+    }
     
-    // POST処理（入金記録など）
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $action = $_POST['action'] ?? '';
-        
-        switch ($action) {
-            case 'record_payment':
-                $paymentData = [
-                    'payment_date' => $_POST['payment_date'],
-                    'amount' => floatval($_POST['amount']),
-                    'payment_method' => $_POST['payment_method'],
-                    'reference_number' => $_POST['reference_number'] ?? '',
-                    'notes' => $_POST['notes'] ?? '',
-                    'auto_generate_receipt' => isset($_POST['auto_generate_receipt'])
+    /**
+     * ✅ 支払い統計取得（payments.phpで使用）
+     */
+    public function getPaymentStatistics($period = 'current_month') {
+        try {
+            // 期間設定
+            switch ($period) {
+                case 'current_month':
+                    $dateFrom = date('Y-m-01');
+                    $dateTo = date('Y-m-t');
+                    break;
+                case 'last_month':
+                    $dateFrom = date('Y-m-01', strtotime('last month'));
+                    $dateTo = date('Y-m-t', strtotime('last month'));
+                    break;
+                case 'current_year':
+                    $dateFrom = date('Y-01-01');
+                    $dateTo = date('Y-12-31');
+                    break;
+                default:
+                    $dateFrom = date('Y-m-01');
+                    $dateTo = date('Y-m-t');
+            }
+            
+            // 今月の入金統計
+            $paymentStats = $this->db->fetchRow("
+                SELECT 
+                    COUNT(*) as total_payments,
+                    COALESCE(SUM(amount), 0) as total_amount,
+                    AVG(amount) as average_amount
+                FROM payments 
+                WHERE payment_date BETWEEN ? AND ?
+            ", [$dateFrom, $dateTo]);
+            
+            // 未回収統計
+            $outstandingStats = $this->db->fetchRow("
+                SELECT 
+                    COUNT(DISTINCT i.id) as outstanding_invoices,
+                    COALESCE(SUM(i.total_amount - COALESCE(paid.amount, 0)), 0) as outstanding_amount
+                FROM invoices i
+                LEFT JOIN (
+                    SELECT invoice_id, SUM(amount) as amount 
+                    FROM payments 
+                    GROUP BY invoice_id
+                ) paid ON i.id = paid.invoice_id
+                WHERE i.status IN ('issued', 'sent', 'partially_paid')
+                AND (i.total_amount - COALESCE(paid.amount, 0)) > 0
+            ");
+            
+            // 支払い方法別統計
+            $methodStats = $this->db->fetchAll("
+                SELECT 
+                    payment_method,
+                    COUNT(*) as count,
+                    SUM(amount) as total_amount
+                FROM payments 
+                WHERE payment_date BETWEEN ? AND ?
+                GROUP BY payment_method
+                ORDER BY total_amount DESC
+            ", [$dateFrom, $dateTo]);
+            
+            return [
+                'period' => $period,
+                'date_range' => [
+                    'from' => $dateFrom,
+                    'to' => $dateTo
+                ],
+                'total_payments' => $paymentStats['total_payments'] ?? 0,
+                'total_amount' => $paymentStats['total_amount'] ?? 0,
+                'average_amount' => $paymentStats['average_amount'] ?? 0,
+                'outstanding_invoices' => $outstandingStats['outstanding_invoices'] ?? 0,
+                'outstanding_amount' => $outstandingStats['outstanding_amount'] ?? 0,
+                'payment_methods' => $methodStats ?? []
+            ];
+            
+        } catch (Exception $e) {
+            error_log("PaymentManager::getPaymentStatistics Error: " . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * ✅ 支払いアラート取得（payments.phpで使用）
+     */
+    public function getPaymentAlerts() {
+        try {
+            // 期限切れ（overdue）
+            $overdueAlerts = $this->db->fetchRow("
+                SELECT 
+                    COUNT(DISTINCT i.id) as count,
+                    COALESCE(SUM(i.total_amount - COALESCE(paid.amount, 0)), 0) as total_amount
+                FROM invoices i
+                LEFT JOIN (
+                    SELECT invoice_id, SUM(amount) as amount 
+                    FROM payments 
+                    GROUP BY invoice_id
+                ) paid ON i.id = paid.invoice_id
+                WHERE i.status IN ('issued', 'sent', 'partially_paid')
+                AND (i.total_amount - COALESCE(paid.amount, 0)) > 0
+                AND i.due_date < CURDATE()
+            ");
+            
+            // 期限間近（3日以内）
+            $dueSoonAlerts = $this->db->fetchRow("
+                SELECT 
+                    COUNT(DISTINCT i.id) as count,
+                    COALESCE(SUM(i.total_amount - COALESCE(paid.amount, 0)), 0) as total_amount
+                FROM invoices i
+                LEFT JOIN (
+                    SELECT invoice_id, SUM(amount) as amount 
+                    FROM payments 
+                    GROUP BY invoice_id
+                ) paid ON i.id = paid.invoice_id
+                WHERE i.status IN ('issued', 'sent', 'partially_paid')
+                AND (i.total_amount - COALESCE(paid.amount, 0)) > 0
+                AND i.due_date >= CURDATE()
+                AND i.due_date <= DATE_ADD(CURDATE(), INTERVAL 3 DAY)
+            ");
+            
+            // 高額未回収（5万円以上）
+            $largeAmountAlerts = $this->db->fetchRow("
+                SELECT 
+                    COUNT(DISTINCT i.id) as count,
+                    COALESCE(SUM(i.total_amount - COALESCE(paid.amount, 0)), 0) as total_amount
+                FROM invoices i
+                LEFT JOIN (
+                    SELECT invoice_id, SUM(amount) as amount 
+                    FROM payments 
+                    GROUP BY invoice_id
+                ) paid ON i.id = paid.invoice_id
+                WHERE i.status IN ('issued', 'sent', 'partially_paid')
+                AND (i.total_amount - COALESCE(paid.amount, 0)) >= 50000
+            ");
+            
+            return [
+                'overdue' => [
+                    'count' => $overdueAlerts['count'] ?? 0,
+                    'total_amount' => $overdueAlerts['total_amount'] ?? 0
+                ],
+                'due_soon' => [
+                    'count' => $dueSoonAlerts['count'] ?? 0,
+                    'total_amount' => $dueSoonAlerts['total_amount'] ?? 0
+                ],
+                'large_amount' => [
+                    'count' => $largeAmountAlerts['count'] ?? 0,
+                    'total_amount' => $largeAmountAlerts['total_amount'] ?? 0
+                ]
+            ];
+            
+        } catch (Exception $e) {
+            error_log("PaymentManager::getPaymentAlerts Error: " . $e->getMessage());
+            return [
+                'overdue' => ['count' => 0, 'total_amount' => 0],
+                'due_soon' => ['count' => 0, 'total_amount' => 0],
+                'large_amount' => ['count' => 0, 'total_amount' => 0]
+            ];
+        }
+    }
+    
+    /**
+     * ✅ 支払い記録（payments.phpで使用）
+     */
+    public function recordPayment($invoiceId, $paymentData) {
+        try {
+            $this->db->beginTransaction();
+            
+            // 入力値検証
+            if (!$this->validatePaymentData($paymentData)) {
+                throw new Exception('入力データが不正です');
+            }
+            
+            // 請求書情報を取得
+            $invoice = $this->db->fetchRow("
+                SELECT id, total_amount, status 
+                FROM invoices 
+                WHERE id = ?
+            ", [$invoiceId]);
+            
+            if (!$invoice) {
+                throw new Exception('請求書が見つかりません');
+            }
+            
+            // 既存の支払い額を計算
+            $paidAmount = $this->db->fetchRow("
+                SELECT COALESCE(SUM(amount), 0) as total_paid 
+                FROM payments 
+                WHERE invoice_id = ?
+            ", [$invoiceId])['total_paid'];
+            
+            $newTotalPaid = $paidAmount + $paymentData['amount'];
+            
+            // 支払い記録を挿入
+            $paymentId = $this->db->insert("
+                INSERT INTO payments (
+                    invoice_id, payment_date, amount, payment_method, 
+                    reference_number, notes, created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+            ", [
+                $invoiceId,
+                $paymentData['payment_date'],
+                $paymentData['amount'],
+                $paymentData['payment_method'],
+                $paymentData['reference_number'] ?? '',
+                $paymentData['notes'] ?? '',
+                'system'
+            ]);
+            
+            // 請求書ステータスを更新
+            if ($newTotalPaid >= $invoice['total_amount']) {
+                $newStatus = 'paid';
+            } elseif ($newTotalPaid > 0) {
+                $newStatus = 'partially_paid';
+            } else {
+                $newStatus = 'issued';
+            }
+            
+            $this->db->execute("
+                UPDATE invoices 
+                SET status = ?, updated_at = NOW() 
+                WHERE id = ?
+            ", [$newStatus, $invoiceId]);
+            
+            $this->db->commit();
+            
+            return [
+                'success' => true,
+                'message' => '支払いを記録しました',
+                'payment_id' => $paymentId,
+                'invoice_status' => $newStatus,
+                'total_paid' => $newTotalPaid
+            ];
+            
+        } catch (Exception $e) {
+            $this->db->rollback();
+            error_log("PaymentManager::recordPayment Error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => '支払いの記録に失敗しました: ' . $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * ✅ 支払いキャンセル（payments.phpで使用）
+     */
+    public function cancelPayment($paymentId, $reason = '') {
+        try {
+            $this->db->beginTransaction();
+            
+            // 支払い情報を取得
+            $payment = $this->db->fetchRow("
+                SELECT p.*, i.total_amount 
+                FROM payments p
+                LEFT JOIN invoices i ON p.invoice_id = i.id
+                WHERE p.id = ?
+            ", [$paymentId]);
+            
+            if (!$payment) {
+                throw new Exception('支払い記録が見つかりません');
+            }
+            
+            // 支払い記録を削除
+            $this->db->execute("DELETE FROM payments WHERE id = ?", [$paymentId]);
+            
+            // 請求書ステータスを再計算
+            $remainingPaid = $this->db->fetchRow("
+                SELECT COALESCE(SUM(amount), 0) as total_paid 
+                FROM payments 
+                WHERE invoice_id = ?
+            ", [$payment['invoice_id']])['total_paid'];
+            
+            if ($remainingPaid >= $payment['total_amount']) {
+                $newStatus = 'paid';
+            } elseif ($remainingPaid > 0) {
+                $newStatus = 'partially_paid';
+            } else {
+                $newStatus = 'issued';
+            }
+            
+            $this->db->execute("
+                UPDATE invoices 
+                SET status = ?, updated_at = NOW() 
+                WHERE id = ?
+            ", [$newStatus, $payment['invoice_id']]);
+            
+            $this->db->commit();
+            
+            return [
+                'success' => true,
+                'message' => '支払いをキャンセルしました'
+            ];
+            
+        } catch (Exception $e) {
+            $this->db->rollback();
+            error_log("PaymentManager::cancelPayment Error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => '支払いのキャンセルに失敗しました: ' . $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * PayPay支払い専用処理
+     */
+    public function processPayPayPayment($paymentData) {
+        // PayPay固有の処理（手数料なし、QRコード処理等）
+        $paymentData['payment_method'] = 'paypay';
+        return $this->recordPayment($paymentData['invoice_id'], $paymentData);
+    }
+    
+    /**
+     * 満額入金記録（一括処理用）
+     */
+    public function recordFullPayment($invoiceId, $paymentDate = null, $paymentMethod = 'cash', $notes = '') {
+        try {
+            // 請求書の未払い金額を取得
+            $invoice = $this->db->fetchRow("
+                SELECT 
+                    i.id, i.total_amount,
+                    COALESCE(SUM(p.amount), 0) as paid_amount,
+                    (i.total_amount - COALESCE(SUM(p.amount), 0)) as outstanding_amount
+                FROM invoices i
+                LEFT JOIN payments p ON i.id = p.invoice_id
+                WHERE i.id = ?
+                GROUP BY i.id, i.total_amount
+            ", [$invoiceId]);
+            
+            if (!$invoice || $invoice['outstanding_amount'] <= 0) {
+                return [
+                    'success' => false,
+                    'message' => '未払い金額がありません'
                 ];
-                
-                $result = $paymentManager->recordPayment($_POST['invoice_id'], $paymentData);
-                $message = $result['message'];
-                $messageType = $result['success'] ? 'success' : 'danger';
-                break;
-                
-            case 'cancel_payment':
-                $result = $paymentManager->cancelPayment($_POST['payment_id'], $_POST['reason'] ?? '');
-                $message = $result['message'];
-                $messageType = $result['success'] ? 'success' : 'danger';
-                break;
-        }
-        
-        // POST後リダイレクト
-        if ($message) {
-            header("Location: payments.php?" . http_build_query(array_merge($filters, ['msg' => base64_encode($message), 'type' => $messageType])));
-            exit;
+            }
+            
+            // 満額入金を記録
+            return $this->recordPayment($invoiceId, [
+                'payment_date' => $paymentDate ?? date('Y-m-d'),
+                'amount' => $invoice['outstanding_amount'],
+                'payment_method' => $paymentMethod,
+                'reference_number' => '',
+                'notes' => $notes ?: '満額入金'
+            ]);
+            
+        } catch (Exception $e) {
+            error_log("PaymentManager::recordFullPayment Error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => '満額入金の記録に失敗しました: ' . $e->getMessage()
+            ];
         }
     }
     
-    // GETメッセージ表示
-    if (isset($_GET['msg'])) {
-        $message = base64_decode($_GET['msg']);
-        $messageType = $_GET['type'] ?? 'info';
+    /**
+     * 入力値検証
+     */
+    private function validatePaymentData($paymentData) {
+        // 必須項目チェック
+        if (empty($paymentData['payment_date']) || 
+            empty($paymentData['amount']) || 
+            empty($paymentData['payment_method'])) {
+            return false;
+        }
+        
+        // 金額チェック
+        if (!is_numeric($paymentData['amount']) || $paymentData['amount'] <= 0) {
+            return false;
+        }
+        
+        // 支払い方法チェック
+        $allowedMethods = array_keys(self::getPaymentMethods());
+        if (!in_array($paymentData['payment_method'], $allowedMethods)) {
+            return false;
+        }
+        
+        // 日付チェック
+        if (!strtotime($paymentData['payment_date'])) {
+            return false;
+        }
+        
+        return true;
     }
-
-} catch (Exception $e) {
-    error_log("支払い管理画面エラー: " . $e->getMessage());
-    $error = "データの取得に失敗しました: " . $e->getMessage();
-    $data = [];
-    $statistics = [];
-    $alerts = [];
-    $companies = [];
-}
-
-// 表示用ヘルパー関数
-function formatCurrency($amount) {
-    return number_format($amount ?? 0) . '円';
-}
-
-function formatDate($date) {
-    return date('Y/m/d', strtotime($date));
-}
-
-function getPaymentMethodText($method) {
-    $methods = [
-        'cash' => '現金',
-        'bank_transfer' => '銀行振込',
-        'account_debit' => '口座引落',
-        'other' => 'その他'
-    ];
-    return $methods[$method] ?? $method;
-}
-
-function getPriorityBadge($priority) {
-    $badges = [
-        'overdue' => 'badge bg-danger',
-        'urgent' => 'badge bg-warning',
-        'warning' => 'badge bg-info',
-        'normal' => 'badge bg-secondary'
-    ];
-    return $badges[$priority] ?? 'badge bg-secondary';
-}
-
-function getPriorityText($priority) {
-    $texts = [
-        'overdue' => '期限切れ',
-        'urgent' => '緊急',
-        'warning' => '注意',
-        'normal' => '通常'
-    ];
-    return $texts[$priority] ?? $priority;
 }
 ?>
-
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo htmlspecialchars($pageTitle); ?></title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="../assets/css/payments.css" rel="stylesheet">
-</head>
-<body class="bg-light">
-
-<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="#">
-            <i class="fas fa-money-check-alt me-2"></i>
-            支払い管理センター
-        </a>
-        <div class="navbar-nav ms-auto">
-            <a class="nav-link" href="../index.php">
-                <i class="fas fa-tachometer-alt me-1"></i>ダッシュボード
-            </a>
-            <a class="nav-link" href="../pages/invoices.php">
-                <i class="fas fa-file-invoice me-1"></i>請求書管理
-            </a>
-            <a class="nav-link" href="../pages/companies.php">
-                <i class="fas fa-building me-1"></i>企業管理
-            </a>
-        </div>
-    </div>
-</nav>
-
-<div class="container-fluid py-4">
-    <?php if (isset($error)): ?>
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        <i class="fas fa-exclamation-triangle me-2"></i>
-        <?php echo htmlspecialchars($error); ?>
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($message): ?>
-    <div class="alert alert-<?php echo $messageType; ?> alert-dismissible fade show" role="alert">
-        <i class="fas fa-info-circle me-2"></i>
-        <?php echo htmlspecialchars($message); ?>
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
-    <?php endif; ?>
-
-    <!-- ヘッダー -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <h1 class="h3 mb-0 text-primary">
-                        <i class="fas fa-money-check-alt me-2"></i>
-                        支払い管理センター
-                    </h1>
-                    <p class="text-muted mb-0">入金記録・未回収管理・督促アラート</p>
-                </div>
-                <div>
-                    <button class="btn btn-success btn-lg" data-bs-toggle="modal" data-bs-target="#paymentModal">
-                        <i class="fas fa-plus me-2"></i>
-                        入金を記録
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 統計カード -->
-    <div class="row g-3 mb-4">
-        <div class="col-lg-3 col-md-6">
-            <div class="card payment-card stats-card">
-                <div class="card-body text-center">
-                    <i class="fas fa-yen-sign fa-3x mb-3 opacity-75"></i>
-                    <h5 class="card-title">今月の入金額</h5>
-                    <h2 class="mb-0"><?php echo formatCurrency($statistics['total_amount'] ?? 0); ?></h2>
-                    <small class="opacity-75"><?php echo ($statistics['total_payments'] ?? 0); ?>件の入金</small>
-                </div>
-            </div>
-        </div>
-        
-        <div class="col-lg-3 col-md-6">
-            <div class="card payment-card outstanding-card">
-                <div class="card-body text-center">
-                    <i class="fas fa-exclamation-triangle fa-3x mb-3 opacity-75"></i>
-                    <h5 class="card-title">未回収金額</h5>
-                    <h2 class="mb-0"><?php echo formatCurrency($statistics['outstanding_amount'] ?? 0); ?></h2>
-                    <small class="opacity-75"><?php echo ($statistics['outstanding_invoices'] ?? 0); ?>件の未払い</small>
-                </div>
-            </div>
-        </div>
-        
-        <div class="col-lg-3 col-md-6">
-            <div class="card payment-card alert-card">
-                <div class="card-body text-center">
-                    <i class="fas fa-clock fa-3x mb-3 opacity-75"></i>
-                    <h5 class="card-title">期限切れ</h5>
-                    <h2 class="mb-0"><?php echo ($alerts['overdue']['count'] ?? 0); ?>件</h2>
-                    <small class="opacity-75"><?php echo formatCurrency($alerts['overdue']['total_amount'] ?? 0); ?></small>
-                </div>
-            </div>
-        </div>
-        
-        <div class="col-lg-3 col-md-6">
-            <div class="card payment-card success-card">
-                <div class="card-body text-center">
-                    <i class="fas fa-percentage fa-3x mb-3 opacity-75"></i>
-                    <h5 class="card-title">回収率</h5>
-                    <h2 class="mb-0">
-                        <?php 
-                        $totalInvoiced = ($statistics['total_amount'] ?? 0) + ($statistics['outstanding_amount'] ?? 0);
-                        $collectionRate = $totalInvoiced > 0 ? (($statistics['total_amount'] ?? 0) / $totalInvoiced * 100) : 0;
-                        echo number_format($collectionRate, 1) . '%';
-                        ?>
-                    </h2>
-                    <small class="opacity-75">今月の実績</small>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- アラート表示 -->
-    <?php if (!empty($alerts)): ?>
-    <div class="row mb-4">
-        <?php if (($alerts['overdue']['count'] ?? 0) > 0): ?>
-        <div class="col-md-4">
-            <div class="alert-card alert-danger-custom p-3">
-                <h6 class="fw-bold text-danger">
-                    <i class="fas fa-exclamation-circle me-2"></i>
-                    期限切れ請求書
-                </h6>
-                <div class="h4 mb-2"><?php echo $alerts['overdue']['count']; ?>件</div>
-                <div class="small"><?php echo formatCurrency($alerts['overdue']['total_amount']); ?></div>
-                <a href="?view_type=outstanding&priority=overdue" class="btn btn-outline-danger btn-sm mt-2">
-                    詳細を確認
-                </a>
-            </div>
-        </div>
-        <?php endif; ?>
-
-        <?php if (($alerts['due_soon']['count'] ?? 0) > 0): ?>
-        <div class="col-md-4">
-            <div class="alert-card alert-warning-custom p-3">
-                <h6 class="fw-bold text-warning">
-                    <i class="fas fa-clock me-2"></i>
-                    期限間近（3日以内）
-                </h6>
-                <div class="h4 mb-2"><?php echo $alerts['due_soon']['count']; ?>件</div>
-                <div class="small"><?php echo formatCurrency($alerts['due_soon']['total_amount']); ?></div>
-                <a href="?view_type=outstanding&priority=urgent" class="btn btn-outline-warning btn-sm mt-2">
-                    詳細を確認
-                </a>
-            </div>
-        </div>
-        <?php endif; ?>
-
-        <?php if (($alerts['large_amount']['count'] ?? 0) > 0): ?>
-        <div class="col-md-4">
-            <div class="alert-card alert-info-custom p-3">
-                <h6 class="fw-bold text-info">
-                    <i class="fas fa-money-bill-wave me-2"></i>
-                    高額未回収（5万円以上）
-                </h6>
-                <div class="h4 mb-2"><?php echo $alerts['large_amount']['count']; ?>件</div>
-                <div class="small"><?php echo formatCurrency($alerts['large_amount']['total_amount']); ?></div>
-                <a href="?view_type=outstanding&large_amount=1" class="btn btn-outline-info btn-sm mt-2">
-                    詳細を確認
-                </a>
-            </div>
-        </div>
-        <?php endif; ?>
-    </div>
-    <?php endif; ?>
-
-    <!-- タブナビゲーション -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <ul class="nav nav-tabs" id="paymentTabs" role="tablist">
-                <li class="nav-item" role="presentation">
-                    <a class="nav-link <?php echo $filters['view_type'] === 'payments' ? 'active' : ''; ?>" 
-                       href="?<?php echo http_build_query(array_merge($filters, ['view_type' => 'payments', 'page' => 1])); ?>">
-                        <i class="fas fa-list me-2"></i>入金履歴
-                    </a>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <a class="nav-link <?php echo $filters['view_type'] === 'outstanding' ? 'active' : ''; ?>" 
-                       href="?<?php echo http_build_query(array_merge($filters, ['view_type' => 'outstanding', 'page' => 1])); ?>">
-                        <i class="fas fa-exclamation-triangle me-2"></i>未回収管理
-                    </a>
-                </li>
-            </ul>
-        </div>
-    </div>
-
-    <!-- フィルターセクション -->
-    <?php include '../includes/payment_filters.php'; ?>
-
-    <!-- データ表示エリア -->
-    <?php if ($filters['view_type'] === 'payments'): ?>
-        <?php include '../includes/payment_history.php'; ?>
-    <?php elseif ($filters['view_type'] === 'outstanding'): ?>
-        <?php include '../includes/outstanding_management.php'; ?>
-    <?php endif; ?>
-</div>
-
-<!-- モーダル -->
-<?php include '../includes/payment_modals.php'; ?>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="../assets/js/payments.js"></script>
-
-</body>
-</html>
