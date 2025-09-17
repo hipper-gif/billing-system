@@ -1,22 +1,17 @@
 <?php
 /**
- * PaymentManager.php - 支払い管理クラス（完全実装版）
+ * PaymentManager.php - 支払い管理クラス（構文修正版）
  * 
- * 機能:
- * - 支払い記録管理
- * - 未回収金額計算
- * - 支払い統計生成
- * - アラート機能
- * - データ取得・フィルタリング
- * 
- * 対応エラー:
- * - Fatal error: Call to undefined method PaymentManager::getPaymentsList() 解決
- * 
- * @version 2.0
+ * @version 2.1
  * @date 2025-09-17
  */
 
-require_once __DIR__ . '/../classes/Database.php';
+// Database.phpのパスを修正
+if (file_exists(__DIR__ . '/Database.php')) {
+    require_once __DIR__ . '/Database.php';
+} elseif (file_exists(__DIR__ . '/../classes/Database.php')) {
+    require_once __DIR__ . '/../classes/Database.php';
+}
 
 class PaymentManager {
     private $db;
