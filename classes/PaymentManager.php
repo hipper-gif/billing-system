@@ -216,7 +216,7 @@ class PaymentManager {
             }
             
             // 今月の入金統計
-            $paymentStats = $this->db->fetchRow("
+            $paymentStatsResult = $this->db->fetchAll("
                 SELECT 
                     COUNT(*) as total_payments,
                     COALESCE(SUM(amount), 0) as total_amount,
@@ -224,9 +224,10 @@ class PaymentManager {
                 FROM payments 
                 WHERE payment_date BETWEEN ? AND ?
             ", array($dateFrom, $dateTo));
+            $paymentStats = isset($paymentStatsResult[0]) ? $paymentStatsResult[0] : array();
             
             // 未回収統計
-            $outstandingStats = $this->db->fetchRow("
+            $outstandingStatsResult = $this->db->fetchAll("
                 SELECT 
                     COUNT(DISTINCT i.id) as outstanding_invoices,
                     COALESCE(SUM(i.total_amount - COALESCE(paid.amount, 0)), 0) as outstanding_amount
@@ -239,6 +240,7 @@ class PaymentManager {
                 WHERE i.status IN ('issued', 'sent', 'partially_paid')
                 AND (i.total_amount - COALESCE(paid.amount, 0)) > 0
             ");
+            $outstandingStats = isset($outstandingStatsResult[0]) ? $outstandingStatsResult[0] : array();
             
             // 支払い方法別統計
             $methodStats = $this->db->fetchAll("
@@ -278,7 +280,7 @@ class PaymentManager {
     public function getPaymentAlerts() {
         try {
             // 期限切れ（overdue）
-            $overdueAlerts = $this->db->fetchRow("
+            $overdueAlertsResult = $this->db->fetchAll("
                 SELECT 
                     COUNT(DISTINCT i.id) as count,
                     COALESCE(SUM(i.total_amount - COALESCE(paid.amount, 0)), 0) as total_amount
@@ -292,9 +294,10 @@ class PaymentManager {
                 AND (i.total_amount - COALESCE(paid.amount, 0)) > 0
                 AND i.due_date < CURDATE()
             ");
+            $overdueAlerts = isset($overdueAlertsResult[0]) ? $overdueAlertsResult[0] : array();
             
             // 期限間近（3日以内）
-            $dueSoonAlerts = $this->db->fetchRow("
+            $dueSoonAlertsResult = $this->db->fetchAll("
                 SELECT 
                     COUNT(DISTINCT i.id) as count,
                     COALESCE(SUM(i.total_amount - COALESCE(paid.amount, 0)), 0) as total_amount
@@ -309,9 +312,10 @@ class PaymentManager {
                 AND i.due_date >= CURDATE()
                 AND i.due_date <= DATE_ADD(CURDATE(), INTERVAL 3 DAY)
             ");
+            $dueSoonAlerts = isset($dueSoonAlertsResult[0]) ? $dueSoonAlertsResult[0] : array();
             
             // 高額未回収（5万円以上）
-            $largeAmountAlerts = $this->db->fetchRow("
+            $largeAmountAlertsResult = $this->db->fetchAll("
                 SELECT 
                     COUNT(DISTINCT i.id) as count,
                     COALESCE(SUM(i.total_amount - COALESCE(paid.amount, 0)), 0) as total_amount
@@ -324,6 +328,7 @@ class PaymentManager {
                 WHERE i.status IN ('issued', 'sent', 'partially_paid')
                 AND (i.total_amount - COALESCE(paid.amount, 0)) >= 50000
             ");
+            $largeAmountAlerts = isset($largeAmountAlertsResult[0]) ? $largeAmountAlertsResult[0] : array();
             
             return array(
                 'overdue' => array(
@@ -363,24 +368,25 @@ class PaymentManager {
             }
             
             // 請求書情報を取得
-            $invoice = $this->db->fetchRow("
+            $invoiceResult = $this->db->fetchAll("
                 SELECT id, total_amount, status 
                 FROM invoices 
                 WHERE id = ?
             ", array($invoiceId));
             
-            if (!$invoice) {
+            if (empty($invoiceResult)) {
                 throw new Exception('請求書が見つかりません');
             }
+            $invoice = $invoiceResult[0];
             
             // 既存の支払い額を計算
-            $paidAmountRow = $this->db->fetchRow("
+            $paidAmountResult = $this->db->fetchAll("
                 SELECT COALESCE(SUM(amount), 0) as total_paid 
                 FROM payments 
                 WHERE invoice_id = ?
             ", array($invoiceId));
             
-            $paidAmount = $paidAmountRow['total_paid'];
+            $paidAmount = isset($paidAmountResult[0]) ? $paidAmountResult[0]['total_paid'] : 0;
             $newTotalPaid = $paidAmount + $paymentData['amount'];
             
             // 支払い記録を挿入
@@ -442,28 +448,29 @@ class PaymentManager {
             $this->db->beginTransaction();
             
             // 支払い情報を取得
-            $payment = $this->db->fetchRow("
+            $paymentResult = $this->db->fetchAll("
                 SELECT p.*, i.total_amount 
                 FROM payments p
                 LEFT JOIN invoices i ON p.invoice_id = i.id
                 WHERE p.id = ?
             ", array($paymentId));
             
-            if (!$payment) {
+            if (empty($paymentResult)) {
                 throw new Exception('支払い記録が見つかりません');
             }
+            $payment = $paymentResult[0];
             
             // 支払い記録を削除
             $this->db->execute("DELETE FROM payments WHERE id = ?", array($paymentId));
             
             // 請求書ステータスを再計算
-            $remainingPaidRow = $this->db->fetchRow("
+            $remainingPaidResult = $this->db->fetchAll("
                 SELECT COALESCE(SUM(amount), 0) as total_paid 
                 FROM payments 
                 WHERE invoice_id = ?
             ", array($payment['invoice_id']));
             
-            $remainingPaid = $remainingPaidRow['total_paid'];
+            $remainingPaid = isset($remainingPaidResult[0]) ? $remainingPaidResult[0]['total_paid'] : 0;
             
             if ($remainingPaid >= $payment['total_amount']) {
                 $newStatus = 'paid';
