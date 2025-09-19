@@ -1,0 +1,821 @@
+/**
+ * Smiley配食事業 集金管理システム
+ * 専用スタイルシート - PC操作不慣れ対応特化版
+ * 
+ * @version 5.0
+ * @date 2025-09-19
+ * @purpose 集金業務の使いやすさを最優先にした設計
+ */
+
+/* =====================================================
+   カラーシステム - 色分けによる直感的理解
+   ===================================================== */
+
+:root {
+    /* Smiley配食事業専用カラーパレット */
+    --primary-blue: #2196F3;
+    --success-green: #4CAF50;
+    --warning-amber: #FFC107;
+    --error-red: #F44336;
+    --info-blue: #03A9F4;
+    --urgent-orange: #FF9800;
+    --normal-teal: #009688;
+    
+    /* PC操作不慣れ対応用の強調色 */
+    --highlight-yellow: #FFEB3B;
+    --safe-green: #8BC34A;
+    --danger-pink: #E91E63;
+    
+    /* 背景・テキスト色 */
+    --light-bg: #FAFAFA;
+    --card-bg: #FFFFFF;
+    --text-primary: #212121;
+    --text-secondary: #757575;
+    --text-light: #BDBDBD;
+    
+    /* シャドウ・エフェクト */
+    --shadow-light: 0 2px 4px rgba(0,0,0,0.1);
+    --shadow-medium: 0 4px 8px rgba(0,0,0,0.15);
+    --shadow-heavy: 0 8px 16px rgba(0,0,0,0.2);
+}
+
+/* =====================================================
+   PC操作不慣れ対応 - 基本要素の大型化
+   ===================================================== */
+
+/* ボタン全般 */
+.btn {
+    min-height: 45px;
+    font-size: 18px;
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 12px 20px;
+    transition: all 0.3s ease;
+    box-shadow: var(--shadow-light);
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-medium);
+}
+
+.btn-lg {
+    min-height: 60px;
+    font-size: 24px;
+    padding: 15px 30px;
+    border-radius: 12px;
+}
+
+.btn-sm {
+    min-height: 40px;
+    font-size: 16px;
+    padding: 10px 16px;
+}
+
+/* フォーム要素の大型化 */
+.form-control, 
+.form-select {
+    min-height: 45px;
+    font-size: 18px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    border: 2px solid #E0E0E0;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus, 
+.form-select:focus {
+    border-color: var(--primary-blue);
+    box-shadow: 0 0 0 0.2rem rgba(33, 150, 243, 0.25);
+    transform: scale(1.02);
+}
+
+/* チェックボックス・ラジオボタンの大型化 */
+.form-check-input {
+    width: 1.5em;
+    height: 1.5em;
+    border: 2px solid #E0E0E0;
+    transition: all 0.3s ease;
+}
+
+.form-check-input:checked {
+    background-color: var(--primary-blue);
+    border-color: var(--primary-blue);
+    transform: scale(1.1);
+}
+
+/* テーブルの見やすさ向上 */
+.table {
+    font-size: 16px;
+}
+
+.table th {
+    background-color: var(--light-bg);
+    font-weight: 700;
+    padding: 15px;
+    border-bottom: 2px solid #E0E0E0;
+}
+
+.table td {
+    padding: 15px;
+    vertical-align: middle;
+    border-bottom: 1px solid #F5F5F5;
+}
+
+/* =====================================================
+   統計カード - サマリー情報表示
+   ===================================================== */
+
+.stat-card {
+    border-radius: 16px;
+    padding: 25px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-medium);
+    transition: all 0.3s ease;
+    border: none;
+    background: linear-gradient(135deg, #FFFFFF, #F8F9FA);
+}
+
+.stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-heavy);
+}
+
+/* 統計カードの色分け */
+.stat-card.success {
+    background: linear-gradient(135deg, var(--success-green), #66BB6A);
+    color: white;
+}
+
+.stat-card.warning {
+    background: linear-gradient(135deg, var(--warning-amber), #FFCA28);
+    color: #333;
+}
+
+.stat-card.danger {
+    background: linear-gradient(135deg, var(--error-red), #EF5350);
+    color: white;
+}
+
+.stat-card.info {
+    background: linear-gradient(135deg, var(--primary-blue), #42A5F5);
+    color: white;
+}
+
+.stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.stat-label {
+    font-size: 1.1rem;
+    opacity: 0.9;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+/* =====================================================
+   集金リスト - メイン機能の視覚化
+   ===================================================== */
+
+/* 集金リスト行の色分け（アラートレベル別） */
+.collection-row {
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.collection-row:hover {
+    transform: translateX(5px);
+    box-shadow: -5px 0 15px rgba(0,0,0,0.1);
+}
+
+.collection-row.overdue {
+    background: linear-gradient(90deg, #FFEBEE, #FFF) !important;
+    border-left: 8px solid var(--error-red);
+    animation: urgentPulse 2s infinite;
+}
+
+.collection-row.urgent {
+    background: linear-gradient(90deg, #FFF8E1, #FFF) !important;
+    border-left: 8px solid var(--warning-amber);
+    animation: warningGlow 3s infinite;
+}
+
+.collection-row.normal {
+    background: linear-gradient(90deg, #F1F8E9, #FFF) !important;
+    border-left: 8px solid var(--success-green);
+}
+
+/* 緊急案件のアニメーション効果 */
+@keyframes urgentPulse {
+    0% { background-color: #FFEBEE; }
+    50% { background-color: #FFCDD2; }
+    100% { background-color: #FFEBEE; }
+}
+
+@keyframes warningGlow {
+    0% { box-shadow: -5px 0 10px rgba(255, 193, 7, 0.3); }
+    50% { box-shadow: -8px 0 20px rgba(255, 193, 7, 0.5); }
+    100% { box-shadow: -5px 0 10px rgba(255, 193, 7, 0.3); }
+}
+
+/* 選択時のハイライト */
+.collection-row.selected {
+    background: linear-gradient(90deg, #E3F2FD, #FFF) !important;
+    border: 3px solid var(--primary-blue);
+    border-left: 8px solid var(--primary-blue);
+    box-shadow: 0 0 20px rgba(33, 150, 243, 0.3);
+    transform: scale(1.01);
+}
+
+/* =====================================================
+   満額入金ボタン - 核心機能の強調
+   ===================================================== */
+
+.btn-full-payment {
+    background: linear-gradient(45deg, var(--success-green), #66BB6A);
+    border: none;
+    color: white;
+    font-weight: 700;
+    font-size: 16px;
+    min-width: 180px;
+    min-height: 45px;
+    border-radius: 25px;
+    box-shadow: var(--shadow-medium);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-full-payment::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+    transition: left 0.5s ease;
+}
+
+.btn-full-payment:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-heavy);
+    color: white;
+    background: linear-gradient(45deg, #2E7D32, var(--success-green));
+}
+
+.btn-full-payment:hover::before {
+    left: 100%;
+}
+
+.btn-full-payment:active {
+    transform: translateY(-1px);
+    background: linear-gradient(45deg, #1B5E20, #2E7D32);
+}
+
+/* =====================================================
+   アラート・バッジシステム
+   ===================================================== */
+
+.alert-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.alert-badge.overdue {
+    background: linear-gradient(45deg, var(--error-red), #EF5350);
+    color: white;
+    animation: criticalBlink 1.5s infinite;
+}
+
+.alert-badge.urgent {
+    background: linear-gradient(45deg, var(--warning-amber), #FFCA28);
+    color: #333;
+    animation: warningPulse 2s infinite;
+}
+
+.alert-badge.normal {
+    background: linear-gradient(45deg, var(--success-green), #66BB6A);
+    color: white;
+}
+
+@keyframes criticalBlink {
+    0%, 50% { opacity: 1; }
+    25%, 75% { opacity: 0.5; }
+}
+
+@keyframes warningPulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+/* =====================================================
+   モーダル・ダイアログの改善
+   ===================================================== */
+
+.modal-content {
+    border-radius: 16px;
+    border: none;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+}
+
+.modal-header {
+    background: linear-gradient(135deg, var(--primary-blue), #42A5F5);
+    color: white;
+    border-radius: 16px 16px 0 0;
+    padding: 20px;
+}
+
+.modal-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.modal-body {
+    padding: 25px;
+}
+
+.modal-footer {
+    padding: 20px 25px;
+    border-top: 1px solid #E0E0E0;
+    border-radius: 0 0 16px 16px;
+}
+
+/* =====================================================
+   検索・フィルター機能
+   ===================================================== */
+
+.input-group .form-control {
+    border-right: none;
+}
+
+.input-group .btn {
+    border-left: none;
+    border-color: #E0E0E0;
+}
+
+.btn-group .btn-check:checked + .btn {
+    background: linear-gradient(135deg, var(--primary-blue), #42A5F5);
+    color: white;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* =====================================================
+   ページネーション
+   ===================================================== */
+
+.pagination .page-item .page-link {
+    min-height: 45px;
+    font-size: 16px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin: 0 2px;
+    border: 2px solid #E0E0E0;
+    color: var(--text-primary);
+    transition: all 0.3s ease;
+}
+
+.pagination .page-item.active .page-link {
+    background: linear-gradient(135deg, var(--primary-blue), #42A5F5);
+    border-color: var(--primary-blue);
+    color: white;
+    box-shadow: var(--shadow-medium);
+}
+
+.pagination .page-item .page-link:hover {
+    background-color: #F5F5F5;
+    border-color: var(--primary-blue);
+    transform: translateY(-1px);
+}
+
+/* =====================================================
+   ローディング・状態表示
+   ===================================================== */
+
+.loading {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-secondary);
+}
+
+.loading .spinner-border {
+    width: 4rem;
+    height: 4rem;
+    border-width: 4px;
+    color: var(--primary-blue);
+}
+
+.loading p {
+    margin-top: 20px;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+/* エラー・成功メッセージ */
+.alert {
+    border-radius: 12px;
+    border: none;
+    padding: 20px;
+    font-size: 16px;
+    box-shadow: var(--shadow-light);
+}
+
+.alert-danger {
+    background: linear-gradient(135deg, #FFEBEE, #FFCDD2);
+    color: #B71C1C;
+    border-left: 6px solid var(--error-red);
+}
+
+.alert-success {
+    background: linear-gradient(135deg, #F1F8E9, #DCEDC8);
+    color: #2E7D32;
+    border-left: 6px solid var(--success-green);
+}
+
+.alert-info {
+    background: linear-gradient(135deg, #E3F2FD, #BBDEFB);
+    color: #0D47A1;
+    border-left: 6px solid var(--primary-blue);
+}
+
+.alert-warning {
+    background: linear-gradient(135deg, #FFF8E1, #FFF176);
+    color: #F57F17;
+    border-left: 6px solid var(--warning-amber);
+}
+
+/* =====================================================
+   ナビゲーション・ヘッダー
+   ===================================================== */
+
+.navbar {
+    box-shadow: var(--shadow-medium);
+}
+
+.navbar-brand {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.navbar-text {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+/* =====================================================
+   印刷専用スタイル
+   ===================================================== */
+
+@media print {
+    /* 非表示要素 */
+    .no-print,
+    .btn,
+    .navbar,
+    .modal,
+    .alert {
+        display: none !important;
+    }
+    
+    /* 印刷用レイアウト調整 */
+    body {
+        font-size: 12px;
+        line-height: 1.4;
+        color: #000;
+        background: white;
+    }
+    
+    .container-fluid {
+        max-width: 100%;
+        padding: 0;
+    }
+    
+    .card {
+        border: 1px solid #000;
+        box-shadow: none;
+        margin: 0;
+        page-break-inside: avoid;
+    }
+    
+    .card-header {
+        background: #F5F5F5 !important;
+        color: #000 !important;
+        border-bottom: 2px solid #000;
+    }
+    
+    .collection-row {
+        page-break-inside: avoid;
+        border-bottom: 1px solid #CCC;
+    }
+    
+    .stat-card {
+        border: 2px solid #000;
+        background: white !important;
+        color: #000 !important;
+        margin: 10px 0;
+    }
+    
+    .table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .table th,
+    .table td {
+        border: 1px solid #000;
+        padding: 8px;
+        text-align: left;
+    }
+    
+    .table th {
+        background: #F0F0F0 !important;
+        font-weight: bold;
+    }
+    
+    /* 印刷ヘッダー */
+    @page {
+        margin: 15mm;
+        size: A4;
+    }
+    
+    .print-header {
+        text-align: center;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #000;
+    }
+    
+    .print-footer {
+        margin-top: 20px;
+        padding-top: 10px;
+        border-top: 1px solid #000;
+        text-align: right;
+        font-size: 10px;
+    }
+}
+
+/* =====================================================
+   レスポンシブ対応 - モバイル・タブレット
+   ===================================================== */
+
+/* タブレット対応 (768px - 991px) */
+@media (max-width: 991px) {
+    .stat-number {
+        font-size: 2rem;
+    }
+    
+    .btn {
+        font-size: 16px;
+        min-height: 42px;
+    }
+    
+    .btn-lg {
+        font-size: 20px;
+        min-height: 55px;
+    }
+    
+    .form-control,
+    .form-select {
+        font-size: 16px;
+        min-height: 42px;
+    }
+    
+    .btn-full-payment {
+        min-width: 150px;
+        font-size: 14px;
+    }
+}
+
+/* スマートフォン対応 (576px - 767px) */
+@media (max-width: 767px) {
+    .container-fluid {
+        padding: 0 10px;
+    }
+    
+    .stat-card {
+        padding: 20px;
+        margin-bottom: 15px;
+    }
+    
+    .stat-number {
+        font-size: 1.8rem;
+    }
+    
+    .btn {
+        font-size: 16px;
+        min-height: 40px;
+        width: 100%;
+        margin-bottom: 10px;
+    }
+    
+    .btn-group .btn {
+        width: auto;
+    }
+    
+    .table-responsive {
+        font-size: 14px;
+    }
+    
+    .table th,
+    .table td {
+        padding: 10px 8px;
+    }
+    
+    .btn-full-payment {
+        width: 100%;
+        min-width: auto;
+        font-size: 14px;
+        margin-top: 5px;
+    }
+    
+    .modal-dialog {
+        margin: 10px;
+    }
+    
+    .modal-body {
+        padding: 20px;
+    }
+    
+    /* 縦画面での最適化 */
+    .row {
+        margin: 0 -5px;
+    }
+    
+    .col-md-3,
+    .col-md-6 {
+        padding: 0 5px;
+        margin-bottom: 15px;
+    }
+}
+
+/* 極小画面対応 (320px - 575px) */
+@media (max-width: 575px) {
+    .navbar-brand {
+        font-size: 1.2rem;
+    }
+    
+    .stat-number {
+        font-size: 1.5rem;
+    }
+    
+    .stat-label {
+        font-size: 0.9rem;
+    }
+    
+    .btn {
+        font-size: 14px;
+        padding: 10px 15px;
+    }
+    
+    .form-control,
+    .form-select {
+        font-size: 16px; /* iOS Safariでのズーム防止 */
+    }
+    
+    .table {
+        font-size: 12px;
+    }
+    
+    .btn-full-payment {
+        font-size: 12px;
+        min-height: 35px;
+        padding: 8px 12px;
+    }
+}
+
+/* =====================================================
+   アクセシビリティ対応
+   ===================================================== */
+
+/* フォーカス表示の強化 */
+*:focus {
+    outline: 3px solid var(--primary-blue);
+    outline-offset: 2px;
+}
+
+/* 高コントラストモード対応 */
+@media (prefers-contrast: high) {
+    .collection-row.overdue {
+        border-left: 10px solid var(--error-red);
+        background: #FFE5E5 !important;
+    }
+    
+    .collection-row.urgent {
+        border-left: 10px solid var(--warning-amber);
+        background: #FFF5CC !important;
+    }
+    
+    .collection-row.normal {
+        border-left: 10px solid var(--success-green);
+        background: #E8F5E8 !important;
+    }
+}
+
+/* 動きを減らしたい場合の対応 */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* =====================================================
+   追加のユーティリティクラス
+   ===================================================== */
+
+/* テキスト関連 */
+.text-large {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.text-emphasis {
+    background: linear-gradient(135deg, var(--highlight-yellow), #FFF176);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 700;
+}
+
+/* 間隔調整 */
+.space-y-3 > * + * {
+    margin-top: 1rem;
+}
+
+.space-y-4 > * + * {
+    margin-top: 1.5rem;
+}
+
+/* カード関連 */
+.card-hover {
+    transition: all 0.3s ease;
+}
+
+.card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-medium);
+}
+
+/* 影の種類 */
+.shadow-soft {
+    box-shadow: var(--shadow-light);
+}
+
+.shadow-medium {
+    box-shadow: var(--shadow-medium);
+}
+
+.shadow-strong {
+    box-shadow: var(--shadow-heavy);
+}
+
+/* 背景色 */
+.bg-success-light {
+    background-color: #F1F8E9;
+}
+
+.bg-warning-light {
+    background-color: #FFF8E1;
+}
+
+.bg-danger-light {
+    background-color: #FFEBEE;
+}
+
+.bg-info-light {
+    background-color: #E3F2FD;
+}
+
+/* =====================================================
+   デバッグ・開発用（プロダクションでは削除）
+   ===================================================== */
+
+.debug-border {
+    border: 2px dashed #FF5722 !important;
+}
+
+.debug-bg {
+    background: rgba(255, 87, 34, 0.1) !important;
+}
+
+/* コンソールログ用クラス */
+.js-collection-row {
+    /* JavaScript用のフック */
+}
+
+.js-payment-button {
+    /* JavaScript用のフック */
+}
+
+.js-modal-trigger {
+    /* JavaScript用のフック */
+}
