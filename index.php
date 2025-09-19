@@ -1,900 +1,1116 @@
 <?php
 /**
- * index.php - Smiley配食事業システム メインダッシュボード
- * ボタンレイアウト修正版
- * 最終更新: 2025年9月17日
+ * Smiley配食事業 集金管理システム
+ * メインダッシュボード - 集金業務特化版
+ * 
+ * @version 5.0
+ * @date 2025-09-19
+ * @purpose 集金管理業務の中央司令室
  */
 
-// セキュリティ・基本設定
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-require_once 'config/database.php';
-require_once 'classes/Database.php';
-require_once 'classes/PaymentManager.php';
+session_start();
 
-// PaymentManagerインスタンス作成
+// 必要なクラスを読み込み
+require_once __DIR__ . '/classes/PaymentManager.php';
+require_once __DIR__ . '/classes/Database.php';
+require_once __DIR__ . '/classes/SecurityHelper.php';
+
+// 初期化処理
 $paymentManager = new PaymentManager();
+$error_message = '';
+$success_message = '';
 
-// 統計データ取得
-$statistics = $paymentManager->getPaymentStatistics('month');
-$alerts = $paymentManager->getPaymentAlerts();
-$outstanding = $paymentManager->getOutstandingAmounts(['overdue_only' => false]);
+// エラーハンドリング
+set_error_handler(function($severity, $message, $file, $line) {
+    error_log("Dashboard Error: {$message} in {$file}:{$line}");
+});
 
-// 基本統計の準備
-$totalSales = $statistics['summary']['total_amount'] ?? 0;
-$outstandingAmount = $statistics['summary']['outstanding_amount'] ?? 0;
-$outstandingCount = $statistics['summary']['outstanding_count'] ?? 0;
-$alertCount = $alerts['alert_count'] ?? 0;
-
-// Chart.js用のデータ準備
-$trendData = $statistics['trend'] ?? [];
-$monthLabels = json_encode(array_column($trendData, 'month'));
-$monthAmounts = json_encode(array_column($trendData, 'monthly_amount'));
-
-$methodData = $statistics['payment_methods'] ?? [];
-$methodLabels = json_encode(array_map(function($item) {
-    $methods = PaymentManager::getPaymentMethods();
-    return $methods[$item['payment_method']] ?? $item['payment_method'];
-}, $methodData));
-$methodAmounts = json_encode(array_column($methodData, 'total_amount'));
+try {
+    // サマリーデータ取得
+    $summary_result = $paymentManager->getCollectionSummary();
+    $summary = $summary_result['success'] ? $summary_result['data'] : [
+        'current_month_sales' => 0,
+        'total_outstanding' => 0,
+        'overdue_amount' => 0,
+        'collection_rate' => 0,
+        'outstanding_count' => 0,
+        'overdue_count' => 0
+    ];
+    
+    // 緊急アラート取得
+    $alerts_result = $paymentManager->getUrgentCollectionAlerts();
+    $alerts = $alerts_result['success'] ? $alerts_result['data'] : [
+        'urgent_count' => 0,
+        'total_urgent_amount' => 0,
+        'alerts' => []
+    ];
+    
+    // 今日の予定取得
+    $schedule_result = $paymentManager->getTodayCollectionSchedule();
+    $schedule = $schedule_result['success'] ? $schedule_result['data'] : [
+        'today' => [],
+        'tomorrow' => [],
+        'today_count' => 0,
+        'tomorrow_count' => 0,
+        'today_amount' => 0,
+        'tomorrow_amount' => 0
+    ];
+    
+} catch (Exception $e) {
+    $error_message = 'システムエラーが発生しました。管理者にお問い合わせください。';
+    error_log("Dashboard Exception: " . $e->getMessage());
+    
+    // エラー時のデフォルト値
+    $summary = ['current_month_sales' => 0, 'total_outstanding' => 0, 'overdue_amount' => 0, 'collection_rate' => 0, 'outstanding_count' => 0, 'overdue_count' => 0];
+    $alerts = ['urgent_count' => 0, 'total_urgent_amount' => 0, 'alerts' => []];
+    $schedule = ['today' => [], 'tomorrow' => [], 'today_count' => 0, 'tomorrow_count' => 0, 'today_amount' => 0, 'tomorrow_amount' => 0];
+}
 ?>
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smiley配食事業システム - ダッシュボード</title>
+    <title>Smiley配食 集金管理システム</title>
     
-    <!-- CSS -->
+    <!-- CSS Libraries -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
-    <link href="assets/css/material-theme.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link href="assets/css/collection.css" rel="stylesheet">
     
     <style>
-        /* ページ固有スタイル - ボタン修正版 */
-        .dashboard-container {
-            padding: var(--spacing-lg);
-            max-width: 1400px;
-            margin: 0 auto;
+        /* 緊急CSS（collection.css作成前の暫定対応） */
+        :root {
+            --primary-blue: #2196F3;
+            --success-green: #4CAF50;
+            --warning-amber: #FFC107;
+            --error-red: #F44336;
+            --info-blue: #03A9F4;
         }
         
-        .welcome-section {
-            background: linear-gradient(135deg, var(--primary-blue), var(--primary-green));
-            color: white;
-            border-radius: var(--radius-large);
-            padding: var(--spacing-xxl);
-            margin-bottom: var(--spacing-lg);
-            box-shadow: var(--elevation-2);
+        /* PC操作不慣れ対応 */
+        .btn {
+            min-height: 45px;
+            font-size: 18px;
+            font-weight: 600;
         }
         
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: var(--spacing-lg);
-            margin-bottom: var(--spacing-lg);
+        .btn-lg {
+            min-height: 60px;
+            font-size: 24px;
+            padding: 15px 30px;
         }
         
+        /* 統計カード */
         .stat-card {
-            background: var(--surface-white);
-            border-radius: var(--radius-normal);
-            padding: var(--spacing-lg);
-            box-shadow: var(--elevation-1);
-            transition: all var(--transition-normal);
-            border-left: 4px solid transparent;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
         }
         
         .stat-card:hover {
-            box-shadow: var(--elevation-2);
             transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
         }
         
-        .stat-card.success { border-left-color: var(--success-green); }
-        .stat-card.warning { border-left-color: var(--warning-amber); }
-        .stat-card.error { border-left-color: var(--error-red); }
-        .stat-card.info { border-left-color: var(--info-blue); }
+        .stat-card.success { background: linear-gradient(135deg, #4CAF50, #66BB6A); color: white; }
+        .stat-card.warning { background: linear-gradient(135deg, #FFC107, #FFCA28); color: #333; }
+        .stat-card.danger { background: linear-gradient(135deg, #F44336, #EF5350); color: white; }
+        .stat-card.info { background: linear-gradient(135deg, #2196F3, #42A5F5); color: white; }
         
-        .stat-icon {
+        .stat-number {
             font-size: 2.5rem;
-            margin-bottom: var(--spacing-md);
-        }
-        
-        .stat-value {
-            font-size: 2rem;
             font-weight: 700;
-            margin: var(--spacing-sm) 0;
+            margin: 0;
         }
         
         .stat-label {
-            color: var(--text-secondary);
-            font-size: var(--font-sm);
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            font-size: 1.1rem;
+            opacity: 0.9;
+            margin-bottom: 0;
         }
         
-        /* 修正: アクションボタングリッド */
-        .action-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: var(--spacing-lg);
-            margin-bottom: var(--spacing-lg);
+        /* 集金リスト行の色分け */
+        .collection-row.overdue {
+            background-color: #ffebee !important;
+            border-left: 5px solid #f44336;
         }
         
-        /* 修正: アクションカードの基本スタイル */
-        .action-card {
-            background: var(--surface-white);
-            border-radius: var(--radius-normal);
-            padding: var(--spacing-xl);
-            box-shadow: var(--elevation-1);
-            text-align: center;
-            transition: all var(--transition-normal);
-            text-decoration: none;
-            color: var(--text-dark);
-            border: 2px solid transparent;
-            min-height: 220px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
+        .collection-row.urgent {
+            background-color: #fff8e1 !important;
+            border-left: 5px solid #ffc107;
         }
         
-        .action-card:hover {
-            box-shadow: var(--elevation-3);
-            transform: translateY(-6px);
-            text-decoration: none;
-            color: var(--text-dark);
-            border-color: var(--primary-blue);
+        .collection-row.normal {
+            background-color: #f1f8e9 !important;
+            border-left: 5px solid #4caf50;
         }
         
-        .action-card:active {
-            transform: translateY(-2px);
-            box-shadow: var(--elevation-2);
-        }
-        
-        /* 修正: アクションアイコン */
-        .action-icon {
-            font-size: 4rem;
-            margin-bottom: var(--spacing-lg);
-            color: var(--primary-blue);
-            transition: all var(--transition-normal);
-        }
-        
-        .action-card:hover .action-icon {
-            transform: scale(1.1);
-            color: var(--primary-green);
-        }
-        
-        /* 修正: アクションタイトル */
-        .action-title {
-            font-size: var(--font-xl);
-            font-weight: var(--font-weight-medium);
-            margin-bottom: var(--spacing-md);
-            color: var(--text-dark);
-        }
-        
-        /* 修正: アクション説明 */
-        .action-description {
-            font-size: var(--font-sm);
-            color: var(--text-secondary);
-            margin-bottom: var(--spacing-lg);
-            line-height: 1.5;
-        }
-        
-        /* 修正: アクションボタン */
-        .action-button {
-            background: var(--primary-blue);
-            color: var(--text-light);
+        /* 満額入金ボタン */
+        .btn-full-payment {
+            background: linear-gradient(45deg, #4caf50, #66bb6a);
             border: none;
-            border-radius: var(--radius-normal);
-            padding: var(--spacing-md) var(--spacing-lg);
-            font-size: var(--font-sm);
-            font-weight: var(--font-weight-medium);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            transition: all var(--transition-normal);
-            display: flex;
-            align-items: center;
-            gap: var(--spacing-sm);
-            margin-top: auto;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.3s;
+            min-width: 150px;
         }
         
-        .action-card:hover .action-button {
-            background: var(--primary-green);
+        .btn-full-payment:hover {
             transform: translateY(-2px);
-            box-shadow: var(--elevation-2);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            color: white;
         }
         
-        /* カラーバリエーション */
-        .action-card.success .action-icon { color: var(--success-green); }
-        .action-card.success:hover .action-icon { color: var(--primary-blue); }
-        .action-card.success .action-button { background: var(--success-green); }
-        .action-card.success:hover .action-button { background: var(--primary-green); }
-        
-        .action-card.warning .action-icon { color: var(--warning-amber); }
-        .action-card.warning:hover .action-icon { color: var(--primary-blue); }
-        .action-card.warning .action-button { background: var(--warning-amber); color: var(--text-dark); }
-        .action-card.warning:hover .action-button { background: var(--primary-green); color: var(--text-light); }
-        
-        .action-card.info .action-icon { color: var(--info-blue); }
-        .action-card.info:hover .action-icon { color: var(--primary-green); }
-        .action-card.info .action-button { background: var(--info-blue); }
-        .action-card.info:hover .action-button { background: var(--primary-green); }
-        
-        .action-card.secondary .action-icon { color: var(--text-secondary); }
-        .action-card.secondary:hover .action-icon { color: var(--primary-blue); }
-        .action-card.secondary .action-button { background: var(--text-secondary); }
-        .action-card.secondary:hover .action-button { background: var(--primary-blue); }
-        
-        .chart-container {
-            background: var(--surface-white);
-            border-radius: var(--radius-normal);
-            padding: var(--spacing-lg);
-            box-shadow: var(--elevation-1);
-            margin-bottom: var(--spacing-lg);
+        /* 選択時のハイライト */
+        .collection-row.selected {
+            background-color: #e3f2fd !important;
+            border: 2px solid #2196f3;
         }
         
-        .alert-list {
-            max-height: 400px;
-            overflow-y: auto;
+        /* アラートバッジ */
+        .alert-badge.overdue {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        .alert-badge.urgent {
+            background-color: #ffc107;
+            color: black;
+        }
+        
+        .alert-badge.normal {
+            background-color: #4caf50;
+            color: white;
+        }
+        
+        /* 印刷専用スタイル */
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+            
+            .collection-row {
+                page-break-inside: avoid;
+            }
+            
+            .card {
+                border: none;
+                box-shadow: none;
+            }
         }
         
         /* レスポンシブ対応 */
         @media (max-width: 768px) {
-            .dashboard-container {
-                padding: var(--spacing-md);
+            .btn {
+                font-size: 16px;
+                min-height: 40px;
             }
             
-            .welcome-section {
-                padding: var(--spacing-lg);
-                text-align: center;
+            .stat-number {
+                font-size: 2rem;
             }
             
-            .stats-grid {
-                grid-template-columns: 1fr;
-                gap: var(--spacing-md);
-            }
-            
-            .action-grid {
-                grid-template-columns: 1fr;
-                gap: var(--spacing-md);
-            }
-            
-            .action-card {
-                min-height: 180px;
-                padding: var(--spacing-lg);
-            }
-            
-            .action-icon {
-                font-size: 3rem;
-                margin-bottom: var(--spacing-md);
-            }
-            
-            .action-title {
-                font-size: var(--font-lg);
+            .card-body {
+                padding: 0.75rem;
             }
         }
         
-        @media (max-width: 480px) {
-            .action-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .action-card {
-                min-height: 160px;
-                padding: var(--spacing-md);
-            }
-            
-            .action-icon {
-                font-size: 2.5rem;
-            }
+        /* ローディング表示 */
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+        
+        .loading .spinner-border {
+            width: 3rem;
+            height: 3rem;
         }
     </style>
 </head>
-<body>
-    <!-- メインナビゲーション -->
-    <nav class="navbar navbar-expand-lg" style="background: var(--primary-blue); color: white; box-shadow: var(--elevation-2);">
-        <div class="container-fluid" style="max-width: 1400px;">
-            <a class="navbar-brand d-flex align-items-center" href="#" style="color: white;">
-                <span class="material-icons me-2" style="font-size: 2rem;">restaurant_menu</span>
-                <span style="font-weight: 500; font-size: 1.25rem;">Smiley配食事業システム</span>
-            </a>
-            
-            <div class="d-flex align-items-center">
-                <!-- アラート表示 -->
-                <?php if ($alertCount > 0): ?>
-                <div class="me-3">
-                    <span class="material-icons text-warning me-1">notifications</span>
-                    <span class="badge bg-warning text-dark"><?php echo $alertCount; ?></span>
-                </div>
-                <?php endif; ?>
-                
-                <!-- 現在時刻 -->
-                <span class="text-small opacity-75">
-                    <?php echo date('Y年m月d日 H:i'); ?>
+<body class="bg-light">
+    <!-- ヘッダー -->
+    <nav class="navbar navbar-dark bg-primary mb-4 no-print">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="material-icons me-2">account_balance_wallet</i>
+                Smiley配食 集金管理システム
+            </span>
+            <div>
+                <button class="btn btn-outline-light me-2" onclick="importCSV()" title="CSVインポート">
+                    <i class="material-icons me-1">upload_file</i> CSVインポート
+                </button>
+                <button class="btn btn-outline-light me-2" onclick="location.reload()" title="画面更新">
+                    <i class="material-icons me-1">refresh</i> 更新
+                </button>
+                <span class="navbar-text">
+                    <i class="material-icons me-1">today</i>
+                    <?= date('Y年m月d日') ?>
                 </span>
             </div>
         </div>
     </nav>
-
-    <!-- メインコンテンツ -->
-    <div class="dashboard-container">
-        <!-- ウェルカムセクション -->
-        <div class="welcome-section animate-fade-in">
-            <div class="row align-items-center">
-                <div class="col-md-8">
-                    <h1 style="font-size: 2.5rem; font-weight: 300; margin-bottom: var(--spacing-md);">
-                        <span class="material-icons me-2" style="font-size: 2.5rem; vertical-align: middle;">dashboard</span>
-                        システムダッシュボード
-                    </h1>
-                    <p style="font-size: var(--font-lg); opacity: 0.9; margin: 0;">
-                        請求書生成・支払い管理・領収書発行を効率的に管理
-                    </p>
+    
+    <div class="container-fluid">
+        <!-- エラー・成功メッセージ -->
+        <?php if ($error_message): ?>
+            <div class="alert alert-danger alert-dismissible fade show no-print" role="alert">
+                <i class="material-icons me-2">error</i>
+                <?= htmlspecialchars($error_message) ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+        
+        <?php if ($success_message): ?>
+            <div class="alert alert-success alert-dismissible fade show no-print" role="alert">
+                <i class="material-icons me-2">check_circle</i>
+                <?= htmlspecialchars($success_message) ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+        
+        <!-- サマリーカード -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stat-card info">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="stat-label">今月売上</p>
+                            <h2 class="stat-number">¥<?= number_format($summary['current_month_sales']) ?></h2>
+                        </div>
+                        <i class="material-icons" style="font-size: 3rem; opacity: 0.7;">trending_up</i>
+                    </div>
                 </div>
-                <div class="col-md-4 text-md-end text-center">
-                    <button class="btn btn-material btn-material-large" 
-                            style="background: rgba(255,255,255,0.2); color: white; border: 2px solid white;">
-                        <span class="material-icons me-2">play_arrow</span>
-                        クイックスタート
+            </div>
+            
+            <div class="col-md-3">
+                <div class="stat-card warning">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="stat-label">未回収</p>
+                            <h2 class="stat-number">¥<?= number_format($summary['total_outstanding']) ?></h2>
+                            <small><?= $summary['outstanding_count'] ?>件</small>
+                        </div>
+                        <i class="material-icons" style="font-size: 3rem; opacity: 0.7;">pending</i>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="stat-card danger">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="stat-label">期限切れ</p>
+                            <h2 class="stat-number">¥<?= number_format($summary['overdue_amount']) ?></h2>
+                            <small><?= $summary['overdue_count'] ?>件</small>
+                        </div>
+                        <i class="material-icons" style="font-size: 3rem; opacity: 0.7;">error</i>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="stat-card success">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <p class="stat-label">回収率</p>
+                            <h2 class="stat-number"><?= number_format($summary['collection_rate'], 1) ?>%</h2>
+                        </div>
+                        <i class="material-icons" style="font-size: 3rem; opacity: 0.7;">check_circle</i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 緊急アラート -->
+        <?php if ($alerts['urgent_count'] > 0): ?>
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="alert alert-danger no-print">
+                    <h5 class="alert-heading">
+                        <i class="material-icons me-2">warning</i>
+                        緊急対応が必要な案件があります！
+                    </h5>
+                    <p class="mb-2">
+                        期限切れ・高額未回収: <strong><?= $alerts['urgent_count'] ?>件</strong>
+                        合計金額: <strong>¥<?= number_format($alerts['total_urgent_amount']) ?></strong>
+                    </p>
+                    <button class="btn btn-danger" onclick="showUrgentAlerts()">
+                        <i class="material-icons me-1">priority_high</i>
+                        緊急案件を確認
                     </button>
                 </div>
             </div>
         </div>
-
-        <!-- 統計サマリーカード -->
-        <div class="stats-grid">
-            <!-- 今月の売上 -->
-            <div class="stat-card success animate-fade-in">
-                <div class="d-flex align-items-center">
-                    <div class="flex-grow-1">
-                        <div class="stat-icon text-success">
-                            <span class="material-icons">attach_money</span>
-                        </div>
-                        <div class="stat-value text-success">
-                            ¥<?php echo number_format($totalSales); ?>
-                        </div>
-                        <div class="stat-label">今月の売上</div>
-                        <small class="text-secondary">
-                            <span class="material-icons" style="font-size: 0.875rem;">trending_up</span>
-                            前月比 +12%
-                        </small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 未回収金額 -->
-            <div class="stat-card <?php echo $outstandingAmount > 0 ? 'warning' : 'info'; ?> animate-fade-in">
-                <div class="d-flex align-items-center">
-                    <div class="flex-grow-1">
-                        <div class="stat-icon <?php echo $outstandingAmount > 0 ? 'text-warning' : 'text-info'; ?>">
-                            <span class="material-icons">account_balance_wallet</span>
-                        </div>
-                        <div class="stat-value <?php echo $outstandingAmount > 0 ? 'text-warning' : 'text-info'; ?>">
-                            ¥<?php echo number_format($outstandingAmount); ?>
-                        </div>
-                        <div class="stat-label">未回収金額</div>
-                        <small class="text-secondary">
-                            <?php echo $outstandingCount; ?>件の未払い請求書
-                        </small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 今月の請求書 -->
-            <div class="stat-card info animate-fade-in">
-                <div class="d-flex align-items-center">
-                    <div class="flex-grow-1">
-                        <div class="stat-icon text-info">
-                            <span class="material-icons">description</span>
-                        </div>
-                        <div class="stat-value text-info">
-                            <?php echo count($trendData); ?>件
-                        </div>
-                        <div class="stat-label">今月の請求書</div>
-                        <small class="text-secondary">
-                            <span class="material-icons" style="font-size: 0.875rem;">check_circle</span>
-                            完了率 85%
-                        </small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- アラート -->
-            <div class="stat-card <?php echo $alertCount > 0 ? 'error' : 'success'; ?> animate-fade-in">
-                <div class="d-flex align-items-center">
-                    <div class="flex-grow-1">
-                        <div class="stat-icon <?php echo $alertCount > 0 ? 'text-danger' : 'text-success'; ?>">
-                            <span class="material-icons">
-                                <?php echo $alertCount > 0 ? 'warning' : 'check_circle'; ?>
-                            </span>
-                        </div>
-                        <div class="stat-value <?php echo $alertCount > 0 ? 'text-danger' : 'text-success'; ?>">
-                            <?php echo $alertCount; ?>
-                        </div>
-                        <div class="stat-label">緊急アラート</div>
-                        <small class="text-secondary">
-                            <?php echo $alertCount > 0 ? '対応が必要です' : '正常稼働中'; ?>
-                        </small>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- クイックアクション -->
-        <div class="row mb-4">
-            <div class="col-12">
-                <h2 class="mb-3">
-                    <span class="material-icons me-2">flash_on</span>
-                    クイックアクション
-                </h2>
-            </div>
-        </div>
-
-        <!-- 修正: アクションカードグリッド -->
-        <div class="action-grid">
-            <!-- CSV インポート -->
-            <a href="pages/csv_import.php" class="action-card info animate-fade-in">
-                <div class="action-icon">
-                    <span class="material-icons">file_upload</span>
-                </div>
-                <h3 class="action-title">CSVインポート</h3>
-                <p class="action-description">注文データを一括取り込み<br>月次データの効率的な処理</p>
-                <div class="action-button">
-                    <span class="material-icons">upload</span>
-                    データ取込
-                </div>
-            </a>
-
-            <!-- 請求書生成 -->
-            <a href="pages/invoice_generate.php" class="action-card success animate-fade-in">
-                <div class="action-icon">
-                    <span class="material-icons">receipt_long</span>
-                </div>
-                <h3 class="action-title">請求書生成</h3>
-                <p class="action-description">月次請求書を一括作成<br>企業別・部署別対応</p>
-                <div class="action-button">
-                    <span class="material-icons">create</span>
-                    今月の請求書を作る
-                </div>
-            </a>
-
-            <!-- 支払い管理 -->
-            <a href="pages/payments.php" class="action-card warning animate-fade-in">
-                <div class="action-icon">
-                    <span class="material-icons">payments</span>
-                </div>
-                <h3 class="action-title">支払い管理</h3>
-                <p class="action-description">入金記録・未回収管理<br>支払い状況の一元管理</p>
-                <div class="action-button">
-                    <span class="material-icons">account_balance</span>
-                    支払い状況確認
-                </div>
-            </a>
-
-            <!-- 領収書発行 -->
-            <a href="pages/receipts.php" class="action-card info animate-fade-in">
-                <div class="action-icon">
-                    <span class="material-icons">local_printshop</span>
-                </div>
-                <h3 class="action-title">領収書発行</h3>
-                <p class="action-description">領収書の作成・印刷<br>収入印紙対応・PDF出力</p>
-                <div class="action-button">
-                    <span class="material-icons">print</span>
-                    領収書作成
-                </div>
-            </a>
-
-            <!-- 企業管理 -->
-            <a href="pages/companies.php" class="action-card animate-fade-in">
-                <div class="action-icon">
-                    <span class="material-icons">business</span>
-                </div>
-                <h3 class="action-title">企業管理</h3>
-                <p class="action-description">配達先企業・部署管理<br>利用者情報の管理</p>
-                <div class="action-button">
-                    <span class="material-icons">manage_accounts</span>
-                    企業設定
-                </div>
-            </a>
-
-            <!-- システム設定 -->
-            <a href="#" class="action-card secondary animate-fade-in">
-                <div class="action-icon">
-                    <span class="material-icons">settings</span>
-                </div>
-                <h3 class="action-title">システム設定</h3>
-                <p class="action-description">各種設定・環境管理<br>バックアップ・メンテナンス</p>
-                <div class="action-button">
-                    <span class="material-icons">tune</span>
-                    設定画面
-                </div>
-            </a>
-        </div>
-
-        <!-- アラート通知 -->
-        <?php if (!empty($alerts['alerts'])): ?>
-        <div class="row mb-4">
-            <div class="col-12">
-                <h2 class="mb-3">
-                    <span class="material-icons me-2 text-warning">priority_high</span>
-                    重要な通知
-                </h2>
-            </div>
-        </div>
-
-        <div class="material-card animate-fade-in">
-            <div class="alert-list">
-                <?php foreach ($alerts['alerts'] as $alert): ?>
-                <div class="material-alert alert-<?php echo $alert['type']; ?> mb-2">
-                    <span class="alert-icon material-icons">
-                        <?php 
-                        switch($alert['type']) {
-                            case 'error': echo 'error'; break;
-                            case 'warning': echo 'warning'; break;
-                            case 'success': echo 'check_circle'; break;
-                            default: echo 'info'; break;
-                        }
-                        ?>
-                    </span>
-                    <div class="flex-grow-1">
-                        <strong><?php echo htmlspecialchars($alert['title']); ?></strong><br>
-                        <?php echo htmlspecialchars($alert['message']); ?>
-                        <?php if (isset($alert['amount']) && $alert['amount'] > 0): ?>
-                        <br><small>金額: ¥<?php echo number_format($alert['amount']); ?></small>
-                        <?php endif; ?>
-                    </div>
-                    <?php if (isset($alert['action_url'])): ?>
-                    <a href="<?php echo $alert['action_url']; ?>" class="btn btn-material btn-flat btn-sm ms-2">
-                        <span class="material-icons">arrow_forward</span>
-                    </a>
-                    <?php endif; ?>
-                </div>
-                <?php endforeach; ?>
-            </div>
-        </div>
         <?php endif; ?>
-
-        <!-- チャートセクション - 修正版 -->
-        <div class="row">
-            <div class="col-lg-8 mb-4">
-                <div class="chart-container animate-fade-in" style="height: 400px; overflow: hidden;">
-                    <div class="d-flex align-items-center justify-content-between mb-3">
-                        <h3 class="mb-0">
-                            <span class="material-icons me-2">trending_up</span>
-                            月別売上推移
-                        </h3>
-                        <div class="btn-group" role="group">
-                            <button type="button" class="btn btn-material btn-flat btn-sm active">月別</button>
-                            <button type="button" class="btn btn-material btn-flat btn-sm">週別</button>
-                            <button type="button" class="btn btn-material btn-flat btn-sm">日別</button>
-                        </div>
-                    </div>
-                    <div style="position: relative; height: 300px; width: 100%;">
-                        <canvas id="salesTrendChart" style="max-width: 100%; max-height: 300px; width: 100%; height: 300px;"></canvas>
-                    </div>
+        
+        <!-- 検索・フィルター -->
+        <div class="row mb-3 no-print">
+            <div class="col-md-6">
+                <div class="input-group">
+                    <span class="input-group-text">
+                        <i class="material-icons">search</i>
+                    </span>
+                    <input type="text" class="form-control" id="search-company" 
+                           placeholder="企業名で検索..." style="font-size: 18px;">
+                    <button class="btn btn-outline-secondary" onclick="searchCollections()">
+                        検索
+                    </button>
                 </div>
             </div>
-
-            <div class="col-lg-4 mb-4">
-                <div class="chart-container animate-fade-in" style="height: 400px; overflow: hidden;">
-                    <h3 class="mb-3">
-                        <span class="material-icons me-2">pie_chart</span>
-                        支払い方法別割合
-                    </h3>
-                    <div style="position: relative; height: 200px; width: 100%;">
-                        <canvas id="paymentMethodChart" style="max-width: 100%; max-height: 200px; width: 100%; height: 200px;"></canvas>
-                    </div>
+            <div class="col-md-6">
+                <div class="btn-group w-100" role="group">
+                    <input type="radio" class="btn-check" name="filter" id="filter-all" value="" checked>
+                    <label class="btn btn-outline-primary" for="filter-all">
+                        <i class="material-icons me-1">list</i> 全て
+                    </label>
                     
-                    <!-- 支払い方法の詳細 -->
-                    <div class="mt-3" style="max-height: 100px; overflow-y: auto;">
-                        <?php foreach ($methodData as $method): ?>
-                        <?php
-                        $methods = PaymentManager::getPaymentMethods();
-                        $methodName = $methods[$method['payment_method']] ?? $method['payment_method'];
-                        $percentage = $totalSales > 0 ? round(($method['total_amount'] / $totalSales) * 100, 1) : 0;
-                        ?>
-                        <div class="d-flex justify-content-between align-items-center py-1">
-                            <span class="text-small"><?php echo $methodName; ?></span>
-                            <span class="text-small">
-                                <strong><?php echo $percentage; ?>%</strong>
-                                <small class="text-secondary">(¥<?php echo number_format($method['total_amount']); ?>)</small>
-                            </span>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
+                    <input type="radio" class="btn-check" name="filter" id="filter-overdue" value="overdue">
+                    <label class="btn btn-outline-danger" for="filter-overdue">
+                        <i class="material-icons me-1">error</i> 期限切れ
+                    </label>
+                    
+                    <input type="radio" class="btn-check" name="filter" id="filter-urgent" value="urgent">
+                    <label class="btn btn-outline-warning" for="filter-urgent">
+                        <i class="material-icons me-1">warning</i> 期限間近
+                    </label>
                 </div>
             </div>
         </div>
-
-        <!-- PC操作不慣れ対応：ヘルプセクション -->
-        <div class="material-card mb-4 animate-fade-in">
-            <div class="card-header">
-                <div class="d-flex align-items-center">
-                    <span class="material-icons text-info me-2">help_outline</span>
-                    <h3 class="card-title">操作ガイド</h3>
+        
+        <!-- 集金リスト -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="material-icons me-2">list</i> 集金が必要な企業一覧
+                </h5>
+                <div class="no-print">
+                    <span id="selected-summary" class="me-3 badge bg-info fs-6">
+                        選択: 0件 ¥0
+                    </span>
+                    <button class="btn btn-success me-2" id="bulk-payment-btn" disabled>
+                        <i class="material-icons me-1">payments</i> 一括入金記録
+                    </button>
+                    <button class="btn btn-outline-primary me-2" onclick="printSelected()">
+                        <i class="material-icons me-1">print</i> 印刷
+                    </button>
+                    <div class="btn-group">
+                        <button class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                            <i class="material-icons me-1">sort</i> 並び替え
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" data-sort="priority">優先度順</a></li>
+                            <li><a class="dropdown-item" href="#" data-sort="amount-desc">金額順（高→低）</a></li>
+                            <li><a class="dropdown-item" href="#" data-sort="due-date">期限順</a></li>
+                            <li><a class="dropdown-item" href="#" data-sort="company-name">企業名順</a></li>
+                        </ul>
+                    </div>
                 </div>
             </div>
-            <div class="row">
-                <div class="col-md-6">
-                    <h4 class="h6 text-primary mb-2">
-                        <span class="material-icons me-1" style="font-size: 1rem;">looks_one</span>
-                        月次作業の流れ
-                    </h4>
-                    <ol class="text-small">
-                        <li>CSVインポートで注文データを取り込み</li>
-                        <li>請求書生成で企業別請求書を作成</li>
-                        <li>支払い管理で入金確認・記録</li>
-                        <li>領収書発行で領収書を印刷</li>
-                    </ol>
+            <div class="card-body p-0">
+                <!-- ローディング表示 -->
+                <div id="loading" class="loading">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">読み込み中...</span>
+                    </div>
+                    <p class="mt-2">集金リストを読み込み中...</p>
                 </div>
-                <div class="col-md-6">
-                    <h4 class="h6 text-primary mb-2">
-                        <span class="material-icons me-1" style="font-size: 1rem;">support_agent</span>
-                        困ったときは
-                    </h4>
-                    <ul class="text-small">
-                        <li>画面上の<span class="material-icons" style="font-size: 0.875rem;">help</span>アイコンをクリック</li>
-                        <li>大きなボタンは重要な操作です</li>
-                        <li>色で状態を判断：🟢正常 🟡注意 🔴緊急</li>
-                        <li>不明な点はお気軽にお問い合わせください</li>
-                    </ul>
+                
+                <!-- 集金リストテーブル -->
+                <div class="table-responsive" id="collection-table" style="display: none;">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th width="50" class="no-print">
+                                    <input type="checkbox" id="select-all" class="form-check-input">
+                                </th>
+                                <th>企業名</th>
+                                <th>請求金額</th>
+                                <th>支払期限</th>
+                                <th>状況</th>
+                                <th class="no-print">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="collection-list">
+                            <!-- 動的生成 -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- データなし表示 -->
+                <div id="no-data" style="display: none;" class="text-center p-5">
+                    <i class="material-icons text-muted" style="font-size: 4rem;">inbox</i>
+                    <h5 class="text-muted mt-3">集金が必要な企業はありません</h5>
+                    <p class="text-muted">全ての請求が完了しているか、検索条件を変更してください。</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ページネーション -->
+        <nav aria-label="集金リストページネーション" class="mt-3 no-print">
+            <ul class="pagination justify-content-center" id="pagination">
+                <!-- 動的生成 -->
+            </ul>
+        </nav>
+    </div>
+    
+    <!-- 満額入金モーダル -->
+    <div class="modal fade" id="paymentModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="material-icons me-2">payments</i> 満額入金記録
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="payment-form">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">企業名</label>
+                            <p class="form-control-plaintext border bg-light p-2" id="modal-company-name">-</p>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">入金金額</label>
+                            <p class="form-control-plaintext border bg-light p-2 fs-4 text-success fw-bold" id="modal-amount">¥0</p>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="payment-method" class="form-label fw-bold">支払方法 <span class="text-danger">*</span></label>
+                            <select class="form-select" id="payment-method" name="payment_method" required style="font-size: 18px;">
+                                <option value="">選択してください</option>
+                                <option value="cash">💵 現金</option>
+                                <option value="bank_transfer">🏦 銀行振込</option>
+                                <option value="paypay">📱 PayPay</option>
+                                <option value="account_debit">🏦 口座引き落とし</option>
+                                <option value="other">💼 その他</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="payment-date" class="form-label fw-bold">入金日 <span class="text-danger">*</span></label>
+                            <input type="date" class="form-select" id="payment-date" name="payment_date" 
+                                   value="<?= date('Y-m-d') ?>" required style="font-size: 18px;">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="payment-notes" class="form-label fw-bold">備考</label>
+                            <textarea class="form-control" id="payment-notes" name="notes" rows="2" 
+                                      placeholder="特記事項があれば入力" style="font-size: 16px;"></textarea>
+                        </div>
+                        
+                        <input type="hidden" id="modal-invoice-id">
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="material-icons me-1">cancel</i> キャンセル
+                    </button>
+                    <button type="button" class="btn btn-success btn-lg" id="confirm-payment-btn">
+                        <i class="material-icons me-1">check</i> 入金記録する
+                    </button>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- フローティングアクションボタン -->
-    <button class="fab" onclick="showQuickMenu()">
-        <span class="material-icons">add</span>
-    </button>
-
-    <!-- フッター -->
-    <footer class="text-center py-4 mt-5" style="background: var(--surface-white); border-top: 1px solid var(--divider-grey);">
-        <div class="container">
-            <p class="text-secondary mb-2">
-                <span class="material-icons me-1" style="font-size: 1rem;">restaurant_menu</span>
-                Smiley配食事業システム v2.0
-            </p>
-            <p class="text-small text-secondary mb-0">
-                © 2025 Smiley Kitchen. All rights reserved. | 
-                <a href="#" class="text-decoration-none">利用規約</a> | 
-                <a href="#" class="text-decoration-none">プライバシーポリシー</a>
-            </p>
+    
+    <!-- 一括入金モーダル -->
+    <div class="modal fade" id="bulkPaymentModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="material-icons me-2">receipt</i> 一括入金記録
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="material-icons me-2">info</i>
+                        複数の企業の入金を同時に記録します。
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <strong>選択企業数:</strong> <span id="bulk-company-count">0</span>社
+                        </div>
+                        <div class="col-md-6">
+                            <strong>合計金額:</strong> <span class="text-success fw-bold" id="bulk-total-amount">¥0</span>
+                        </div>
+                    </div>
+                    
+                    <form id="bulk-payment-form">
+                        <div class="mb-3">
+                            <label for="bulk-payment-method" class="form-label fw-bold">一括支払方法 <span class="text-danger">*</span></label>
+                            <select class="form-select" id="bulk-payment-method" name="payment_method" required style="font-size: 18px;">
+                                <option value="">選択してください</option>
+                                <option value="cash">💵 現金一括</option>
+                                <option value="bank_transfer">🏦 銀行振込一括</option>
+                                <option value="mixed">💳 混合（個別設定）</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="bulk-payment-date" class="form-label fw-bold">処理日 <span class="text-danger">*</span></label>
+                            <input type="date" class="form-select" id="bulk-payment-date" name="payment_date" 
+                                   value="<?= date('Y-m-d') ?>" required style="font-size: 18px;">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="bulk-payment-notes" class="form-label fw-bold">備考</label>
+                            <textarea class="form-control" id="bulk-payment-notes" name="notes" rows="2" 
+                                      placeholder="一括処理の備考" style="font-size: 16px;"></textarea>
+                        </div>
+                    </form>
+                    
+                    <div class="alert alert-warning mt-3">
+                        <i class="material-icons me-2">warning</i>
+                        <strong>注意:</strong> この操作は取り消せません。内容を十分確認してから実行してください。
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="material-icons me-1">cancel</i> キャンセル
+                    </button>
+                    <button type="button" class="btn btn-success btn-lg" id="confirm-bulk-payment-btn">
+                        <i class="material-icons me-1">check</i> 一括処理実行
+                    </button>
+                </div>
+            </div>
         </div>
-    </footer>
-
-    <!-- JavaScript -->
+    </div>
+    
+    <!-- JavaScript Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    
+    <!-- Custom JavaScript -->
     <script>
-        // Chart.js設定 - グラフサイズ修正版
-        const materialColors = {
-            primary: '#2196F3',
-            success: '#4CAF50',
-            warning: '#FFC107',
-            error: '#F44336',
-            info: '#2196F3'
-        };
-
-        // ページ読み込み後にChart.jsを初期化
+        // グローバル変数
+        let collectionManager = null;
+        
+        // ページ読み込み完了時に初期化
         document.addEventListener('DOMContentLoaded', function() {
-            // Canvas要素の取得とサイズ設定
-            const salesTrendCanvas = document.getElementById('salesTrendChart');
-            const paymentMethodCanvas = document.getElementById('paymentMethodChart');
+            console.log('集金管理ダッシュボード初期化開始');
             
-            if (salesTrendCanvas) {
-                // 月別売上推移チャート - 修正版
-                const salesTrendCtx = salesTrendCanvas.getContext('2d');
-                new Chart(salesTrendCtx, {
-                    type: 'line',
-                    data: {
-                        labels: <?php echo $monthLabels; ?>,
-                        datasets: [{
-                            label: '売上金額',
-                            data: <?php echo $monthAmounts; ?>,
-                            borderColor: materialColors.primary,
-                            backgroundColor: materialColors.primary + '20',
-                            borderWidth: 3,
-                            fill: true,
-                            tension: 0.4,
-                            pointBackgroundColor: materialColors.primary,
-                            pointBorderColor: '#fff',
-                            pointBorderWidth: 2,
-                            pointRadius: 6
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false, // 重要: アスペクト比固定を無効化
-                        plugins: {
-                            legend: {
-                                display: false
-                            },
-                            tooltip: {
-                                mode: 'index',
-                                intersect: false,
-                                backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                                titleColor: 'white',
-                                bodyColor: 'white',
-                                borderColor: materialColors.primary,
-                                borderWidth: 1
-                            }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                ticks: {
-                                    callback: function(value) {
-                                        return '¥' + value.toLocaleString();
-                                    },
-                                    font: {
-                                        size: 12
-                                    }
-                                },
-                                grid: {
-                                    color: '#E0E0E0',
-                                    drawBorder: false
-                                }
-                            },
-                            x: {
-                                grid: {
-                                    display: false
-                                },
-                                ticks: {
-                                    font: {
-                                        size: 12
-                                    }
-                                }
-                            }
-                        },
-                        elements: {
-                            point: {
-                                hoverRadius: 8
-                            }
-                        },
-                        interaction: {
-                            intersect: false,
-                            mode: 'index'
-                        },
-                        layout: {
-                            padding: {
-                                left: 10,
-                                right: 10,
-                                top: 10,
-                                bottom: 10
-                            }
-                        }
-                    }
-                });
-            }
-
-            if (paymentMethodCanvas) {
-                // 支払い方法別円グラフ - 修正版
-                const paymentMethodCtx = paymentMethodCanvas.getContext('2d');
-                new Chart(paymentMethodCtx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: <?php echo $methodLabels; ?>,
-                        datasets: [{
-                            data: <?php echo $methodAmounts; ?>,
-                            backgroundColor: [
-                                materialColors.success,
-                                materialColors.primary,
-                                materialColors.warning,
-                                materialColors.info,
-                                '#9C27B0',
-                                '#FF5722'
-                            ],
-                            borderWidth: 0,
-                            hoverBorderWidth: 2,
-                            hoverBorderColor: '#fff'
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false, // 重要: アスペクト比固定を無効化
-                        plugins: {
-                            legend: {
-                                position: 'bottom',
-                                labels: {
-                                    padding: 15,
-                                    usePointStyle: true,
-                                    font: {
-                                        size: 11
-                                    }
-                                }
-                            },
-                            tooltip: {
-                                backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                                titleColor: 'white',
-                                bodyColor: 'white',
-                                callbacks: {
-                                    label: function(context) {
-                                        const label = context.label || '';
-                                        const value = context.parsed || 0;
-                                        return label + ': ¥' + value.toLocaleString();
-                                    }
-                                }
-                            }
-                        },
-                        cutout: '60%',
-                        layout: {
-                            padding: {
-                                left: 5,
-                                right: 5,
-                                top: 5,
-                                bottom: 5
-                            }
-                        }
-                    }
-                });
-            }
-
-            // カードのスタガーアニメーション
-            const cards = document.querySelectorAll('.animate-fade-in');
-            cards.forEach((card, index) => {
-                card.style.animationDelay = (index * 0.1) + 's';
-            });
-
-            // 統計数値のカウントアップアニメーション
-            const statValues = document.querySelectorAll('.stat-value');
-            statValues.forEach(stat => {
-                const finalValue = parseInt(stat.textContent.replace(/[^\d]/g, ''));
-                if (!isNaN(finalValue)) {
-                    animateNumber(stat, finalValue);
-                }
-            });
+            // CollectionManagerクラスは別ファイルで定義予定
+            // 暫定的に基本機能のみ実装
+            initBasicFunctions();
         });
-
-        // フローティングアクションボタン機能
-        function showQuickMenu() {
-            const actions = [
-                { icon: 'receipt_long', text: '請求書生成', url: 'pages/invoice_generate.php' },
-                { icon: 'payments', text: '支払い確認', url: 'pages/payments.php' },
-                { icon: 'file_upload', text: 'CSV取込', url: 'pages/csv_import.php' }
-            ];
+        
+        /**
+         * 基本機能初期化
+         */
+        function initBasicFunctions() {
+            console.log('基本機能初期化中...');
             
-            // 簡易メニュー表示（実装は省略）
-            alert('クイックメニュー機能（実装予定）');
+            // 集金リスト読み込み
+            loadCollectionList();
+            
+            // イベントリスナー設定
+            setupEventListeners();
+            
+            // 自動更新設定（5分ごと）
+            setInterval(refreshData, 300000);
         }
-
-        // 数値アニメーション関数
-        function animateNumber(element, finalValue, duration = 1000) {
-            let startValue = 0;
-            const increment = finalValue / (duration / 16);
+        
+        /**
+         * イベントリスナー設定
+         */
+        function setupEventListeners() {
+            // 全選択チェックボックス
+            const selectAll = document.getElementById('select-all');
+            if (selectAll) {
+                selectAll.addEventListener('change', function(e) {
+                    toggleSelectAll(e.target.checked);
+                });
+            }
             
-            function updateNumber() {
-                startValue += increment;
-                if (startValue < finalValue) {
-                    element.innerHTML = element.innerHTML.replace(/[\d,]+/, Math.floor(startValue).toLocaleString());
-                    requestAnimationFrame(updateNumber);
+            // 検索フィールド
+            const searchInput = document.getElementById('search-company');
+            if (searchInput) {
+                searchInput.addEventListener('input', function(e) {
+                    debounceSearch(e.target.value);
+                });
+            }
+            
+            // フィルターラジオボタン
+            document.querySelectorAll('input[name="filter"]').forEach(radio => {
+                radio.addEventListener('change', function(e) {
+                    applyFilter(e.target.value);
+                });
+            });
+            
+            // 一括入金ボタン
+            const bulkBtn = document.getElementById('bulk-payment-btn');
+            if (bulkBtn) {
+                bulkBtn.addEventListener('click', showBulkPaymentModal);
+            }
+            
+            // モーダル確認ボタン
+            const confirmBtn = document.getElementById('confirm-payment-btn');
+            if (confirmBtn) {
+                confirmBtn.addEventListener('click', confirmPayment);
+            }
+            
+            const confirmBulkBtn = document.getElementById('confirm-bulk-payment-btn');
+            if (confirmBulkBtn) {
+                confirmBulkBtn.addEventListener('click', confirmBulkPayment);
+            }
+        }
+        
+        /**
+         * 集金リスト読み込み
+         */
+        async function loadCollectionList(filters = {}) {
+            try {
+                console.log('集金リスト読み込み開始', filters);
+                showLoading(true);
+                
+                const params = new URLSearchParams({
+                    action: 'collection_list',
+                    ...filters
+                });
+                
+                const response = await fetch(`api/payments.php?${params}`);
+                const data = await response.json();
+                
+                if (data && data.success !== false) {
+                    // データが配列の場合は成功とみなす（APIが未完成のため暫定対応）
+                    const listData = Array.isArray(data) ? data : (data.data || []);
+                    renderCollectionList(listData);
                 } else {
-                    element.innerHTML = element.innerHTML.replace(/[\d,]+/, finalValue.toLocaleString());
+                    console.error('集金リスト取得エラー:', data);
+                    showError('集金リストの取得に失敗しました');
                 }
+                
+            } catch (error) {
+                console.error('集金リスト読み込みエラー:', error);
+                showError('集金リスト読み込み中にエラーが発生しました');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        /**
+         * 集金リスト表示
+         */
+        function renderCollectionList(data) {
+            console.log('集金リスト表示', data);
+            
+            const tbody = document.getElementById('collection-list');
+            const tableContainer = document.getElementById('collection-table');
+            const noDataContainer = document.getElementById('no-data');
+            
+            if (!tbody) return;
+            
+            tbody.innerHTML = '';
+            
+            if (!data || data.length === 0) {
+                tableContainer.style.display = 'none';
+                noDataContainer.style.display = 'block';
+                return;
             }
             
-            if (finalValue > 0) {
-                updateNumber();
+            tableContainer.style.display = 'block';
+            noDataContainer.style.display = 'none';
+            
+            data.forEach(item => {
+                const row = createCollectionRow(item);
+                tbody.appendChild(row);
+            });
+            
+            updateSelectedSummary();
+        }
+        
+        /**
+         * 集金リスト行作成
+         */
+        function createCollectionRow(item) {
+            const tr = document.createElement('tr');
+            tr.className = `collection-row ${item.alert_level || 'normal'}`;
+            tr.dataset.invoiceId = item.invoice_id || item.id;
+            tr.dataset.amount = item.outstanding_amount || item.total_amount || 0;
+            
+            const alertIcon = getAlertIcon(item.alert_level);
+            const alertBadge = getAlertBadge(item.alert_level, item.overdue_days);
+            
+            tr.innerHTML = `
+                <td class="no-print">
+                    <input type="checkbox" class="form-check-input row-checkbox" 
+                           data-invoice-id="${item.invoice_id || item.id}" 
+                           data-amount="${item.outstanding_amount || item.total_amount || 0}">
+                </td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        ${alertIcon}
+                        <div class="ms-2">
+                            <div class="fw-bold">${item.company_name || '企業名不明'}</div>
+                            <small class="text-muted">${item.contact_person || ''}</small>
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <span class="fw-bold fs-5">¥${(item.outstanding_amount || item.total_amount || 0).toLocaleString()}</span>
+                </td>
+                <td>
+                    <div>${item.due_date || '期限未設定'}</div>
+                    ${alertBadge}
+                </td>
+                <td>
+                    <span class="badge bg-${getStatusColor(item.alert_level)}">
+                        ${getStatusText(item.alert_level)}
+                    </span>
+                </td>
+                <td class="no-print">
+                    <button class="btn btn-full-payment btn-sm" 
+                            onclick="showPaymentModal(${item.invoice_id || item.id})">
+                        <i class="material-icons me-1">payments</i>
+                        満額入金 ¥${(item.outstanding_amount || item.total_amount || 0).toLocaleString()}
+                    </button>
+                </td>
+            `;
+            
+            // チェックボックスイベント
+            const checkbox = tr.querySelector('.row-checkbox');
+            if (checkbox) {
+                checkbox.addEventListener('change', function(e) {
+                    toggleRowSelection(e.target);
+                });
+            }
+            
+            return tr;
+        }
+        
+        /**
+         * アラートアイコン取得
+         */
+        function getAlertIcon(level) {
+            const icons = {
+                'overdue': '<i class="material-icons text-danger">error</i>',
+                'urgent': '<i class="material-icons text-warning">warning</i>',
+                'normal': '<i class="material-icons text-success">check_circle</i>'
+            };
+            return icons[level] || icons['normal'];
+        }
+        
+        /**
+         * アラートバッジ取得
+         */
+        function getAlertBadge(level, overdueDays) {
+            if (level === 'overdue' && overdueDays > 0) {
+                return `<small class="badge bg-danger">${overdueDays}日経過</small>`;
+            } else if (level === 'urgent') {
+                return `<small class="badge bg-warning">期限間近</small>`;
+            }
+            return '';
+        }
+        
+        /**
+         * ステータス色取得
+         */
+        function getStatusColor(level) {
+            const colors = {
+                'overdue': 'danger',
+                'urgent': 'warning',
+                'normal': 'success'
+            };
+            return colors[level] || 'success';
+        }
+        
+        /**
+         * ステータステキスト取得
+         */
+        function getStatusText(level) {
+            const texts = {
+                'overdue': '期限切れ',
+                'urgent': '期限間近',
+                'normal': '正常'
+            };
+            return texts[level] || '正常';
+        }
+        
+        /**
+         * 行選択切り替え
+         */
+        function toggleRowSelection(checkbox) {
+            const row = checkbox.closest('tr');
+            
+            if (checkbox.checked) {
+                row.classList.add('selected');
+            } else {
+                row.classList.remove('selected');
+            }
+            
+            updateSelectedSummary();
+        }
+        
+        /**
+         * 全選択切り替え
+         */
+        function toggleSelectAll(checked) {
+            const checkboxes = document.querySelectorAll('.row-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = checked;
+                toggleRowSelection(cb);
+            });
+        }
+        
+        /**
+         * 選択サマリー更新
+         */
+        function updateSelectedSummary() {
+            const selectedCheckboxes = document.querySelectorAll('.row-checkbox:checked');
+            const selectedCount = selectedCheckboxes.length;
+            const selectedAmount = Array.from(selectedCheckboxes).reduce((sum, cb) => {
+                return sum + parseFloat(cb.dataset.amount || 0);
+            }, 0);
+            
+            const summaryEl = document.getElementById('selected-summary');
+            if (summaryEl) {
+                summaryEl.textContent = `選択: ${selectedCount}件 ¥${selectedAmount.toLocaleString()}`;
+            }
+            
+            const bulkBtn = document.getElementById('bulk-payment-btn');
+            if (bulkBtn) {
+                bulkBtn.disabled = selectedCount === 0;
             }
         }
-
-        // レスポンシブ対応
-        window.addEventListener('resize', function() {
-            // Chart.js が自動的にリサイズを処理
-        });
-
-        // ダークモード切り替え（将来機能）
-        function toggleDarkMode() {
-            document.body.classList.toggle('dark-mode');
-            localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
+        
+        /**
+         * 満額入金モーダル表示
+         */
+        function showPaymentModal(invoiceId) {
+            const row = document.querySelector(`tr[data-invoice-id="${invoiceId}"]`);
+            if (!row) return;
+            
+            const companyName = row.querySelector('.fw-bold').textContent;
+            const amount = parseFloat(row.dataset.amount);
+            
+            document.getElementById('modal-company-name').textContent = companyName;
+            document.getElementById('modal-amount').textContent = `¥${amount.toLocaleString()}`;
+            document.getElementById('modal-invoice-id').value = invoiceId;
+            
+            const modal = new bootstrap.Modal(document.getElementById('paymentModal'));
+            modal.show();
         }
-
-        // ローカルストレージからダークモード設定を復元
-        if (localStorage.getItem('darkMode') === 'true') {
-            document.body.classList.add('dark-mode');
+        
+        /**
+         * 一括入金モーダル表示
+         */
+        function showBulkPaymentModal() {
+            const selectedCheckboxes = document.querySelectorAll('.row-checkbox:checked');
+            const selectedCount = selectedCheckboxes.length;
+            const totalAmount = Array.from(selectedCheckboxes).reduce((sum, cb) => {
+                return sum + parseFloat(cb.dataset.amount || 0);
+            }, 0);
+            
+            if (selectedCount === 0) {
+                alert('処理する企業を選択してください');
+                return;
+            }
+            
+            document.getElementById('bulk-company-count').textContent = selectedCount;
+            document.getElementById('bulk-total-amount').textContent = `¥${totalAmount.toLocaleString()}`;
+            
+            const modal = new bootstrap.Modal(document.getElementById('bulkPaymentModal'));
+            modal.show();
         }
+        
+        /**
+         * 入金記録確認
+         */
+        async function confirmPayment() {
+            const form = document.getElementById('payment-form');
+            const formData = new FormData(form);
+            const invoiceId = document.getElementById('modal-invoice-id').value;
+            
+            if (!formData.get('payment_method')) {
+                alert('支払方法を選択してください');
+                return;
+            }
+            
+            if (!confirm('入金記録を実行しますか？\nこの操作は取り消せません。')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('api/payments.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        action: 'record_full_payment',
+                        invoice_id: invoiceId,
+                        payment_method: formData.get('payment_method'),
+                        payment_date: formData.get('payment_date'),
+                        notes: formData.get('notes')
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result && result.success) {
+                    alert(`入金記録が完了しました（¥${result.amount?.toLocaleString() || '0'}）`);
+                    
+                    // モーダルを閉じる
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('paymentModal'));
+                    modal.hide();
+                    
+                    // データを更新
+                    refreshData();
+                } else {
+                    alert(`エラー: ${result.error || '入金記録に失敗しました'}`);
+                }
+                
+            } catch (error) {
+                console.error('入金記録エラー:', error);
+                alert('入金記録中にエラーが発生しました');
+            }
+        }
+        
+        /**
+         * 一括入金記録確認
+         */
+        async function confirmBulkPayment() {
+            const form = document.getElementById('bulk-payment-form');
+            const formData = new FormData(form);
+            const selectedCheckboxes = document.querySelectorAll('.row-checkbox:checked');
+            const invoiceIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.invoiceId));
+            
+            if (!formData.get('payment_method')) {
+                alert('支払方法を選択してください');
+                return;
+            }
+            
+            if (!confirm(`${invoiceIds.length}件の一括入金記録を実行しますか？\nこの操作は取り消せません。`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('api/payments.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        action: 'record_bulk_full_payments',
+                        invoice_ids: invoiceIds,
+                        payment_method: formData.get('payment_method'),
+                        payment_date: formData.get('payment_date'),
+                        notes: formData.get('notes')
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result && result.success) {
+                    alert(`一括入金記録が完了しました\n成功: ${result.success_count}件\n合計: ¥${result.total_amount?.toLocaleString() || '0'}`);
+                    
+                    // モーダルを閉じる
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('bulkPaymentModal'));
+                    modal.hide();
+                    
+                    // データを更新
+                    refreshData();
+                } else {
+                    alert(`エラー: ${result.error || '一括入金記録に失敗しました'}`);
+                }
+                
+            } catch (error) {
+                console.error('一括入金記録エラー:', error);
+                alert('一括入金記録中にエラーが発生しました');
+            }
+        }
+        
+        /**
+         * ローディング表示切り替え
+         */
+        function showLoading(show) {
+            const loading = document.getElementById('loading');
+            const table = document.getElementById('collection-table');
+            
+            if (loading) {
+                loading.style.display = show ? 'block' : 'none';
+            }
+            if (table) {
+                table.style.display = show ? 'none' : 'block';
+            }
+        }
+        
+        /**
+         * エラーメッセージ表示
+         */
+        function showError(message) {
+            alert(message); // 暫定実装、後でtoast等に変更
+        }
+        
+        /**
+         * データ更新
+         */
+        function refreshData() {
+            console.log('データ更新中...');
+            location.reload(); // 暫定実装、後でAJAXに変更
+        }
+        
+        /**
+         * CSVインポート
+         */
+        function importCSV() {
+            window.open('pages/csv_import.php', '_blank');
+        }
+        
+        /**
+         * 印刷
+         */
+        function printSelected() {
+            window.print();
+        }
+        
+        /**
+         * 検索（デバウンス付き）
+         */
+        let searchTimer;
+        function debounceSearch(query) {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                loadCollectionList({ company_name: query });
+            }, 500);
+        }
+        
+        /**
+         * 検索実行
+         */
+        function searchCollections() {
+            const query = document.getElementById('search-company').value;
+            loadCollectionList({ company_name: query });
+        }
+        
+        /**
+         * フィルター適用
+         */
+        function applyFilter(filterValue) {
+            loadCollectionList({ alert_level: filterValue });
+        }
+        
+        /**
+         * 緊急アラート表示
+         */
+        function showUrgentAlerts() {
+            // フィルターを期限切れに設定
+            document.getElementById('filter-overdue').checked = true;
+            applyFilter('overdue');
+        }
+        
+        console.log('集金管理ダッシュボード JavaScript 読み込み完了');
     </script>
 </body>
 </html>
