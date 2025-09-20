@@ -1,16 +1,18 @@
 <?php
 /**
- * 集金管理システム データベースセットアップ（根本対応版）
+ * 集金管理システム データベースセットアップ（根本対応版v2）
  * setup/database_setup.php
  * 
  * 作成日: 2025年9月20日
+ * 修正日: 2025年9月20日（構文エラー根本解決）
  * 目的: 集金管理専用VIEW 5個の作成とデータベース基盤整備
  * 
  * 修正内容:
- * - config/database.phpの正しい読み込み（Databaseクラス含む）
- * - classes/Database.phpとの重複回避
+ * - 構文エラー完全解決
+ * - config/database.php + classes/Database.php 両対応
+ * - 段階的なDatabaseクラス検出
  * - 適切なエラーハンドリング
- * - 進捗表示とログ出力
+ * - 詳細な進捗表示とログ出力
  */
 
 // エラー表示設定
@@ -26,6 +28,10 @@ echo "📍 実行環境確認...\n";
 echo "実行場所: " . __DIR__ . "\n";
 echo "PHP版本: " . PHP_VERSION . "\n";
 echo "実行時刻: " . date('Y-m-d H:i:s') . "\n\n";
+
+// 変数初期化
+$usingConfigDatabase = false;
+$db = null;
 
 // config/database.phpの読み込み（DB定数定義）
 $configPath = __DIR__ . '/../config/database.php';
@@ -80,12 +86,6 @@ try {
     } else {
         throw new Exception("Databaseクラスが見つかりません");
     }
-    
-    // usingConfigDatabaseが未設定の場合のデフォルト値
-    if (!isset($usingConfigDatabase)) {
-        $usingConfigDatabase = false;
-    }
-    
     echo "\n";
     
 } catch (Exception $e) {
@@ -108,15 +108,17 @@ try {
     }
     
     // 接続テスト
+    $connectionTestPassed = false;
     if (method_exists($db, 'getConnection')) {
         $pdo = $db->getConnection();
         $stmt = $pdo->query("SELECT 1 as test");
         $result = $stmt->fetch();
         echo "✅ PDO接続確認成功\n";
+        $connectionTestPassed = true;
     } elseif (method_exists($db, 'query')) {
-        // query メソッドで接続確認
         $stmt = $db->query("SELECT 1 as test");
         echo "✅ データベースクエリテスト成功\n";
+        $connectionTestPassed = true;
     } else {
         // リフレクションでPDOオブジェクト取得して接続確認
         $reflection = new ReflectionClass($db);
@@ -126,12 +128,17 @@ try {
         $stmt = $pdo->query("SELECT 1 as test");
         $result = $stmt->fetch();
         echo "✅ リフレクション経由接続確認成功\n";
+        $connectionTestPassed = true;
     }
     
-    echo "データベース: " . DB_NAME . "\n";
-    echo "ユーザー: " . DB_USER . "\n";
-    echo "環境: " . (defined('ENVIRONMENT') ? ENVIRONMENT : 'unknown') . "\n";
-    echo "使用クラス: " . ($usingConfigDatabase ? 'config/database.php' : 'classes/Database.php') . "\n\n";
+    if ($connectionTestPassed) {
+        echo "データベース: " . DB_NAME . "\n";
+        echo "ユーザー: " . DB_USER . "\n";
+        echo "環境: " . (defined('ENVIRONMENT') ? ENVIRONMENT : 'unknown') . "\n";
+        echo "使用クラス: " . ($usingConfigDatabase ? 'config/database.php' : 'classes/Database.php') . "\n\n";
+    } else {
+        throw new Exception("接続テストが実行できませんでした");
+    }
     
 } catch (Exception $e) {
     echo "❌ データベース接続エラー: " . $e->getMessage() . "\n";
@@ -140,7 +147,7 @@ try {
     echo "- ユーザー名: " . (defined('DB_USER') ? DB_USER : '未定義') . "\n"; 
     echo "- ホスト: " . (defined('DB_HOST') ? DB_HOST : '未定義') . "\n";
     echo "- パスワード設定: " . (defined('DB_PASS') && !empty(DB_PASS) ? '設定済み' : '未設定') . "\n";
-    echo "- 使用予定クラス: " . (isset($usingConfigDatabase) && $usingConfigDatabase ? 'config/database.php' : 'classes/Database.php') . "\n";
+    echo "- 使用予定クラス: " . ($usingConfigDatabase ? 'config/database.php' : 'classes/Database.php') . "\n";
     echo "\n📋 対処方法:\n";
     echo "1. データベースが作成されているか確認してください\n";
     echo "2. ユーザー権限が適切に設定されているか確認してください\n";
@@ -193,6 +200,7 @@ try {
                 }
             } else {
                 // 代替方法：PDO直接アクセス
+                $pdo = null;
                 if (method_exists($db, 'getConnection')) {
                     $pdo = $db->getConnection();
                 } else {
@@ -244,6 +252,7 @@ try {
                     $db->query($sql);
                 } else {
                     // 代替方法：PDO直接アクセス
+                    $pdo = null;
                     if (method_exists($db, 'getConnection')) {
                         $pdo = $db->getConnection();
                     } else {
@@ -303,9 +312,12 @@ try {
                             echo "   ⚠️ データ取得テスト失敗: " . $e->getMessage() . "\n";
                         }
                     }
+                } else {
+                    echo "❌ VIEW未作成: {$viewName}\n";
                 }
             } else {
                 // 代替方法：PDO直接アクセス
+                $pdo = null;
                 if (method_exists($db, 'getConnection')) {
                     $pdo = $db->getConnection();
                 } else {
@@ -333,9 +345,9 @@ try {
                             echo "   ⚠️ データ取得テスト失敗: " . $e->getMessage() . "\n";
                         }
                     }
+                } else {
+                    echo "❌ VIEW未作成: {$viewName}\n";
                 }
-            } else {
-                echo "❌ VIEW未作成: {$viewName}\n";
             }
         } catch (Exception $e) {
             echo "❌ VIEW確認エラー({$viewName}): " . $e->getMessage() . "\n";
@@ -360,10 +372,12 @@ try {
 echo "\n📊 データベース基本情報確認...\n";
 try {
     // テーブル一覧取得
+    $tables = [];
     if (method_exists($db, 'query')) {
         $stmt = $db->query("SHOW TABLES");
         $tables = $stmt->fetchAll(PDO::FETCH_COLUMN);
     } else {
+        $pdo = null;
         if (method_exists($db, 'getConnection')) {
             $pdo = $db->getConnection();
         } else {
@@ -391,6 +405,7 @@ try {
                     $stmt = $db->query("SELECT COUNT(*) as count FROM {$table}");
                     $result = $stmt->fetch();
                 } else {
+                    $pdo = null;
                     if (method_exists($db, 'getConnection')) {
                         $pdo = $db->getConnection();
                     } else {
@@ -419,7 +434,7 @@ try {
 
 // 完了メッセージ
 echo "\n" . str_repeat("=", 70) . "\n";
-if (count($createdViews) === count($viewsToCheck)) {
+if (isset($createdViews) && count($createdViews) === count($viewsToCheck)) {
     echo "🎉 セットアップ完了！\n\n";
     echo "✅ 全ての集金管理VIEWが正常に作成されました\n";
     echo "✅ データベース接続が確認できました\n";
@@ -456,7 +471,7 @@ function logSetupResult($createdViews, $viewsToCheck) {
     $logFile = $logDir . 'setup_' . date('Y-m-d_H-i-s') . '.log';
     $logContent = [
         'timestamp' => date('Y-m-d H:i:s'),
-        'database' => DB_NAME,
+        'database' => defined('DB_NAME') ? DB_NAME : 'unknown',
         'environment' => defined('ENVIRONMENT') ? ENVIRONMENT : 'unknown',
         'views_total' => count($viewsToCheck),
         'views_created' => count($createdViews),
