@@ -27,7 +27,7 @@ echo "実行場所: " . __DIR__ . "\n";
 echo "PHP版本: " . PHP_VERSION . "\n";
 echo "実行時刻: " . date('Y-m-d H:i:s') . "\n\n";
 
-// config/database.phpの読み込み（Databaseクラス含む）
+// config/database.phpの読み込み（DB定数定義）
 $configPath = __DIR__ . '/../config/database.php';
 echo "📂 設定ファイル読み込み...\n";
 echo "パス: {$configPath}\n";
@@ -49,7 +49,44 @@ try {
             throw new Exception("必要な定数 {$constant} が定義されていません");
         }
     }
-    echo "✅ データベース定数確認完了\n\n";
+    echo "✅ データベース定数確認完了\n";
+    
+    // Databaseクラスの存在確認
+    echo "🔍 Databaseクラス確認...\n";
+    if (class_exists('Database')) {
+        echo "✅ config/database.php内のDatabaseクラス検出\n";
+        $usingConfigDatabase = true;
+    } else {
+        echo "⚠️ config/database.php内のDatabaseクラス未検出\n";
+        echo "📂 classes/Database.php を読み込みます...\n";
+        
+        $classesDbPath = __DIR__ . '/../classes/Database.php';
+        if (!file_exists($classesDbPath)) {
+            throw new Exception("classes/Database.php が見つかりません");
+        }
+        
+        require_once $classesDbPath;
+        echo "✅ classes/Database.php 読み込み成功\n";
+        $usingConfigDatabase = false;
+    }
+    
+    // 使用するDatabaseクラスの詳細確認
+    if (class_exists('Database')) {
+        $reflection = new ReflectionClass('Database');
+        echo "📋 Databaseクラス詳細:\n";
+        echo "  ファイル: " . $reflection->getFileName() . "\n";
+        echo "  getInstance(): " . (method_exists('Database', 'getInstance') ? '✅' : '❌') . "\n";
+        echo "  コンストラクタ: " . ($reflection->getConstructor() && $reflection->getConstructor()->isPrivate() ? 'private' : 'public') . "\n";
+    } else {
+        throw new Exception("Databaseクラスが見つかりません");
+    }
+    
+    // usingConfigDatabaseが未設定の場合のデフォルト値
+    if (!isset($usingConfigDatabase)) {
+        $usingConfigDatabase = false;
+    }
+    
+    echo "\n";
     
 } catch (Exception $e) {
     echo "❌ エラー: " . $e->getMessage() . "\n";
@@ -59,20 +96,55 @@ try {
 // データベース接続テスト
 echo "🔌 データベース接続テスト...\n";
 try {
-    $db = Database::getInstance();
-    echo "✅ データベース接続成功\n";
+    // Singletonパターンが利用可能な場合の接続テスト
+    if (method_exists('Database', 'getInstance')) {
+        echo "🔧 Database::getInstance() を使用\n";
+        $db = Database::getInstance();
+        echo "✅ Singleton接続成功\n";
+    } else {
+        echo "🔧 new Database() を使用\n";
+        $db = new Database();
+        echo "✅ 通常接続成功\n";
+    }
+    
+    // 接続テスト
+    if (method_exists($db, 'getConnection')) {
+        $pdo = $db->getConnection();
+        $stmt = $pdo->query("SELECT 1 as test");
+        $result = $stmt->fetch();
+        echo "✅ PDO接続確認成功\n";
+    } elseif (method_exists($db, 'query')) {
+        // query メソッドで接続確認
+        $stmt = $db->query("SELECT 1 as test");
+        echo "✅ データベースクエリテスト成功\n";
+    } else {
+        // リフレクションでPDOオブジェクト取得して接続確認
+        $reflection = new ReflectionClass($db);
+        $pdoProperty = $reflection->getProperty('pdo');
+        $pdoProperty->setAccessible(true);
+        $pdo = $pdoProperty->getValue($db);
+        $stmt = $pdo->query("SELECT 1 as test");
+        $result = $stmt->fetch();
+        echo "✅ リフレクション経由接続確認成功\n";
+    }
+    
     echo "データベース: " . DB_NAME . "\n";
     echo "ユーザー: " . DB_USER . "\n";
-    echo "環境: " . (defined('ENVIRONMENT') ? ENVIRONMENT : 'unknown') . "\n\n";
+    echo "環境: " . (defined('ENVIRONMENT') ? ENVIRONMENT : 'unknown') . "\n";
+    echo "使用クラス: " . ($usingConfigDatabase ? 'config/database.php' : 'classes/Database.php') . "\n\n";
     
 } catch (Exception $e) {
     echo "❌ データベース接続エラー: " . $e->getMessage() . "\n";
     echo "\n🔍 確認事項:\n";
-    echo "- データベース名: " . DB_NAME . "\n";
-    echo "- ユーザー名: " . DB_USER . "\n"; 
-    echo "- ホスト: " . DB_HOST . "\n";
-    echo "- データベースが作成されているか確認してください\n";
-    echo "- ユーザー権限が適切に設定されているか確認してください\n";
+    echo "- データベース名: " . (defined('DB_NAME') ? DB_NAME : '未定義') . "\n";
+    echo "- ユーザー名: " . (defined('DB_USER') ? DB_USER : '未定義') . "\n"; 
+    echo "- ホスト: " . (defined('DB_HOST') ? DB_HOST : '未定義') . "\n";
+    echo "- パスワード設定: " . (defined('DB_PASS') && !empty(DB_PASS) ? '設定済み' : '未設定') . "\n";
+    echo "- 使用予定クラス: " . (isset($usingConfigDatabase) && $usingConfigDatabase ? 'config/database.php' : 'classes/Database.php') . "\n";
+    echo "\n📋 対処方法:\n";
+    echo "1. データベースが作成されているか確認してください\n";
+    echo "2. ユーザー権限が適切に設定されているか確認してください\n";
+    echo "3. エックスサーバーのデータベース設定を確認してください\n";
     exit(1);
 }
 
@@ -111,10 +183,36 @@ $viewsToCheck = [
 
 try {
     foreach ($viewsToCheck as $viewName) {
-        $stmt = $db->query("SHOW TABLES LIKE ?", [$viewName]);
-        if ($stmt->rowCount() > 0) {
-            $db->query("DROP VIEW IF EXISTS `{$viewName}`");
-            echo "🗑️ 既存VIEW削除: {$viewName}\n";
+        try {
+            // データベースクラスのメソッドに応じて適切な方法を選択
+            if (method_exists($db, 'query')) {
+                $stmt = $db->query("SHOW TABLES LIKE ?", [$viewName]);
+                if ($stmt && $stmt->rowCount() > 0) {
+                    $db->query("DROP VIEW IF EXISTS `{$viewName}`");
+                    echo "🗑️ 既存VIEW削除: {$viewName}\n";
+                }
+            } else {
+                // 代替方法：PDO直接アクセス
+                if (method_exists($db, 'getConnection')) {
+                    $pdo = $db->getConnection();
+                } else {
+                    // さらなる代替方法：リフレクションでPDOオブジェクト取得
+                    $reflection = new ReflectionClass($db);
+                    $pdoProperty = $reflection->getProperty('pdo');
+                    $pdoProperty->setAccessible(true);
+                    $pdo = $pdoProperty->getValue($db);
+                }
+                
+                $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+                $stmt->execute([$viewName]);
+                if ($stmt->rowCount() > 0) {
+                    $dropStmt = $pdo->prepare("DROP VIEW IF EXISTS `{$viewName}`");
+                    $dropStmt->execute();
+                    echo "🗑️ 既存VIEW削除: {$viewName}\n";
+                }
+            }
+        } catch (Exception $e) {
+            echo "⚠️ {$viewName} 削除時警告: " . $e->getMessage() . "\n";
         }
     }
     echo "✅ 既存VIEW確認・削除完了\n\n";
@@ -141,7 +239,23 @@ try {
     foreach ($sqlStatements as $index => $sql) {
         if (trim($sql)) {
             try {
-                $db->query($sql);
+                // データベースクラスのメソッドに応じて適切な方法を選択
+                if (method_exists($db, 'query')) {
+                    $db->query($sql);
+                } else {
+                    // 代替方法：PDO直接アクセス
+                    if (method_exists($db, 'getConnection')) {
+                        $pdo = $db->getConnection();
+                    } else {
+                        // さらなる代替方法：リフレクションでPDOオブジェクト取得
+                        $reflection = new ReflectionClass($db);
+                        $pdoProperty = $reflection->getProperty('pdo');
+                        $pdoProperty->setAccessible(true);
+                        $pdo = $pdoProperty->getValue($db);
+                    }
+                    $pdo->exec($sql);
+                }
+                
                 $successCount++;
                 
                 // VIEW作成の場合は特別表示
@@ -171,23 +285,60 @@ echo "🔍 作成されたVIEW確認...\n";
 try {
     $createdViews = [];
     foreach ($viewsToCheck as $viewName) {
-        $stmt = $db->query("SHOW TABLES LIKE ?", [$viewName]);
-        if ($stmt->rowCount() > 0) {
-            $createdViews[] = $viewName;
-            echo "✅ VIEW確認: {$viewName}\n";
-            
-            // サンプルデータ取得テスト
-            if ($viewName === 'collection_status_view') {
-                try {
-                    $testStmt = $db->query("SELECT COUNT(*) as count FROM {$viewName}");
-                    $testResult = $testStmt->fetch();
-                    echo "   📊 データ件数: {$testResult['count']}件\n";
-                } catch (Exception $e) {
-                    echo "   ⚠️ データ取得テスト失敗: " . $e->getMessage() . "\n";
+        try {
+            // データベースクラスのメソッドに応じて適切な方法を選択
+            if (method_exists($db, 'query')) {
+                $stmt = $db->query("SHOW TABLES LIKE ?", [$viewName]);
+                if ($stmt && $stmt->rowCount() > 0) {
+                    $createdViews[] = $viewName;
+                    echo "✅ VIEW確認: {$viewName}\n";
+                    
+                    // サンプルデータ取得テスト
+                    if ($viewName === 'collection_status_view') {
+                        try {
+                            $testStmt = $db->query("SELECT COUNT(*) as count FROM {$viewName}");
+                            $testResult = $testStmt->fetch();
+                            echo "   📊 データ件数: {$testResult['count']}件\n";
+                        } catch (Exception $e) {
+                            echo "   ⚠️ データ取得テスト失敗: " . $e->getMessage() . "\n";
+                        }
+                    }
                 }
+            } else {
+                // 代替方法：PDO直接アクセス
+                if (method_exists($db, 'getConnection')) {
+                    $pdo = $db->getConnection();
+                } else {
+                    // さらなる代替方法：リフレクションでPDOオブジェクト取得
+                    $reflection = new ReflectionClass($db);
+                    $pdoProperty = $reflection->getProperty('pdo');
+                    $pdoProperty->setAccessible(true);
+                    $pdo = $pdoProperty->getValue($db);
+                }
+                
+                $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+                $stmt->execute([$viewName]);
+                if ($stmt->rowCount() > 0) {
+                    $createdViews[] = $viewName;
+                    echo "✅ VIEW確認: {$viewName}\n";
+                    
+                    // サンプルデータ取得テスト
+                    if ($viewName === 'collection_status_view') {
+                        try {
+                            $testStmt = $pdo->prepare("SELECT COUNT(*) as count FROM {$viewName}");
+                            $testStmt->execute();
+                            $testResult = $testStmt->fetch();
+                            echo "   📊 データ件数: {$testResult['count']}件\n";
+                        } catch (Exception $e) {
+                            echo "   ⚠️ データ取得テスト失敗: " . $e->getMessage() . "\n";
+                        }
+                    }
+                }
+            } else {
+                echo "❌ VIEW未作成: {$viewName}\n";
             }
-        } else {
-            echo "❌ VIEW未作成: {$viewName}\n";
+        } catch (Exception $e) {
+            echo "❌ VIEW確認エラー({$viewName}): " . $e->getMessage() . "\n";
         }
     }
     
@@ -209,8 +360,23 @@ try {
 echo "\n📊 データベース基本情報確認...\n";
 try {
     // テーブル一覧取得
-    $stmt = $db->query("SHOW TABLES");
-    $tables = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    if (method_exists($db, 'query')) {
+        $stmt = $db->query("SHOW TABLES");
+        $tables = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    } else {
+        if (method_exists($db, 'getConnection')) {
+            $pdo = $db->getConnection();
+        } else {
+            // さらなる代替方法：リフレクションでPDOオブジェクト取得
+            $reflection = new ReflectionClass($db);
+            $pdoProperty = $reflection->getProperty('pdo');
+            $pdoProperty->setAccessible(true);
+            $pdo = $pdoProperty->getValue($db);
+        }
+        $stmt = $pdo->query("SHOW TABLES");
+        $tables = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+    
     echo "総テーブル数: " . count($tables) . "\n";
     
     // 主要テーブルの存在確認
@@ -220,9 +386,28 @@ try {
     
     foreach ($requiredTables as $table) {
         if (in_array($table, $tables)) {
-            $stmt = $db->query("SELECT COUNT(*) as count FROM {$table}");
-            $result = $stmt->fetch();
-            echo "  ✅ {$table}: {$result['count']}件\n";
+            try {
+                if (method_exists($db, 'query')) {
+                    $stmt = $db->query("SELECT COUNT(*) as count FROM {$table}");
+                    $result = $stmt->fetch();
+                } else {
+                    if (method_exists($db, 'getConnection')) {
+                        $pdo = $db->getConnection();
+                    } else {
+                        // さらなる代替方法：リフレクションでPDOオブジェクト取得
+                        $reflection = new ReflectionClass($db);
+                        $pdoProperty = $reflection->getProperty('pdo');
+                        $pdoProperty->setAccessible(true);
+                        $pdo = $pdoProperty->getValue($db);
+                    }
+                    $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM {$table}");
+                    $stmt->execute();
+                    $result = $stmt->fetch();
+                }
+                echo "  ✅ {$table}: {$result['count']}件\n";
+            } catch (Exception $e) {
+                echo "  ⚠️ {$table}: データ取得エラー\n";
+            }
         } else {
             echo "  ❌ {$table}: 未作成\n";
         }
