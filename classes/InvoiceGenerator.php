@@ -16,7 +16,10 @@
  * @date 2025-08-31
  */
 
-require_once __DIR__ . '/Database.php';
+// ✅ 修正版: config/database.php の正しい読み込み
+if (!class_exists('Database')) {
+    require_once __DIR__ . '/../config/database.php';
+}
 
 class InvoiceGenerator {
     private $db;
@@ -43,6 +46,7 @@ class InvoiceGenerator {
     const INVOICE_PREFIX = 'INV';
     
     public function __construct() {
+        // ✅ 修正版: 正しい Singleton パターンの使用
         $this->db = Database::getInstance();
     }
     
