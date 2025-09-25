@@ -1,6 +1,6 @@
 <?php
 /**
- * PaymentManager - 支払い管理クラス（完全実装版）
+ * PaymentManager - 支払い管理クラス（仕様書準拠版）
  * 
  * 機能:
  * - 支払い記録管理
@@ -9,15 +9,13 @@
  * - アラート機能
  * - 支払い履歴管理
  * 
+ * ✅ Database使用方法統一ガイド準拠
+ * ✅ config/database.php Singleton統一使用
+ * 
  * @author Claude
- * @version 2.0 (Complete Implementation)
+ * @version 2.2 (Specification Compliant)
  * @date 2025-09-25
  */
-
-// ✅ 正しいDatabase読み込み
-if (!class_exists('Database')) {
-    require_once __DIR__ . '/../config/database.php';
-}
 
 class PaymentManager {
     private $db;
@@ -39,7 +37,11 @@ class PaymentManager {
     const STATUS_FAILED = 'failed';
     
     public function __construct() {
-        // ✅ 正しい Singleton パターンの使用
+        // ✅ 仕様書準拠: Database使用方法統一ガイドの指示通り
+        if (!class_exists('Database')) {
+            require_once __DIR__ . '/../config/database.php';
+        }
+        
         $this->db = Database::getInstance();
     }
     
@@ -379,13 +381,6 @@ class PaymentManager {
                 [$newStatus, $invoiceId]
             );
             
-            // 領収書自動生成（設定されている場合）
-            if ($paymentData['auto_generate_receipt'] ?? false) {
-                // ReceiptGeneratorクラスがある場合の処理
-                // $receiptGenerator = new ReceiptGenerator();
-                // $receiptGenerator->generateReceipt($paymentId);
-            }
-            
             $this->db->commit();
             
             return [
@@ -569,6 +564,7 @@ class PaymentManager {
     public function getDebugInfo() {
         return [
             'class_name' => __CLASS__,
+            'database_connection' => 'Database Singleton (config/database.php)',
             'database_connected' => method_exists($this->db, 'testConnection') ? $this->db->testConnection() : true,
             'payment_methods' => self::PAYMENT_METHODS,
             'payment_statuses' => [
