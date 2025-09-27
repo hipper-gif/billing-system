@@ -12,7 +12,7 @@ class PaymentManager {
     private $db;
     
     public function __construct() {
-        // 📋 Database クラス読み込み確認・実行
+        // 📋 統合版Database読み込み（設定値+クラス）
         if (!class_exists('Database')) {
             require_once __DIR__ . '/../config/database.php';
         }
