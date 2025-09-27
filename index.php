@@ -8,7 +8,7 @@
  * - PaymentManager エラー "Class Database not found" 完全解決
  */
 
-// 🔧 Database設定ファイルを最初に読み込み（重要！）
+// 🔧 統合版Database読み込み（設定値+クラス統合済み）
 require_once __DIR__ . '/config/database.php';
 
 // ✅ PaymentManager読み込み
