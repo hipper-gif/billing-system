@@ -64,41 +64,42 @@ try {
     // POST リクエスト処理（CSVアップロード）
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
-        // デバッグ: 受信したデータをログ出力
-        error_log("=== CSV Import Debug ===");
-        error_log("_FILES keys: " . json_encode(array_keys($_FILES)));
-        error_log("_POST keys: " . json_encode(array_keys($_POST)));
+        // ファイルアップロード確認（両方のフィールド名に対応）
+        $uploadedFile = null;
         
-        // ファイルアップロード確認
-        if (!isset($_FILES['csv_file'])) {
-            // 別のフィールド名でファイルが送られている可能性をチェック
-            $fileKeys = array_keys($_FILES);
-            if (!empty($fileKeys)) {
-                sendResponse(false, 'フィールド名が一致しません。期待: csv_file、実際: ' . implode(', ', $fileKeys), [
-                    'received_files' => $_FILES,
-                    'expected_field' => 'csv_file'
-                ]);
-            } else {
-                sendResponse(false, 'CSVファイルがアップロードされていません（$_FILESが空です）', [
-                    'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'unknown',
-                    'content_length' => $_SERVER['CONTENT_LENGTH'] ?? 0,
-                    'post_data_exists' => !empty($_POST)
-                ]);
-            }
+        if (isset($_FILES['csv_file'])) {
+            $uploadedFile = $_FILES['csv_file'];
+        } elseif (isset($_FILES['csvFile'])) {
+            $uploadedFile = $_FILES['csvFile'];
+        } else {
+            sendResponse(false, 'CSVファイルがアップロードされていません', [
+                'hint' => 'csv_file または csvFile フィールドが必要です'
+            ]);
         }
         
-        if ($_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
-            sendResponse(false, 'ファイルアップロードエラー: ' . $_FILES['csv_file']['error']);
+        if ($uploadedFile['error'] !== UPLOAD_ERR_OK) {
+            $errorMessages = [
+                UPLOAD_ERR_INI_SIZE => 'ファイルサイズがphp.iniの上限を超えています',
+                UPLOAD_ERR_FORM_SIZE => 'ファイルサイズがフォームの上限を超えています',
+                UPLOAD_ERR_PARTIAL => 'ファイルが部分的にしかアップロードされませんでした',
+                UPLOAD_ERR_NO_FILE => 'ファイルがアップロードされませんでした',
+                UPLOAD_ERR_NO_TMP_DIR => '一時ディレクトリが見つかりません',
+                UPLOAD_ERR_CANT_WRITE => 'ディスクへの書き込みに失敗しました',
+                UPLOAD_ERR_EXTENSION => 'PHPの拡張機能によってアップロードが停止されました'
+            ];
+            
+            $errorMsg = $errorMessages[$uploadedFile['error']] ?? '不明なアップロードエラー';
+            sendResponse(false, 'ファイルアップロードエラー: ' . $errorMsg);
         }
-        
-        $uploadedFile = $_FILES['csv_file'];
         
         // ファイル検証
         $fileHandler = new FileUploadHandler();
         $uploadResult = $fileHandler->uploadFile($uploadedFile);
         
         if (!$uploadResult['success']) {
-            sendResponse(false, 'ファイルアップロードエラー', null, $uploadResult['errors']);
+            sendResponse(false, 'ファイルアップロードエラー', [
+                'errors' => $uploadResult['errors']
+            ]);
         }
         
         // CSVインポート実行
@@ -106,11 +107,12 @@ try {
         $importOptions = [
             'encoding' => $_POST['encoding'] ?? 'UTF-8',
             'delimiter' => ',',
-            'has_header' => true,
-            'overwrite' => isset($_POST['overwrite']) ? (bool)$_POST['overwrite'] : false
+            'has_header' => true
         ];
         
+        $startTime = microtime(true);
         $importResult = $importer->importCSV($uploadResult['filepath'], $importOptions);  // importCSV()を呼び出し
+        $processingTime = round(microtime(true) - $startTime, 2);
         
         // 一時ファイル削除
         if (file_exists($uploadResult['filepath'])) {
@@ -121,17 +123,31 @@ try {
         if ($importResult['success']) {
             sendResponse(true, 'CSVインポートが正常に完了しました', [
                 'batch_id' => $importResult['batch_id'],
-                'stats' => $importResult['stats'],
-                'processing_time' => $importResult['execution_time'] . '秒',
-                'summary_message' => $importResult['summary_message'] ?? ''
-            ], $importResult['errors'] ?? []);
+                'filename' => $uploadedFile['name'],
+                'stats' => [
+                    'total_records' => $importResult['stats']['total_rows'] ?? 0,
+                    'processed_records' => $importResult['stats']['processed_rows'] ?? 0,
+                    'success_records' => $importResult['stats']['success_rows'] ?? 0,
+                    'error_records' => $importResult['stats']['error_rows'] ?? 0,
+                    'new_companies' => $importResult['stats']['new_companies'] ?? 0,
+                    'new_departments' => $importResult['stats']['new_departments'] ?? 0,
+                    'new_users' => $importResult['stats']['new_users'] ?? 0,
+                    'new_suppliers' => $importResult['stats']['new_suppliers'] ?? 0,
+                    'new_products' => $importResult['stats']['new_products'] ?? 0,
+                    'duplicate_orders' => $importResult['stats']['duplicate_orders'] ?? 0,
+                    'processing_time' => $processingTime . '秒'
+                ],
+                'summary_message' => $importResult['summary_message'] ?? '',
+                'errors' => array_slice($importResult['errors'] ?? [], 0, 10) // 最初の10件
+            ]);
         } else {
             sendResponse(false, 'CSVインポートでエラーが発生しました', [
                 'batch_id' => $importResult['batch_id'] ?? null,
+                'filename' => $uploadedFile['name'],
                 'stats' => $importResult['stats'] ?? [],
-                'processing_time' => ($importResult['execution_time'] ?? 0) . '秒',
-                'summary_message' => $importResult['summary_message'] ?? ''
-            ], $importResult['errors'] ?? []);
+                'summary_message' => $importResult['summary_message'] ?? '',
+                'errors' => $importResult['errors'] ?? []
+            ]);
         }
     }
     
