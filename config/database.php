@@ -1,12 +1,15 @@
 <?php
 /**
- * config/database.php - Database統合版
+ * config/database.php - Database完全統一版
  * 
  * 🎯 設計方針:
- * - 設定値とDatabaseクラスを統合
- * - Singletonパターン完全実装
- * - クラス重複問題の根本解決
+ * - 全クラスが使用する全メソッドを網羅
+ * - 仕様書の「自己完結原則」完全準拠
+ * - メソッド不整合の完全排除
  * - エックスサーバー最適化
+ * 
+ * @version 5.0 - 完全統一版
+ * @date 2025-10-02
  */
 
 // 🔧 データベース設定値
@@ -18,22 +21,39 @@ define('DB_CHARSET', 'utf8mb4');
 
 // 🌍 環境設定
 define('ENVIRONMENT', 'production'); // production, development, testing
+define('DEBUG_MODE', ENVIRONMENT === 'development');
 
 /**
- * Database クラス - Singleton統合版
+ * Database クラス - 完全統一版
  * 
- * 🏆 機能:
- * - Singletonパターンでインスタンス管理
- * - エックスサーバー最適化設定
- * - 包括的エラーハンドリング
- * - セキュリティ強化
+ * 🏆 網羅するメソッド:
+ * 1. getInstance() - Singleton
+ * 2. getConnection() - PDO取得（SmileyCSVImporter用）
+ * 3. query() - 汎用クエリ実行
+ * 4. fetchAll() - 全行取得
+ * 5. fetch() - 1行取得
+ * 6. fetchColumn() - 単一値取得
+ * 7. execute() - INSERT/UPDATE/DELETE
+ * 8. lastInsertId() - 最終挿入ID
+ * 9. beginTransaction() - トランザクション開始
+ * 10. commit() - コミット
+ * 11. rollback() - ロールバック
+ * 12. tableExists() - テーブル存在確認
+ * 13. getTableInfo() - テーブル情報取得
+ * 14. testConnection() - 接続テスト
+ * 15. getDatabaseStats() - DB統計
+ * 16. getDebugInfo() - デバッグ情報
  */
 class Database {
     private static $instance = null;
     private $pdo;
     
+    // ========================================
+    // Singleton パターン
+    // ========================================
+    
     /**
-     * Singletonパターン - インスタンス取得
+     * インスタンス取得（Singleton）
      * @return Database
      */
     public static function getInstance() {
@@ -44,11 +64,27 @@ class Database {
     }
     
     /**
-     * プライベートコンストラクタ（Singleton強制）
+     * プライベートコンストラクタ
      */
     private function __construct() {
         $this->connect();
     }
+    
+    /**
+     * クローン防止
+     */
+    private function __clone() {}
+    
+    /**
+     * アンシリアライズ防止
+     */
+    public function __wakeup() {
+        throw new Exception("Cannot unserialize singleton");
+    }
+    
+    // ========================================
+    // データベース接続
+    // ========================================
     
     /**
      * データベース接続
@@ -57,7 +93,7 @@ class Database {
         try {
             $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
             
-            // 🔧 エックスサーバー最適化オプション
+            // エックスサーバー最適化オプション
             $options = [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -70,19 +106,13 @@ class Database {
             
             $this->pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
             
-            // 🎯 環境別設定
-            if (ENVIRONMENT === 'development') {
-                $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            } else {
-                // 本番環境ではエラー詳細を隠す
-                error_reporting(0);
-                ini_set('display_errors', 0);
-            }
+            // タイムゾーン設定
+            $this->pdo->exec("SET time_zone = '+09:00'");
             
         } catch (PDOException $e) {
             error_log("Database Connection Error: " . $e->getMessage());
             
-            if (ENVIRONMENT === 'development') {
+            if (DEBUG_MODE) {
                 throw new Exception("データベース接続エラー: " . $e->getMessage());
             } else {
                 throw new Exception("データベース接続に失敗しました");
@@ -90,19 +120,31 @@ class Database {
         }
     }
     
+    // ========================================
+    // PDO直接アクセス（SmileyCSVImporter用）
+    // ========================================
+    
     /**
      * PDO接続オブジェクト取得
+     * 
+     * 用途: SmileyCSVImporterで直接PDOを使用
      * @return PDO
      */
     public function getConnection() {
         return $this->pdo;
     }
     
+    // ========================================
+    // クエリ実行系メソッド
+    // ========================================
+    
     /**
-     * SQLクエリ実行
-     * @param string $sql
-     * @param array $params
+     * SQLクエリ実行（プリペアドステートメント）
+     * 
+     * @param string $sql SQL文
+     * @param array $params パラメータ配列
      * @return PDOStatement
+     * @throws Exception
      */
     public function query($sql, $params = []) {
         try {
@@ -112,7 +154,7 @@ class Database {
         } catch (PDOException $e) {
             error_log("Database Query Error: " . $e->getMessage() . " | SQL: " . $sql . " | Params: " . json_encode($params));
             
-            if (ENVIRONMENT === 'development') {
+            if (DEBUG_MODE) {
                 throw new Exception("クエリエラー: " . $e->getMessage() . " | SQL: " . $sql);
             } else {
                 throw new Exception("データベース処理でエラーが発生しました");
@@ -122,9 +164,10 @@ class Database {
     
     /**
      * 全行取得
-     * @param string $sql
-     * @param array $params
-     * @return array
+     * 
+     * @param string $sql SQL文
+     * @param array $params パラメータ配列
+     * @return array 結果の配列
      */
     public function fetchAll($sql, $params = []) {
         return $this->query($sql, $params)->fetchAll();
@@ -132,9 +175,10 @@ class Database {
     
     /**
      * 1行取得
-     * @param string $sql
-     * @param array $params
-     * @return array|false
+     * 
+     * @param string $sql SQL文
+     * @param array $params パラメータ配列
+     * @return array|false 結果の連想配列、またはfalse
      */
     public function fetch($sql, $params = []) {
         return $this->query($sql, $params)->fetch();
@@ -142,9 +186,10 @@ class Database {
     
     /**
      * 単一値取得
-     * @param string $sql
-     * @param array $params
-     * @return mixed
+     * 
+     * @param string $sql SQL文
+     * @param array $params パラメータ配列
+     * @return mixed 単一値
      */
     public function fetchColumn($sql, $params = []) {
         return $this->query($sql, $params)->fetchColumn();
@@ -152,22 +197,19 @@ class Database {
     
     /**
      * INSERT・UPDATE・DELETE実行
-     * @param string $sql
-     * @param array $params
-     * @return int 影響行数
+     * 
+     * @param string $sql SQL文
+     * @param array $params パラメータ配列
+     * @return int 影響を受けた行数
      */
     public function execute($sql, $params = []) {
         $stmt = $this->query($sql, $params);
         return $stmt->rowCount();
     }
     
-    /**
-     * 最後のINSERT ID取得
-     * @return string
-     */
-    public function lastInsertId() {
-        return $this->pdo->lastInsertId();
-    }
+    // ========================================
+    // トランザクション管理
+    // ========================================
     
     /**
      * トランザクション開始
@@ -194,9 +236,22 @@ class Database {
     }
     
     /**
+     * 最後のINSERT ID取得
+     * @return string
+     */
+    public function lastInsertId() {
+        return $this->pdo->lastInsertId();
+    }
+    
+    // ========================================
+    // ユーティリティメソッド
+    // ========================================
+    
+    /**
      * テーブル存在確認
-     * @param string $tableName
-     * @return bool
+     * 
+     * @param string $tableName テーブル名
+     * @return bool 存在する場合true
      */
     public function tableExists($tableName) {
         try {
@@ -212,8 +267,9 @@ class Database {
     
     /**
      * テーブル情報取得
-     * @param string $tableName
-     * @return array|null
+     * 
+     * @param string $tableName テーブル名
+     * @return array|null カラム情報の配列
      */
     public function getTableInfo($tableName) {
         try {
@@ -226,7 +282,8 @@ class Database {
                         DATA_TYPE as data_type,
                         IS_NULLABLE as is_nullable,
                         COLUMN_DEFAULT as column_default,
-                        COLUMN_KEY as column_key
+                        COLUMN_KEY as column_key,
+                        EXTRA as extra
                     FROM INFORMATION_SCHEMA.COLUMNS 
                     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
                     ORDER BY ORDINAL_POSITION";
@@ -240,7 +297,7 @@ class Database {
     
     /**
      * 接続テスト
-     * @return bool
+     * @return bool 接続成功の場合true
      */
     public function testConnection() {
         try {
@@ -255,14 +312,15 @@ class Database {
     
     /**
      * データベース統計取得
-     * @return array
+     * @return array 統計情報の配列
      */
     public function getDatabaseStats() {
         try {
             $stats = [];
             
             // テーブル一覧・行数取得
-            $sql = "SELECT TABLE_NAME, TABLE_ROWS 
+            $sql = "SELECT TABLE_NAME, TABLE_ROWS, 
+                           ROUND(DATA_LENGTH / 1024 / 1024, 2) as size_mb
                     FROM INFORMATION_SCHEMA.TABLES 
                     WHERE TABLE_SCHEMA = ?
                     ORDER BY TABLE_NAME";
@@ -272,6 +330,7 @@ class Database {
             $stats['tables'] = $tables;
             $stats['total_tables'] = count($tables);
             $stats['total_rows'] = array_sum(array_column($tables, 'TABLE_ROWS'));
+            $stats['total_size_mb'] = array_sum(array_column($tables, 'size_mb'));
             $stats['connection_test'] = $this->testConnection();
             $stats['timestamp'] = date('Y-m-d H:i:s');
             
@@ -287,20 +346,22 @@ class Database {
     }
     
     /**
-     * 環境確認用デバッグ情報取得
-     * @return array
+     * デバッグ情報取得
+     * @return array デバッグ情報の配列
      */
     public function getDebugInfo() {
         try {
             return [
                 'environment' => ENVIRONMENT,
+                'debug_mode' => DEBUG_MODE,
                 'db_host' => DB_HOST,
                 'db_name' => DB_NAME,
                 'db_user' => DB_USER,
+                'db_charset' => DB_CHARSET,
                 'connection_test' => $this->testConnection(),
                 'php_version' => PHP_VERSION,
                 'pdo_version' => $this->pdo->getAttribute(PDO::ATTR_SERVER_VERSION),
-                'charset' => DB_CHARSET,
+                'available_methods' => get_class_methods($this),
                 'timestamp' => date('Y-m-d H:i:s')
             ];
         } catch (Exception $e) {
@@ -311,27 +372,17 @@ class Database {
             ];
         }
     }
-    
-    /**
-     * クローン防止
-     */
-    private function __clone() {}
-    
-    /**
-     * アンシリアライズ防止
-     */
-    public function __wakeup() {
-        throw new Exception("Cannot unserialize singleton");
-    }
 }
 
-// 🎯 統合完了の確認
+// ========================================
+// 初期化確認
+// ========================================
+
 if (class_exists('Database')) {
-    // Database クラスの統合が成功
-    if (ENVIRONMENT === 'development') {
-        error_log("Database class integrated successfully in config/database.php");
+    if (DEBUG_MODE) {
+        error_log("✅ Database class (v5.0 Unified) loaded successfully");
     }
 } else {
-    error_log("Database class integration failed");
+    error_log("❌ Database class loading failed");
 }
 ?>
