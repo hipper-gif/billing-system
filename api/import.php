@@ -64,9 +64,31 @@ try {
     // POST リクエスト処理（CSVアップロード）
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
+        // デバッグ: 受信したデータをログ出力
+        error_log("=== CSV Import Debug ===");
+        error_log("_FILES keys: " . json_encode(array_keys($_FILES)));
+        error_log("_POST keys: " . json_encode(array_keys($_POST)));
+        
         // ファイルアップロード確認
-        if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
-            sendResponse(false, 'CSVファイルがアップロードされていません');
+        if (!isset($_FILES['csv_file'])) {
+            // 別のフィールド名でファイルが送られている可能性をチェック
+            $fileKeys = array_keys($_FILES);
+            if (!empty($fileKeys)) {
+                sendResponse(false, 'フィールド名が一致しません。期待: csv_file、実際: ' . implode(', ', $fileKeys), [
+                    'received_files' => $_FILES,
+                    'expected_field' => 'csv_file'
+                ]);
+            } else {
+                sendResponse(false, 'CSVファイルがアップロードされていません（$_FILESが空です）', [
+                    'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'unknown',
+                    'content_length' => $_SERVER['CONTENT_LENGTH'] ?? 0,
+                    'post_data_exists' => !empty($_POST)
+                ]);
+            }
+        }
+        
+        if ($_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
+            sendResponse(false, 'ファイルアップロードエラー: ' . $_FILES['csv_file']['error']);
         }
         
         $uploadedFile = $_FILES['csv_file'];
