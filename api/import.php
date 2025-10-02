@@ -80,13 +80,15 @@ try {
         }
         
         // CSVインポート実行
-        $importer = new SmileyCSVImporter($db);
+        $importer = new SmileyCSVImporter();  // 引数なしで初期化
         $importOptions = [
-            'encoding' => $_POST['encoding'] ?? 'auto',
+            'encoding' => $_POST['encoding'] ?? 'UTF-8',
+            'delimiter' => ',',
+            'has_header' => true,
             'overwrite' => isset($_POST['overwrite']) ? (bool)$_POST['overwrite'] : false
         ];
         
-        $importResult = $importer->importFile($uploadResult['filepath'], $importOptions);
+        $importResult = $importer->importCSV($uploadResult['filepath'], $importOptions);  // importCSV()を呼び出し
         
         // 一時ファイル削除
         if (file_exists($uploadResult['filepath'])) {
@@ -98,13 +100,15 @@ try {
             sendResponse(true, 'CSVインポートが正常に完了しました', [
                 'batch_id' => $importResult['batch_id'],
                 'stats' => $importResult['stats'],
-                'processing_time' => $importResult['processing_time']
+                'processing_time' => $importResult['execution_time'] . '秒',
+                'summary_message' => $importResult['summary_message'] ?? ''
             ], $importResult['errors'] ?? []);
         } else {
             sendResponse(false, 'CSVインポートでエラーが発生しました', [
                 'batch_id' => $importResult['batch_id'] ?? null,
                 'stats' => $importResult['stats'] ?? [],
-                'processing_time' => $importResult['processing_time'] ?? null
+                'processing_time' => ($importResult['execution_time'] ?? 0) . '秒',
+                'summary_message' => $importResult['summary_message'] ?? ''
             ], $importResult['errors'] ?? []);
         }
     }
