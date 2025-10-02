@@ -10,7 +10,7 @@
  */
 
 // 🔧 データベース設定値
-define('DB_HOST', 'localhost.xserver.jp');
+define('DB_HOST', 'localhost');
 define('DB_NAME', 'twinklemark_billing');  
 define('DB_USER', 'twinklemark_bill');
 define('DB_PASS', 'Smiley2525');
