@@ -1,513 +1,331 @@
 <?php
 /**
- * performance_check.php - パフォーマンス診断ツール
+ * performance_check.php - パフォーマンス診断ツール（簡略版）
  * 配置: /api/performance_check.php
- * 
- * 全ページ遅延の原因を特定
  */
 
-// エラー表示強制
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
-ini_set('log_errors', 1);
 
-// 開始時間記録
 $startTime = microtime(true);
-$checkPoints = array();
+$results = array();
 
-function recordCheckpoint($label) {
-    global $startTime, $checkPoints;
-    $checkPoints[] = array(
-        'label' => $label,
-        'time' => round((microtime(true) - $startTime) * 1000, 2),
-        'memory' => round(memory_get_usage(true) / 1024 / 1024, 2)
-    );
-}
+// 1. 基本情報
+$results['php_version'] = phpversion();
+$results['server_software'] = isset($_SERVER['SERVER_SOFTWARE']) ? $_SERVER['SERVER_SOFTWARE'] : 'Unknown';
+$results['current_time'] = date('Y-m-d H:i:s');
 
-recordCheckpoint('スクリプト開始');
-
-// 1. 基本PHP設定確認
-$phpInfo = array(
-    'version' => phpversion(),
-    'max_execution_time' => ini_get('max_execution_time'),
-    'memory_limit' => ini_get('memory_limit'),
-    'upload_max_filesize' => ini_get('upload_max_filesize'),
-    'post_max_size' => ini_get('post_max_size'),
-    'display_errors' => ini_get('display_errors'),
-    'log_errors' => ini_get('log_errors')
-);
-
-recordCheckpoint('PHP設定確認完了');
-
-// 2. config/database.php読み込みテスト
-$configLoadStart = microtime(true);
+// 2. config/database.php読み込み
+$configStart = microtime(true);
 try {
     require_once __DIR__ . '/../config/database.php';
-    $configLoadTime = round((microtime(true) - $configLoadStart) * 1000, 2);
-    $configStatus = 'OK';
-    $configError = null;
+    $results['config_load_time'] = round((microtime(true) - $configStart) * 1000, 2);
+    $results['config_status'] = 'OK';
+    $results['db_host'] = defined('DB_HOST') ? DB_HOST : 'undefined';
+    $results['db_name'] = defined('DB_NAME') ? DB_NAME : 'undefined';
+    $results['db_user'] = defined('DB_USER') ? DB_USER : 'undefined';
+    $results['environment'] = defined('ENVIRONMENT') ? ENVIRONMENT : 'undefined';
 } catch (Exception $e) {
-    $configLoadTime = round((microtime(true) - $configLoadStart) * 1000, 2);
-    $configStatus = 'ERROR';
-    $configError = $e->getMessage();
+    $results['config_load_time'] = round((microtime(true) - $configStart) * 1000, 2);
+    $results['config_status'] = 'ERROR';
+    $results['config_error'] = $e->getMessage();
 }
-
-recordCheckpoint('config/database.php読み込み完了: ' . $configLoadTime . 'ms');
 
 // 3. データベース接続テスト
-$dbConnectStart = microtime(true);
-$dbStatus = array();
+$dbStart = microtime(true);
 try {
     $db = Database::getInstance();
-    $dbConnectTime = round((microtime(true) - $dbConnectStart) * 1000, 2);
+    $results['db_connect_time'] = round((microtime(true) - $dbStart) * 1000, 2);
+    $results['db_status'] = 'OK';
     
-    // 簡単なクエリ実行
+    // 簡単なクエリ
     $queryStart = microtime(true);
-    $stmt = $db->query("SELECT 1 as test");
-    $queryTime = round((microtime(true) - $queryStart) * 1000, 2);
+    $stmt = $db->query("SELECT 1");
+    $results['db_query_time'] = round((microtime(true) - $queryStart) * 1000, 2);
     
-    $dbStatus = array(
-        'status' => 'OK',
-        'connect_time' => $dbConnectTime,
-        'query_time' => $queryTime,
-        'total_time' => $dbConnectTime + $queryTime,
-        'host' => DB_HOST,
-        'database' => DB_NAME,
-        'user' => DB_USER
-    );
 } catch (Exception $e) {
-    $dbConnectTime = round((microtime(true) - $dbConnectStart) * 1000, 2);
-    $dbStatus = array(
-        'status' => 'ERROR',
-        'connect_time' => $dbConnectTime,
-        'error' => $e->getMessage(),
-        'host' => defined('DB_HOST') ? DB_HOST : 'undefined',
-        'database' => defined('DB_NAME') ? DB_NAME : 'undefined',
-        'user' => defined('DB_USER') ? DB_USER : 'undefined'
-    );
+    $results['db_connect_time'] = round((microtime(true) - $dbStart) * 1000, 2);
+    $results['db_status'] = 'ERROR';
+    $results['db_error'] = $e->getMessage();
 }
 
-recordCheckpoint('データベース接続テスト完了: ' . $dbConnectTime . 'ms');
-
-// 4. テーブル存在確認
-$tableCheck = array();
-if ($dbStatus['status'] === 'OK') {
-    try {
-        $tables = array('companies', 'users', 'orders', 'invoices', 'payments', 'receipts');
-        foreach ($tables as $table) {
-            $stmt = $db->query("SELECT COUNT(*) as count FROM {$table}");
+// 4. テーブル確認
+if (isset($db)) {
+    $tables = array('companies', 'users', 'invoices', 'payments');
+    foreach ($tables as $table) {
+        try {
+            $stmt = $db->query("SELECT COUNT(*) as cnt FROM " . $table);
             $result = $stmt->fetch();
-            $tableCheck[$table] = array(
-                'exists' => true,
-                'count' => $result['count']
-            );
+            $results['table_' . $table] = $result['cnt'];
+        } catch (Exception $e) {
+            $results['table_' . $table] = 'ERROR';
         }
-    } catch (Exception $e) {
-        $tableCheck['error'] = $e->getMessage();
     }
 }
 
-recordCheckpoint('テーブル確認完了');
+// 5. メモリ使用量
+$results['memory_usage'] = round(memory_get_usage(true) / 1024 / 1024, 2);
+$results['memory_peak'] = round(memory_get_peak_usage(true) / 1024 / 1024, 2);
 
-// 5. ファイルシステムチェック
-$fileCheck = array();
-$requiredFiles = array(
-    'config/database.php' => __DIR__ . '/../config/database.php',
-    'classes/Database.php' => __DIR__ . '/../classes/Database.php',
-    'classes/PaymentManager.php' => __DIR__ . '/../classes/PaymentManager.php',
-    'pages/index.php' => __DIR__ . '/../pages/index.php',
-    'pages/payments.php' => __DIR__ . '/../pages/payments.php'
-);
+// 6. 総実行時間
+$results['total_time'] = round((microtime(true) - $startTime) * 1000, 2);
 
-foreach ($requiredFiles as $name => $path) {
-    $fileCheck[$name] = array(
-        'exists' => file_exists($path),
-        'readable' => is_readable($path),
-        'size' => file_exists($path) ? filesize($path) : 0
-    );
-}
-
-recordCheckpoint('ファイルシステムチェック完了');
-
-// 6. エラーログ確認
-$errorLogPath = __DIR__ . '/../logs/error.log';
-$errorLogInfo = array(
-    'exists' => file_exists($errorLogPath),
-    'size' => file_exists($errorLogPath) ? filesize($errorLogPath) : 0,
-    'readable' => is_readable($errorLogPath)
-);
-
-if ($errorLogInfo['exists'] && $errorLogInfo['readable'] && $errorLogInfo['size'] > 0) {
-    // 最新10行を取得
-    $errorLogContent = file($errorLogPath);
-    $errorLogInfo['last_10_lines'] = array_slice($errorLogContent, -10);
-}
-
-recordCheckpoint('エラーログ確認完了');
-
-// 7. 外部リソース確認（オプション）
-$externalCheck = array();
-if (function_exists('curl_version')) {
-    $externalResources = array(
-        'Bootstrap CSS' => 'https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css',
-        'Chart.js' => 'https://cdn.jsdelivr.net/npm/chart.js'
-    );
-    
-    foreach ($externalResources as $name => $url) {
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_NOBODY, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        
-        $start = microtime(true);
-        curl_exec($ch);
-        $responseTime = round((microtime(true) - $start) * 1000, 2);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        
-        $externalCheck[$name] = array(
-            'url' => $url,
-            'http_code' => $httpCode,
-            'response_time' => $responseTime,
-            'status' => $httpCode == 200 ? 'OK' : 'ERROR'
-        );
-    }
-}
-
-recordCheckpoint('外部リソース確認完了');
-
-// 総実行時間
-$totalTime = round((microtime(true) - $startTime) * 1000, 2);
-
-// 診断結果判定
+// 7. 診断判定
 $diagnosis = array();
 
-// データベース接続が遅い
-if (isset($dbStatus['connect_time']) && $dbStatus['connect_time'] > 3000) {
-    $diagnosis[] = array(
-        'severity' => 'critical',
-        'issue' => 'データベース接続が非常に遅い',
-        'detail' => "接続時間: {$dbStatus['connect_time']}ms（正常: <500ms）",
-        'solution' => 'DB接続情報を確認してください。特にDB_USER, DB_PASSが正しいか確認。'
-    );
+if (isset($results['db_connect_time']) && $results['db_connect_time'] > 3000) {
+    $diagnosis[] = 'データベース接続が非常に遅い (' . $results['db_connect_time'] . 'ms)';
 }
 
-// config読み込みが遅い
-if ($configLoadTime > 1000) {
-    $diagnosis[] = array(
-        'severity' => 'high',
-        'issue' => 'config/database.phpの読み込みが遅い',
-        'detail' => "読み込み時間: {$configLoadTime}ms（正常: <100ms）",
-        'solution' => 'config/database.phpの不要な処理（ディレクトリ作成等）をコメントアウト'
-    );
+if (isset($results['config_load_time']) && $results['config_load_time'] > 1000) {
+    $diagnosis[] = 'config/database.phpの読み込みが遅い (' . $results['config_load_time'] . 'ms)';
 }
 
-// エラーログが肥大化
-if ($errorLogInfo['size'] > 10 * 1024 * 1024) { // 10MB以上
-    $diagnosis[] = array(
-        'severity' => 'medium',
-        'issue' => 'エラーログファイルが肥大化',
-        'detail' => "サイズ: " . round($errorLogInfo['size'] / 1024 / 1024, 2) . "MB",
-        'solution' => 'logs/error.logを削除またはローテーション'
-    );
+if ($results['db_status'] === 'ERROR') {
+    $diagnosis[] = 'データベース接続エラー: ' . $results['db_error'];
 }
 
-// データベース接続エラー
-if ($dbStatus['status'] === 'ERROR') {
-    $diagnosis[] = array(
-        'severity' => 'critical',
-        'issue' => 'データベース接続エラー',
-        'detail' => $dbStatus['error'],
-        'solution' => 'DB_HOST, DB_NAME, DB_USER, DB_PASSを確認。phpMyAdminでログイン可能か確認。'
-    );
+if ($results['total_time'] > 5000) {
+    $diagnosis[] = '総実行時間が非常に遅い (' . $results['total_time'] . 'ms)';
 }
 
-// メモリ不足
-$currentMemory = memory_get_usage(true) / 1024 / 1024;
-if ($currentMemory > 50) {
-    $diagnosis[] = array(
-        'severity' => 'medium',
-        'issue' => 'メモリ使用量が多い',
-        'detail' => round($currentMemory, 2) . "MB使用中",
-        'solution' => 'PHPのmemory_limitを増やすか、処理を最適化'
-    );
+if (isset($results['db_host']) && $results['db_host'] === 'localhost') {
+    $diagnosis[] = '警告: DB_HOSTがlocalhostです。エックスサーバーでは専用のMySQLホスト名を使用してください';
 }
 
-// 問題なし
 if (empty($diagnosis)) {
-    $diagnosis[] = array(
-        'severity' => 'info',
-        'issue' => '重大な問題は検出されませんでした',
-        'detail' => '外部CDNの読み込み速度を確認してください',
-        'solution' => 'ブラウザの開発者ツール（F12）でネットワークタブを確認'
-    );
+    $diagnosis[] = '重大な問題は検出されませんでした';
 }
 
-// HTML出力
 ?>
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>パフォーマンス診断 - Smiley配食システム</title>
+    <title>パフォーマンス診断</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
-            background: #f5f5f5; 
+        body {
+            font-family: sans-serif;
+            background: #f5f5f5;
             padding: 20px;
-            line-height: 1.6;
+            margin: 0;
         }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .card { 
-            background: white; 
-            border-radius: 8px; 
-            padding: 24px; 
-            margin-bottom: 20px; 
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1); 
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
-        h1 { 
-            color: #2c3e50; 
-            margin-bottom: 10px; 
-            font-size: 28px;
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
         }
-        h2 { 
-            color: #34495e; 
-            margin: 20px 0 15px 0; 
-            font-size: 20px;
-            border-bottom: 2px solid #3498db;
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+            border-bottom: 1px solid #ddd;
             padding-bottom: 8px;
         }
         .total-time {
             font-size: 48px;
             font-weight: bold;
-            color: <?php echo $totalTime > 5000 ? '#e74c3c' : ($totalTime > 2000 ? '#f39c12' : '#27ae60'); ?>;
             text-align: center;
             margin: 20px 0;
+            padding: 20px;
+            border-radius: 8px;
         }
-        .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-size: 12px;
+        .time-good { color: #27ae60; background: #d5f4e6; }
+        .time-warning { color: #f39c12; background: #fef5e7; }
+        .time-bad { color: #e74c3c; background: #fadbd8; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background: #ecf0f1;
             font-weight: bold;
-            text-transform: uppercase;
         }
-        .status-ok { background: #d4edda; color: #155724; }
-        .status-error { background: #f8d7da; color: #721c24; }
-        .status-warning { background: #fff3cd; color: #856404; }
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            margin: 15px 0;
-        }
-        th, td { 
-            padding: 12px; 
-            text-align: left; 
-            border-bottom: 1px solid #dee2e6; 
-        }
-        th { 
-            background: #f8f9fa; 
-            font-weight: 600;
-            color: #495057;
-        }
-        tr:hover { background: #f8f9fa; }
-        .checkpoint { 
-            display: flex; 
-            justify-content: space-between; 
-            padding: 8px 0; 
-            border-bottom: 1px solid #eee;
-        }
-        .checkpoint:last-child { border-bottom: none; }
-        .diagnosis-item {
+        .status-ok { color: #27ae60; font-weight: bold; }
+        .status-error { color: #e74c3c; font-weight: bold; }
+        .diagnosis {
+            background: #fff3cd;
+            border-left: 4px solid #f39c12;
             padding: 15px;
             margin: 10px 0;
-            border-radius: 6px;
-            border-left: 4px solid;
+            border-radius: 4px;
         }
-        .diagnosis-critical { 
-            background: #fee; 
-            border-color: #e74c3c; 
+        .diagnosis-critical {
+            background: #f8d7da;
+            border-left-color: #e74c3c;
         }
-        .diagnosis-high { 
-            background: #fef5e7; 
-            border-color: #f39c12; 
-        }
-        .diagnosis-medium { 
-            background: #eaf2f8; 
-            border-color: #3498db; 
-        }
-        .diagnosis-info { 
-            background: #eafaf1; 
-            border-color: #27ae60; 
-        }
-        .diagnosis-item h3 { 
-            margin-bottom: 8px; 
-            font-size: 16px;
-        }
-        .diagnosis-item p { 
-            margin: 5px 0; 
-            font-size: 14px;
-        }
-        code { 
-            background: #f4f4f4; 
-            padding: 2px 6px; 
-            border-radius: 3px; 
-            font-family: 'Courier New', monospace;
-            font-size: 13px;
-        }
-        .log-line {
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            padding: 4px;
-            background: #f8f9fa;
-            margin: 2px 0;
-            overflow-x: auto;
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="card">
-            <h1>🔍 パフォーマンス診断レポート</h1>
-            <p style="color: #666; margin-top: 10px;">
-                実行日時: <?php echo date('Y-m-d H:i:s'); ?> | 
-                環境: <?php echo defined('ENVIRONMENT') ? ENVIRONMENT : 'unknown'; ?>
-            </p>
-            
-            <div class="total-time">
-                <?php echo $totalTime; ?>ms
+        <h1>パフォーマンス診断レポート</h1>
+        <p>実行日時: <?php echo $results['current_time']; ?></p>
+        
+        <?php
+        $timeClass = 'time-good';
+        if ($results['total_time'] > 5000) {
+            $timeClass = 'time-bad';
+        } elseif ($results['total_time'] > 2000) {
+            $timeClass = 'time-warning';
+        }
+        ?>
+        
+        <div class="total-time <?php echo $timeClass; ?>">
+            <?php echo $results['total_time']; ?>ms
+        </div>
+        
+        <h2>診断結果</h2>
+        <?php foreach ($diagnosis as $diag): ?>
+            <div class="diagnosis <?php echo strpos($diag, 'エラー') !== false || strpos($diag, '非常に') !== false ? 'diagnosis-critical' : ''; ?>">
+                <?php echo htmlspecialchars($diag); ?>
             </div>
-            <p style="text-align: center; color: #666; margin-bottom: 20px;">
-                総実行時間
-                <?php if ($totalTime > 5000): ?>
-                    <strong style="color: #e74c3c;">（非常に遅い）</strong>
-                <?php elseif ($totalTime > 2000): ?>
-                    <strong style="color: #f39c12;">（遅い）</strong>
-                <?php else: ?>
-                    <strong style="color: #27ae60;">（正常）</strong>
-                <?php endif; ?>
-            </p>
-        </div>
-
-        <!-- 診断結果 -->
-        <div class="card">
-            <h2>🎯 診断結果と推奨対応</h2>
-            <?php foreach ($diagnosis as $item): ?>
-                <div class="diagnosis-item diagnosis-<?php echo $item['severity']; ?>">
-                    <h3><?php echo htmlspecialchars($item['issue']); ?></h3>
-                    <p><strong>詳細:</strong> <?php echo htmlspecialchars($item['detail']); ?></p>
-                    <p><strong>対応策:</strong> <?php echo htmlspecialchars($item['solution']); ?></p>
-                </div>
-            <?php endforeach; ?>
-        </div>
-
-        <!-- チェックポイント -->
-        <div class="card">
-            <h2>⏱️ 処理時間詳細</h2>
-            <?php foreach ($checkPoints as $cp): ?>
-                <div class="checkpoint">
-                    <span><?php echo htmlspecialchars($cp['label']); ?></span>
-                    <span>
-                        <strong><?php echo $cp['time']; ?>ms</strong> / 
-                        <?php echo $cp['memory']; ?>MB
-                    </span>
-                </div>
-            <?php endforeach; ?>
-        </div>
-
-        <!-- データベース状態 -->
-        <div class="card">
-            <h2>💾 データベース接続状態</h2>
-            <table>
-                <tr>
-                    <th>項目</th>
-                    <th>値</th>
-                </tr>
-                <tr>
-                    <td>ステータス</td>
-                    <td>
-                        <span class="status-badge status-<?php echo $dbStatus['status'] === 'OK' ? 'ok' : 'error'; ?>">
-                            <?php echo $dbStatus['status']; ?>
-                        </span>
-                    </td>
-                </tr>
-                <tr>
-                    <td>接続時間</td>
-                    <td><?php echo $dbStatus['connect_time']; ?>ms</td>
-                </tr>
-                <?php if (isset($dbStatus['query_time'])): ?>
-                <tr>
-                    <td>クエリ実行時間</td>
-                    <td><?php echo $dbStatus['query_time']; ?>ms</td>
-                </tr>
-                <?php endif; ?>
-                <tr>
-                    <td>ホスト</td>
-                    <td><code><?php echo htmlspecialchars($dbStatus['host']); ?></code></td>
-                </tr>
-                <tr>
-                    <td>データベース名</td>
-                    <td><code><?php echo htmlspecialchars($dbStatus['database']); ?></code></td>
-                </tr>
-                <tr>
-                    <td>ユーザー名</td>
-                    <td><code><?php echo htmlspecialchars($dbStatus['user']); ?></code></td>
-                </tr>
-                <?php if (isset($dbStatus['error'])): ?>
-                <tr>
-                    <td>エラー内容</td>
-                    <td style="color: #e74c3c;"><code><?php echo htmlspecialchars($dbStatus['error']); ?></code></td>
-                </tr>
-                <?php endif; ?>
-            </table>
-        </div>
-
-        <!-- テーブル状態 -->
-        <?php if (!empty($tableCheck) && !isset($tableCheck['error'])): ?>
-        <div class="card">
-            <h2>📊 テーブル状態</h2>
-            <table>
-                <tr>
-                    <th>テーブル名</th>
-                    <th>データ件数</th>
-                </tr>
-                <?php foreach ($tableCheck as $table => $info): ?>
-                <tr>
-                    <td><code><?php echo htmlspecialchars($table); ?></code></td>
-                    <td><?php echo number_format($info['count']); ?>件</td>
-                </tr>
-                <?php endforeach; ?>
-            </table>
-        </div>
+        <?php endforeach; ?>
+        
+        <h2>詳細情報</h2>
+        <table>
+            <tr>
+                <th>項目</th>
+                <th>値</th>
+            </tr>
+            <tr>
+                <td>PHP バージョン</td>
+                <td><?php echo $results['php_version']; ?></td>
+            </tr>
+            <tr>
+                <td>環境</td>
+                <td><?php echo isset($results['environment']) ? $results['environment'] : 'N/A'; ?></td>
+            </tr>
+            <tr>
+                <td>config読み込み</td>
+                <td class="<?php echo $results['config_status'] === 'OK' ? 'status-ok' : 'status-error'; ?>">
+                    <?php echo $results['config_status']; ?> 
+                    (<?php echo $results['config_load_time']; ?>ms)
+                </td>
+            </tr>
+            <tr>
+                <td>DB接続</td>
+                <td class="<?php echo $results['db_status'] === 'OK' ? 'status-ok' : 'status-error'; ?>">
+                    <?php echo $results['db_status']; ?>
+                    <?php if (isset($results['db_connect_time'])): ?>
+                        (<?php echo $results['db_connect_time']; ?>ms)
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php if (isset($results['db_query_time'])): ?>
+            <tr>
+                <td>DBクエリ実行</td>
+                <td><?php echo $results['db_query_time']; ?>ms</td>
+            </tr>
+            <?php endif; ?>
+            <tr>
+                <td>メモリ使用量</td>
+                <td><?php echo $results['memory_usage']; ?>MB (ピーク: <?php echo $results['memory_peak']; ?>MB)</td>
+            </tr>
+        </table>
+        
+        <h2>データベース設定</h2>
+        <table>
+            <tr>
+                <th>項目</th>
+                <th>値</th>
+            </tr>
+            <tr>
+                <td>DB_HOST</td>
+                <td><code><?php echo isset($results['db_host']) ? htmlspecialchars($results['db_host']) : 'N/A'; ?></code></td>
+            </tr>
+            <tr>
+                <td>DB_NAME</td>
+                <td><code><?php echo isset($results['db_name']) ? htmlspecialchars($results['db_name']) : 'N/A'; ?></code></td>
+            </tr>
+            <tr>
+                <td>DB_USER</td>
+                <td><code><?php echo isset($results['db_user']) ? htmlspecialchars($results['db_user']) : 'N/A'; ?></code></td>
+            </tr>
+        </table>
+        
+        <?php if (isset($results['table_companies'])): ?>
+        <h2>テーブル状態</h2>
+        <table>
+            <tr>
+                <th>テーブル</th>
+                <th>データ件数</th>
+            </tr>
+            <tr>
+                <td>companies</td>
+                <td><?php echo $results['table_companies']; ?></td>
+            </tr>
+            <tr>
+                <td>users</td>
+                <td><?php echo $results['table_users']; ?></td>
+            </tr>
+            <tr>
+                <td>invoices</td>
+                <td><?php echo $results['table_invoices']; ?></td>
+            </tr>
+            <tr>
+                <td>payments</td>
+                <td><?php echo $results['table_payments']; ?></td>
+            </tr>
+        </table>
         <?php endif; ?>
-
-        <!-- PHP設定 -->
-        <div class="card">
-            <h2>⚙️ PHP設定</h2>
-            <table>
-                <?php foreach ($phpInfo as $key => $value): ?>
-                <tr>
-                    <td><?php echo htmlspecialchars($key); ?></td>
-                    <td><code><?php echo htmlspecialchars($value); ?></code></td>
-                </tr>
-                <?php endforeach; ?>
-            </table>
+        
+        <?php if ($results['db_status'] === 'ERROR'): ?>
+        <h2>エラー詳細</h2>
+        <div class="diagnosis diagnosis-critical">
+            <strong>データベース接続エラー:</strong><br>
+            <?php echo htmlspecialchars($results['db_error']); ?>
         </div>
-
-        <!-- エラーログ -->
-        <?php if ($errorLogInfo['exists'] && isset($errorLogInfo['last_10_lines'])): ?>
-        <div class="card">
-            <h2>📝 エラーログ（最新10行）</h2>
-            <p style="color: #666; margin-bottom: 10px;">
-                ログサイズ: <?php echo round($errorLogInfo['size'] / 1024, 2); ?>KB
-            </p>
-            <?php foreach ($errorLogInfo['last_10_lines'] as $line): ?>
-                <div class="log-line"><?php echo htmlspecialchars($line); ?></div>
-            <?php endforeach; ?>
-        </div>
+        
+        <h3>対応方法</h3>
+        <ol>
+            <li>エックスサーバーのサーバーパネルにログイン</li>
+            <li>「MySQL設定」を開く</li>
+            <li>「MySQLホスト名」を確認（例: mysql1234.xsrv.jp）</li>
+            <li>config/database.phpの<code>DB_HOST</code>を正しいホスト名に変更</li>
+            <li>データベース名、ユーザー名、パスワードが正しいか確認</li>
+        </ol>
         <?php endif; ?>
+        
+        <h2>推奨対応</h2>
+        <div style="background: #e8f4f8; padding: 15px; border-radius: 4px; margin-top: 20px;">
+            <?php if ($results['total_time'] > 5000): ?>
+                <p><strong>緊急対応が必要です:</strong></p>
+                <ul>
+                    <li>DB_HOSTを確認してください（localhostの場合は変更必須）</li>
+                    <li>config/database.phpを軽量版に差し替えてください</li>
+                    <li>データベース接続情報が正しいか確認してください</li>
+                </ul>
+            <?php elseif ($results['total_time'] > 2000): ?>
+                <p><strong>最適化を推奨します:</strong></p>
+                <ul>
+                    <li>config/database.phpの不要な処理を削除</li>
+                    <li>PaymentManagerを軽量版に更新</li>
+                </ul>
+            <?php else: ?>
+                <p><strong>パフォーマンスは良好です</strong></p>
+                <p>特に対応は不要ですが、他のページも確認してください。</p>
+            <?php endif; ?>
+        </div>
     </div>
 </body>
 </html>
