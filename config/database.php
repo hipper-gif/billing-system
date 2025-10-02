@@ -91,6 +91,14 @@ class Database {
     }
     
     /**
+     * PDO接続オブジェクト取得
+     * @return PDO
+     */
+    public function getConnection() {
+        return $this->pdo;
+    }
+    
+    /**
      * SQLクエリ実行
      * @param string $sql
      * @param array $params
