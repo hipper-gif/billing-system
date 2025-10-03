@@ -20,8 +20,8 @@ define('DB_PASS', 'Smiley2525');
 define('DB_CHARSET', 'utf8mb4');
 
 // 🌍 環境設定
-define('ENVIRONMENT', 'production'); // production, development, testing
-define('DEBUG_MODE', ENVIRONMENT === 'development');
+define('ENVIRONMENT', 'development'); // production, development, testing （一時的にdevelopmentに変更）
+define('DEBUG_MODE', true); // デバッグモード強制有効
 
 /**
  * Database クラス - 完全統一版
