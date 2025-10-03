@@ -53,7 +53,7 @@ try {
     ], true);
     
     logStep(4, "簡単なクエリテスト", null, true);
-    $stmt = $db->query("SELECT 1 as test, DATABASE() as db_name, NOW() as current_time");
+    $stmt = $db->query("SELECT 1 as test, DATABASE() as db_name, NOW() as current_dt");
     $result = $stmt->fetch();
     logStep(4, "クエリ成功", $result, true);
     
