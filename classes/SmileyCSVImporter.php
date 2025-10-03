@@ -74,8 +74,9 @@ class SmileyCSVImporter {
     
     /**
      * CSVファイルインポート（メイン処理）
+     * メソッド名: importCSV (呼び出し側と統一)
      */
-    public function importFile($filePath, $options = []) {
+    public function importCSV($filePath, $options = []) {
         $startTime = microtime(true);
         $batchId = 'BATCH_' . date('YmdHis') . '_' . uniqid();
         
