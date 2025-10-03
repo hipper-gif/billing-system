@@ -1,17 +1,19 @@
 <?php
 /**
  * Smiley配食事業専用CSVインポーター
- * Shift-JIS（CP932）完全対応版 - HTTP 500エラー解決版
+ * 自己完結原則準拠版 - コンストラクタ引数なし
  * 
- * 対応エンコーディング:
- * - SJIS-win (Windows Shift-JIS)
- * - CP932 (Code Page 932)
- * - SJIS (標準 Shift-JIS)
- * - UTF-8, UTF-8-BOM
+ * 設計原則:
+ * - 自己完結: Database::getInstance()を内部で呼び出し
+ * - 外部依存なし: 引数でDatabaseを受け取らない
  * 
- * @version 3.0.0
- * @date 2025-09-10
+ * @version 4.0.0 - 自己完結版
+ * @date 2025-10-02
  */
+
+// config/database.phpを読み込み（Database統一版）
+require_once __DIR__ . '/../config/database.php';
+
 class SmileyCSVImporter {
     private $db;
     
@@ -57,14 +59,21 @@ class SmileyCSVImporter {
     // ログ用
     private $importLog = [];
     
-    public function __construct(Database $db) {
-        $this->db = $db;
-        $this->log("SmileyCSVImporter初期化完了");
+    /**
+     * コンストラクタ - 自己完結版（引数なし）
+     * 
+     * 設計原則: 
+     * - 内部でDatabase::getInstance()を呼び出し
+     * - 外部からDatabaseインスタンスを受け取らない
+     */
+    public function __construct() {
+        // 自己完結: 内部でDatabaseインスタンスを取得
+        $this->db = Database::getInstance();
+        $this->log("SmileyCSVImporter初期化完了（自己完結版）");
     }
     
     /**
      * CSVファイルインポート（メイン処理）
-     * HTTP 500エラー対策強化版
      */
     public function importFile($filePath, $options = []) {
         $startTime = microtime(true);
@@ -91,11 +100,11 @@ class SmileyCSVImporter {
             
             $this->log("ファイル確認完了", ['size' => $fileSize]);
             
-            // 4. エンコーディング検出（強化版）
+            // 4. エンコーディング検出
             $encoding = $this->detectEncodingAdvanced($filePath);
             $this->log("エンコーディング検出", ['encoding' => $encoding]);
             
-            // 5. CSV読み込み（エラーハンドリング強化版）
+            // 5. CSV読み込み
             $rawData = $this->readCsvAdvanced($filePath, $encoding);
             $this->log("CSV読み込み完了", ['rows' => count($rawData)]);
             
@@ -145,8 +154,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * 強化版エンコーディング検出
-     * Shift-JIS系の細かい違いに対応
+     * エンコーディング検出
      */
     private function detectEncodingAdvanced($filePath) {
         try {
@@ -192,7 +200,7 @@ class SmileyCSVImporter {
             }
             
             // 2. 実際に変換してみる
-            $testContent = substr($content, 0, 1000); // 最初の1000バイトでテスト
+            $testContent = substr($content, 0, 1000);
             $converted = mb_convert_encoding($testContent, 'UTF-8', $encoding);
             
             if ($converted === false || strlen($converted) === 0) {
@@ -201,7 +209,6 @@ class SmileyCSVImporter {
             
             // 3. 日本語文字が含まれているかチェック
             if ($encoding !== 'UTF-8' && $encoding !== 'UTF-8-BOM') {
-                // ひらがな、カタカナ、漢字の存在確認
                 if (preg_match('/[\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{4E00}-\x{9FAF}]/u', $converted)) {
                     $this->log("日本語文字検出", ['encoding' => $encoding]);
                     return true;
@@ -220,8 +227,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * 強化版CSV読み込み
-     * エラーハンドリングとエンコーディング変換を改善
+     * CSV読み込み
      */
     private function readCsvAdvanced($filePath, $encoding) {
         $data = [];
@@ -239,7 +245,7 @@ class SmileyCSVImporter {
             // BOM除去
             if ($encoding === 'UTF-8-BOM') {
                 $content = substr($content, 3);
-                $encoding = 'UTF-8'; // 以降はUTF-8として処理
+                $encoding = 'UTF-8';
             }
             
             // エンコーディング変換
@@ -332,7 +338,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * 強化版データ正規化
+     * データ正規化
      */
     private function normalizeDataAdvanced($rawData) {
         $normalizedData = [];
@@ -377,7 +383,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * 強化版データ検証
+     * データ検証
      */
     private function validateDataAdvanced($normalizedData) {
         $validData = [];
@@ -430,7 +436,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * 強化版データベース登録
+     * データベース登録
      */
     private function importToDatabaseAdvanced($validData, $batchId) {
         $success = 0;
@@ -443,12 +449,12 @@ class SmileyCSVImporter {
             foreach ($validData as $row) {
                 try {
                     // 重複チェック
-                    $duplicateCheck = $this->db->query(
+                    $stmt = $this->db->query(
                         "SELECT id FROM orders WHERE user_code = ? AND delivery_date = ? AND product_code = ?",
                         [$row['user_code'], $row['delivery_date'], $row['product_code']]
                     );
                     
-                    if ($duplicateCheck->rowCount() > 0) {
+                    if ($stmt->rowCount() > 0) {
                         $duplicates++;
                         continue;
                     }
@@ -460,7 +466,7 @@ class SmileyCSVImporter {
                         delivery_date, department_code, department_name, user_code, user_name,
                         employee_type_code, employee_type_name, product_code, product_name,
                         quantity, unit_price, total_amount, notes, delivery_time, cooperation_code,
-                        batch_id, created_at
+                        import_batch_id, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
                     
                     $this->db->query($sql, [
@@ -509,7 +515,6 @@ class SmileyCSVImporter {
     private function normalizeDate($value) {
         if (empty($value)) return null;
         
-        // 様々な日付フォーマットに対応
         $formats = ['Y-m-d', 'Y/m/d', 'm/d/Y', 'd/m/Y', 'Ymd'];
         
         foreach ($formats as $format) {
@@ -519,21 +524,17 @@ class SmileyCSVImporter {
             }
         }
         
-        return $value; // 変換できない場合はそのまま返す
+        return $value;
     }
     
     private function normalizeInteger($value) {
         if (empty($value)) return 0;
-        
-        // 全角数字を半角に変換
         $value = mb_convert_kana($value, 'n', 'UTF-8');
         return intval($value);
     }
     
     private function normalizeDecimal($value) {
         if (empty($value)) return 0.00;
-        
-        // 全角数字を半角に変換、カンマ除去
         $value = mb_convert_kana($value, 'n', 'UTF-8');
         $value = str_replace(',', '', $value);
         return floatval($value);
@@ -542,7 +543,6 @@ class SmileyCSVImporter {
     private function normalizeTime($value) {
         if (empty($value)) return null;
         
-        // 時刻正規化（HH:MM形式に統一）
         if (preg_match('/(\d{1,2}):(\d{2})/', $value, $matches)) {
             return sprintf('%02d:%02d', $matches[1], $matches[2]);
         }
@@ -552,11 +552,8 @@ class SmileyCSVImporter {
     
     private function normalizeString($value) {
         if (empty($value)) return '';
-        
-        // 前後の空白除去、改行コード除去
         $value = trim($value);
         $value = str_replace(["\r\n", "\r", "\n"], ' ', $value);
-        
         return $value;
     }
     
@@ -584,25 +581,24 @@ class SmileyCSVImporter {
                 'error_records' => $importResult['error'],
                 'duplicate_records' => $importResult['duplicate'],
                 'validation_errors' => count($validationResult['errors']),
-                'processing_time' => round(microtime(true) - $startTime, 2),
+                'processing_time_seconds' => round(microtime(true) - $startTime, 2),
                 'created_at' => date('Y-m-d H:i:s')
             ];
             
             // import_logsテーブルに記録
             $sql = "INSERT INTO import_logs (
-                batch_id, file_name, total_records, success_records, 
-                error_records, duplicate_records, processing_time, created_at
+                batch_id, file_path, total_records, success_records, 
+                error_records, duplicate_records, processing_time_seconds, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
             
             $this->db->query($sql, [
                 $logData['batch_id'], $logData['file_path'],
                 $logData['total_records'], $logData['success_records'],
                 $logData['error_records'], $logData['duplicate_records'],
-                $logData['processing_time'], $logData['created_at']
+                $logData['processing_time_seconds'], $logData['created_at']
             ]);
             
         } catch (Exception $e) {
-            // ログ記録エラーは無視（メイン処理には影響させない）
             error_log("インポートログ記録エラー: " . $e->getMessage());
         }
     }
