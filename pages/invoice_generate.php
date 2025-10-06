@@ -4,10 +4,12 @@
  * Smiley配食事業専用の請求書生成インターフェース
  * 
  * @author Claude
- * @version 2.0.0 - v5.0仕様準拠版
+ * @version 3.0.0 - シンプル版（企業・個人のみ）
  * @created 2025-08-26
  * @updated 2025-10-06
- * @changes 14行目修正: classes/Database.php → config/database.php
+ * @changes 
+ *   - v3.0: 部署別請求・混合請求を削除（シンプル化）
+ *   - v2.0: v5.0仕様準拠、CSP対応
  */
 
 // v5.0仕様: config/database.php から Database クラスを読み込む
@@ -182,7 +184,6 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
             </a>
             <div class="navbar-nav ms-auto">
                 <a class="nav-link" href="../pages/companies.php">企業管理</a>
-                <a class="nav-link" href="../pages/departments.php">部署管理</a>
                 <a class="nav-link" href="../pages/users.php">利用者管理</a>
                 <a class="nav-link active" href="../pages/invoice_generate.php">請求書生成</a>
                 <a class="nav-link" href="../pages/invoices.php">請求書一覧</a>
@@ -194,7 +195,7 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
         <!-- ヘッダー -->
         <div class="smiley-header text-center">
             <h1><i class="fas fa-file-invoice-dollar me-3"></i>請求書生成</h1>
-            <p class="mb-0">配達先企業・部署・個人別の請求書を生成します</p>
+            <p class="mb-0">配達先企業または利用者個人別の請求書を生成します</p>
         </div>
 
         <!-- 請求書生成フォーム -->
@@ -219,32 +220,12 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                                 </div>
                             </div>
 
-                            <div class="invoice-type-card" data-type="department_bulk">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="invoice_type" id="type_department" value="department_bulk">
-                                    <label class="form-check-label" for="type_department">
-                                        <strong>部署別一括請求</strong>
-                                        <small class="d-block text-muted">部署ごとに分けて請求書を生成</small>
-                                    </label>
-                                </div>
-                            </div>
-
                             <div class="invoice-type-card" data-type="individual">
                                 <div class="form-check">
                                     <input class="form-check-input" type="radio" name="invoice_type" id="type_individual" value="individual">
                                     <label class="form-check-label" for="type_individual">
                                         <strong>個人請求</strong>
                                         <small class="d-block text-muted">利用者個人ごとに請求書を生成</small>
-                                    </label>
-                                </div>
-                            </div>
-
-                            <div class="invoice-type-card" data-type="mixed">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="invoice_type" id="type_mixed" value="mixed">
-                                    <label class="form-check-label" for="type_mixed">
-                                        <strong>混合請求（自動判定）</strong>
-                                        <small class="d-block text-muted">企業設定に基づいて最適な請求方法を自動選択</small>
                                     </label>
                                 </div>
                             </div>
@@ -487,15 +468,13 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                 let apiUrl = '';
                 switch(currentInvoiceType) {
                     case 'company_bulk':
-                    case 'mixed':
                         apiUrl = '../api/companies.php';
-                        break;
-                    case 'department_bulk':
-                        apiUrl = '../api/departments.php';
                         break;
                     case 'individual':
                         apiUrl = '../api/users.php';
                         break;
+                    default:
+                        throw new Error('不明な請求タイプです');
                 }
 
                 console.log('Loading targets from:', apiUrl);
@@ -546,15 +525,14 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
             let items = [];
             switch(currentInvoiceType) {
                 case 'company_bulk':
-                case 'mixed':
                     items = data.companies || data;
-                    break;
-                case 'department_bulk':
-                    items = data.departments || data;
                     break;
                 case 'individual':
                     items = data.users || data;
                     break;
+                default:
+                    targetList.innerHTML = '<div class="alert alert-warning"><i class="fas fa-exclamation-triangle me-2"></i>不明な請求タイプです</div>';
+                    return;
             }
 
             if (!items || items.length === 0) {
@@ -572,16 +550,9 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                 
                 switch(currentInvoiceType) {
                     case 'company_bulk':
-                    case 'mixed':
                         name = item.company_name || '名称不明';
                         code = item.company_code || '';
                         subInfo = '';
-                        break;
-                        
-                    case 'department_bulk':
-                        name = item.department_name || '名称不明';
-                        code = item.department_code || '';
-                        subInfo = item.company_name ? `<small class="text-muted d-block">${item.company_name}</small>` : '';
                         break;
                         
                     case 'individual':
