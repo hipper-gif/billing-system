@@ -1,13 +1,14 @@
 <?php
 /**
- * Smiley配食事業専用CSVインポートクラス v5.1
+ * Smiley配食事業専用CSVインポートクラス v5.2
  * 23フィールドCSVファイルの完全対応
- * Shift_JIS固定エンコーディング対応
+ * Shift_JIS / UTF-8 自動検出対応
  * 重複スキップ機能実装
  * 法人名「株式会社Smiley」の自動チェック
  * 
- * 最終更新: 2025-10-04
+ * 最終更新: 2025-10-06
  * 変更履歴:
+ * - v5.2: エンコーディング自動検出追加（UTF-8 / Shift_JIS対応）
  * - v5.1: Shift_JIS固定、重複スキップ、詳細ログ、import_logs仕様書準拠
  */
 
@@ -62,7 +63,7 @@ class SmileyCSVImporter {
             $this->batchId = 'BATCH_' . date('YmdHis') . '_' . uniqid();
             $this->initializeStats();
             
-            error_log("SmileyCSVImporter v5.1 初期化完了: バッチID = {$this->batchId}");
+            error_log("SmileyCSVImporter v5.2 初期化完了: バッチID = {$this->batchId}");
         } catch (Exception $e) {
             error_log("SmileyCSVImporter初期化エラー: " . $e->getMessage());
             throw new Exception('データベース接続エラー: ' . $e->getMessage());
@@ -95,7 +96,7 @@ class SmileyCSVImporter {
     public function importCSV($filePath, $options = []) {
         try {
             error_log("========================================");
-            error_log("CSVインポート開始 v5.1: {$filePath}");
+            error_log("CSVインポート開始 v5.2: {$filePath}");
             error_log("========================================");
             
             // ファイル存在チェック
@@ -139,7 +140,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * CSVファイル読み込み（Shift_JIS固定版）
+     * CSVファイル読み込み（エンコーディング自動検出版）
      */
     private function readCSV($filePath, $options = []) {
         $delimiter = $options['delimiter'] ?? ',';
@@ -157,15 +158,31 @@ class SmileyCSVImporter {
         $originalSize = strlen($content);
         error_log("元のファイルサイズ: {$originalSize} bytes");
         
-        // Shift_JIS → UTF-8 固定変換
-        $content = mb_convert_encoding($content, 'UTF-8', 'SJIS-win');
-        if ($content === false) {
-            throw new Exception('Shift_JISからUTF-8への変換に失敗しました');
+        // エンコーディング自動検出
+        $encodingPriority = ['UTF-8', 'SJIS-win', 'CP932', 'SJIS', 'Shift_JIS', 'EUC-JP'];
+        $detectedEncoding = mb_detect_encoding($content, $encodingPriority, true);
+        
+        if ($detectedEncoding === false) {
+            // 検出失敗時はShift_JISを試行
+            $detectedEncoding = 'SJIS-win';
+            error_log("エンコーディング自動検出失敗、Shift_JISを試行");
+        } else {
+            error_log("エンコーディング検出成功: {$detectedEncoding}");
+        }
+        
+        // UTF-8以外の場合は変換
+        if (strtoupper($detectedEncoding) !== 'UTF-8') {
+            $content = mb_convert_encoding($content, 'UTF-8', $detectedEncoding);
+            if ($content === false) {
+                throw new Exception("エンコーディング変換失敗: {$detectedEncoding} → UTF-8");
+            }
+            error_log("エンコーディング変換: {$detectedEncoding} → UTF-8 完了");
+        } else {
+            error_log("UTF-8ファイル、変換不要");
         }
         
         $convertedSize = strlen($content);
         error_log("変換後サイズ: {$convertedSize} bytes");
-        error_log("エンコーディング変換: SJIS-win → UTF-8 完了");
         
         // UTF-8 BOM除去
         $content = preg_replace('/^\xEF\xBB\xBF/', '', $content);
@@ -213,7 +230,7 @@ class SmileyCSVImporter {
         $this->stats['total_rows'] = count($data);
         
         if (count($data) === 0) {
-            throw new Exception('CSVファイルにデータ行が見つかりません（ヘッダーのみ、または全行が無効）');
+            throw new Exception('CSVファイルにデータ行が見つかりません');
         }
         
         if (empty($headers)) {
@@ -333,7 +350,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * 行データ正規化（実際のSmiley配食システム形式対応）
+     * 行データ正規化
      */
     private function normalizeRowData($row, $rowNumber) {
         if (count($row) !== 23) {
@@ -693,7 +710,7 @@ class SmileyCSVImporter {
         ]);
         
         if ($stmt->fetch()) {
-            // 重複時は静かにスキップ（エラーではない）
+            // 重複時は静かにスキップ
             $this->stats['duplicate_orders']++;
             error_log('重複スキップ: ' . $data['user_code'] . ' / ' . $data['delivery_date'] . ' / ' . $data['product_code']);
             return;
