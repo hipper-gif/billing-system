@@ -1,448 +1,358 @@
 <?php
 /**
- * 配達先企業管理API
- * Smiley配食事業専用
+ * 企業管理API
+ * 完全CRUD対応
+ * 
+ * @version 2.0.0 - v5.0仕様準拠版
+ * @updated 2025-10-06
+ * @changes config/database.php読み込みに変更
  */
 
-require_once '../config/database.php';
-require_once '../classes/Database.php';
-require_once '../classes/SecurityHelper.php';
+// エラーレポート設定（開発時）
+error_reporting(E_ALL);
+ini_set('display_errors', 0); // 本番ではエラー表示しない
+ini_set('log_errors', 1);
 
-// CORS設定
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Content-Type: application/json; charset=utf-8');
+// v5.0仕様: config/database.php から Database クラスを読み込む
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../classes/SecurityHelper.php';
 
-// OPTIONSリクエストの処理
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
-}
+// JSONヘッダー設定
+SecurityHelper::setJsonHeaders();
 
-// セキュリティヘッダー設定
-SecurityHelper::setSecurityHeaders();
+// HTTPメソッド取得
+$method = $_SERVER['REQUEST_METHOD'];
 
 try {
+    // Database接続
     $db = Database::getInstance();
-    $pdo = $db->getConnection();
-    
-    $method = $_SERVER['REQUEST_METHOD'];
-    $input = json_decode(file_get_contents('php://input'), true);
     
     switch ($method) {
         case 'GET':
-            handleGetRequest($pdo);
+            handleGet($db);
             break;
+            
         case 'POST':
-            handlePostRequest($pdo, $input);
+            handlePost($db);
             break;
+            
         case 'PUT':
-            handlePutRequest($pdo, $input);
+            handlePut($db);
             break;
+            
         case 'DELETE':
-            handleDeleteRequest($pdo);
+            handleDelete($db);
             break;
+            
         default:
-            throw new Exception('サポートされていないHTTPメソッドです。');
+            throw new Exception('サポートされていないHTTPメソッドです');
     }
     
 } catch (Exception $e) {
-    error_log("企業管理API エラー: " . $e->getMessage());
-    http_response_code(500);
+    // エラーログ記録
+    error_log("Companies API Error: " . $e->getMessage());
+    
+    // エラーレスポンス
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage()
-    ]);
+        'message' => $e->getMessage(),
+        'trace' => $e->getTraceAsString()
+    ], JSON_UNESCAPED_UNICODE);
 }
 
 /**
- * GET リクエストの処理
+ * GET: 企業一覧・詳細取得
  */
-function handleGetRequest($pdo) {
-    $company_id = $_GET['id'] ?? null;
+function handleGet($db) {
+    $id = $_GET['id'] ?? null;
     
-    if ($company_id) {
-        // 特定企業の詳細情報取得
-        getCompanyDetail($pdo, $company_id);
+    if ($id) {
+        // 企業詳細取得
+        getCompanyDetail($db, $id);
     } else {
         // 企業一覧取得
-        getCompaniesList($pdo);
+        getCompaniesList($db);
     }
 }
 
 /**
  * 企業一覧取得
  */
-function getCompaniesList($pdo) {
+function getCompaniesList($db) {
+    // パラメータ取得
+    $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+    $limit = isset($_GET['limit']) ? min(100, max(1, intval($_GET['limit']))) : 20;
     $search = $_GET['search'] ?? '';
-    $page = max(1, intval($_GET['page'] ?? 1));
-    $per_page = min(100, max(10, intval($_GET['per_page'] ?? 20)));
-    $offset = ($page - 1) * $per_page;
+    $isActive = isset($_GET['is_active']) ? intval($_GET['is_active']) : null;
     
-    // 検索条件の構築
-    $where_conditions = [];
+    $offset = ($page - 1) * $limit;
+    
+    // クエリ構築
+    $sql = "SELECT 
+                id,
+                company_code,
+                company_name,
+                company_address,
+                phone,
+                email,
+                contact_person,
+                payment_method,
+                billing_method,
+                payment_cycle,
+                is_active,
+                created_at,
+                updated_at
+            FROM companies
+            WHERE 1=1";
+    
     $params = [];
     
-    if ($search) {
-        $where_conditions[] = "(company_name LIKE :search OR company_code LIKE :search)";
-        $params['search'] = '%' . $search . '%';
+    // 検索条件
+    if (!empty($search)) {
+        $sql .= " AND (
+            company_name LIKE ? OR 
+            company_code LIKE ? OR 
+            contact_person LIKE ?
+        )";
+        $searchParam = "%{$search}%";
+        $params[] = $searchParam;
+        $params[] = $searchParam;
+        $params[] = $searchParam;
     }
     
-    $where_clause = $where_conditions ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
-    
-    // 企業一覧の取得
-    $sql = "
-        SELECT 
-            c.id,
-            c.company_code,
-            c.company_name,
-            c.company_address,
-            c.contact_person,
-            c.contact_phone,
-            c.contact_email,
-            c.billing_method,
-            c.is_active,
-            c.created_at,
-            c.updated_at,
-            -- 統計情報
-            COUNT(DISTINCT d.id) as department_count,
-            COUNT(DISTINCT u.id) as user_count,
-            COUNT(DISTINCT o.id) as total_order_count,
-            COALESCE(SUM(o.total_amount), 0) as total_revenue
-        FROM companies c
-        LEFT JOIN departments d ON c.id = d.company_id
-        LEFT JOIN users u ON c.id = u.company_id
-        LEFT JOIN orders o ON c.id = o.company_id
-        $where_clause
-        GROUP BY c.id
-        ORDER BY c.company_name
-        LIMIT :limit OFFSET :offset
-    ";
-    
-    $params['limit'] = $per_page;
-    $params['offset'] = $offset;
-    
-    $stmt = $pdo->prepare($sql);
-    foreach ($params as $key => $value) {
-        $stmt->bindValue(':' . $key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+    // 有効フラグフィルタ
+    if ($isActive !== null) {
+        $sql .= " AND is_active = ?";
+        $params[] = $isActive;
     }
-    $stmt->execute();
-    $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // ソート
+    $sql .= " ORDER BY company_name ASC";
     
     // 総件数取得
-    $count_sql = "SELECT COUNT(DISTINCT id) as total FROM companies $where_clause";
-    $count_stmt = $pdo->prepare($count_sql);
-    foreach ($params as $key => $value) {
-        if ($key !== 'limit' && $key !== 'offset') {
-            $count_stmt->bindValue(':' . $key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
-        }
-    }
-    $count_stmt->execute();
-    $total = $count_stmt->fetch(PDO::FETCH_ASSOC)['total'];
+    $countSql = str_replace(
+        "SELECT id, company_code, company_name, company_address, phone, email, contact_person, payment_method, billing_method, payment_cycle, is_active, created_at, updated_at",
+        "SELECT COUNT(*) as total",
+        $sql
+    );
+    $totalResult = $db->fetch($countSql, $params);
+    $total = $totalResult['total'] ?? 0;
     
+    // ページング適用
+    $sql .= " LIMIT ? OFFSET ?";
+    $params[] = $limit;
+    $params[] = $offset;
+    
+    // データ取得
+    $companies = $db->fetchAll($sql, $params);
+    
+    // レスポンス
     echo json_encode([
         'success' => true,
-        'data' => $companies,
-        'pagination' => [
-            'page' => $page,
-            'per_page' => $per_page,
+        'data' => [
+            'companies' => $companies,
             'total' => $total,
-            'total_pages' => ceil($total / $per_page)
+            'page' => $page,
+            'limit' => $limit,
+            'total_pages' => ceil($total / $limit)
         ]
-    ]);
+    ], JSON_UNESCAPED_UNICODE);
 }
 
 /**
- * 企業詳細情報取得
+ * 企業詳細取得
  */
-function getCompanyDetail($pdo, $company_id) {
-    $sql = "
-        SELECT 
-            c.*,
-            -- 統計情報
-            COUNT(DISTINCT d.id) as department_count,
-            COUNT(DISTINCT u.id) as user_count,
-            COUNT(DISTINCT o.id) as total_order_count,
-            COALESCE(SUM(o.total_amount), 0) as total_revenue,
-            MAX(o.delivery_date) as last_order_date,
-            MIN(o.delivery_date) as first_order_date
-        FROM companies c
-        LEFT JOIN departments d ON c.id = d.company_id
-        LEFT JOIN users u ON c.id = u.company_id
-        LEFT JOIN orders o ON c.id = o.company_id
-        WHERE c.id = :company_id
-        GROUP BY c.id
-    ";
-    
-    $stmt = $pdo->prepare($sql);
-    $stmt->bindValue(':company_id', $company_id, PDO::PARAM_INT);
-    $stmt->execute();
-    $company = $stmt->fetch(PDO::FETCH_ASSOC);
+function getCompanyDetail($db, $id) {
+    $sql = "SELECT * FROM companies WHERE id = ?";
+    $company = $db->fetch($sql, [$id]);
     
     if (!$company) {
-        http_response_code(404);
-        echo json_encode([
-            'success' => false,
-            'message' => '指定された企業が見つかりません。'
-        ]);
-        return;
+        throw new Exception('企業が見つかりません');
     }
     
-    // 部署一覧も取得
-    $departments_sql = "
-        SELECT 
-            d.*,
-            COUNT(DISTINCT u.id) as user_count,
-            COUNT(DISTINCT o.id) as order_count,
-            COALESCE(SUM(o.total_amount), 0) as total_amount
-        FROM departments d
-        LEFT JOIN users u ON d.id = u.department_id
-        LEFT JOIN orders o ON d.id = o.department_id
-        WHERE d.company_id = :company_id
-        GROUP BY d.id
-        ORDER BY d.department_name
-    ";
-    
-    $dept_stmt = $pdo->prepare($departments_sql);
-    $dept_stmt->bindValue(':company_id', $company_id, PDO::PARAM_INT);
-    $dept_stmt->execute();
-    $departments = $dept_stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // 最近の注文履歴も取得（最新10件）
-    $orders_sql = "
-        SELECT 
-            o.delivery_date,
-            o.user_name,
-            o.product_name,
-            o.quantity,
-            o.total_amount,
-            o.department_name
-        FROM orders o
-        WHERE o.company_id = :company_id
-        ORDER BY o.delivery_date DESC, o.id DESC
-        LIMIT 10
-    ";
-    
-    $orders_stmt = $pdo->prepare($orders_sql);
-    $orders_stmt->bindValue(':company_id', $company_id, PDO::PARAM_INT);
-    $orders_stmt->execute();
-    $recent_orders = $orders_stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    $company['departments'] = $departments;
-    $company['recent_orders'] = $recent_orders;
-    
+    // レスポンス
     echo json_encode([
         'success' => true,
         'data' => $company
-    ]);
+    ], JSON_UNESCAPED_UNICODE);
 }
 
 /**
- * POST リクエストの処理（新規企業作成）
+ * POST: 企業登録
  */
-function handlePostRequest($pdo, $input) {
-    // フォームデータからの場合
-    if (empty($input) && !empty($_POST)) {
-        $input = $_POST;
+function handlePost($db) {
+    // リクエストボディ取得
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('不正なJSONデータです');
     }
     
-    // 必須項目のチェック
-    $required_fields = ['company_code', 'company_name'];
-    foreach ($required_fields as $field) {
+    // 必須項目チェック
+    $required = ['company_code', 'company_name'];
+    foreach ($required as $field) {
         if (empty($input[$field])) {
-            throw new Exception("必須項目「{$field}」が入力されていません。");
+            throw new Exception("{$field}は必須項目です");
         }
     }
     
-    // 企業コードの重複チェック
-    $check_sql = "SELECT id FROM companies WHERE company_code = :company_code";
-    $check_stmt = $pdo->prepare($check_sql);
-    $check_stmt->bindValue(':company_code', $input['company_code']);
-    $check_stmt->execute();
-    
-    if ($check_stmt->fetch()) {
-        throw new Exception('指定された企業コードは既に使用されています。');
+    // 企業コード重複チェック
+    $checkSql = "SELECT COUNT(*) as count FROM companies WHERE company_code = ?";
+    $checkResult = $db->fetch($checkSql, [$input['company_code']]);
+    if ($checkResult['count'] > 0) {
+        throw new Exception('この企業コードは既に使用されています');
     }
     
-    $pdo->beginTransaction();
+    // データ挿入
+    $sql = "INSERT INTO companies (
+        company_code,
+        company_name,
+        company_address,
+        phone,
+        email,
+        contact_person,
+        contact_department,
+        contact_phone,
+        contact_email,
+        payment_method,
+        billing_method,
+        payment_cycle,
+        payment_due_days,
+        closing_date,
+        is_active,
+        created_at,
+        updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
     
-    try {
-        // 企業データの挿入
-        $sql = "
-            INSERT INTO companies (
-                company_code, company_name, company_address,
-                contact_person, contact_phone, contact_email,
-                billing_method, is_active, created_at, updated_at
-            ) VALUES (
-                :company_code, :company_name, :company_address,
-                :contact_person, :contact_phone, :contact_email,
-                :billing_method, 1, NOW(), NOW()
-            )
-        ";
-        
-        $stmt = $pdo->prepare($sql);
-        $stmt->bindValue(':company_code', $input['company_code']);
-        $stmt->bindValue(':company_name', $input['company_name']);
-        $stmt->bindValue(':company_address', $input['company_address'] ?? null);
-        $stmt->bindValue(':contact_person', $input['contact_person'] ?? null);
-        $stmt->bindValue(':contact_phone', $input['contact_phone'] ?? null);
-        $stmt->bindValue(':contact_email', $input['contact_email'] ?? null);
-        $stmt->bindValue(':billing_method', $input['billing_method'] ?? 'company');
-        
-        $stmt->execute();
-        $company_id = $pdo->lastInsertId();
-        
-        $pdo->commit();
-        
-        echo json_encode([
-            'success' => true,
-            'message' => '配達先企業を正常に追加しました。',
-            'data' => ['id' => $company_id]
-        ]);
-        
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
+    $params = [
+        $input['company_code'],
+        $input['company_name'],
+        $input['company_address'] ?? null,
+        $input['phone'] ?? null,
+        $input['email'] ?? null,
+        $input['contact_person'] ?? null,
+        $input['contact_department'] ?? null,
+        $input['contact_phone'] ?? null,
+        $input['contact_email'] ?? null,
+        $input['payment_method'] ?? 'company_bulk',
+        $input['billing_method'] ?? 'company',
+        $input['payment_cycle'] ?? 'monthly',
+        $input['payment_due_days'] ?? 30,
+        $input['closing_date'] ?? 31,
+        isset($input['is_active']) ? $input['is_active'] : 1
+    ];
+    
+    $db->execute($sql, $params);
+    $newId = $db->lastInsertId();
+    
+    // 登録データ取得
+    $newCompany = $db->fetch("SELECT * FROM companies WHERE id = ?", [$newId]);
+    
+    // レスポンス
+    echo json_encode([
+        'success' => true,
+        'message' => '企業を登録しました',
+        'data' => $newCompany
+    ], JSON_UNESCAPED_UNICODE);
 }
 
 /**
- * PUT リクエストの処理（企業情報更新）
+ * PUT: 企業更新
  */
-function handlePutRequest($pdo, $input) {
-    $company_id = $_GET['id'] ?? $input['id'] ?? null;
+function handlePut($db) {
+    // リクエストボディ取得
+    $input = json_decode(file_get_contents('php://input'), true);
     
-    if (!$company_id) {
-        throw new Exception('企業IDが指定されていません。');
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('不正なJSONデータです');
     }
     
-    // 企業の存在確認
-    $check_sql = "SELECT id FROM companies WHERE id = :id";
-    $check_stmt = $pdo->prepare($check_sql);
-    $check_stmt->bindValue(':id', $company_id, PDO::PARAM_INT);
-    $check_stmt->execute();
-    
-    if (!$check_stmt->fetch()) {
-        http_response_code(404);
-        echo json_encode([
-            'success' => false,
-            'message' => '指定された企業が見つかりません。'
-        ]);
-        return;
+    // ID必須チェック
+    if (empty($input['id'])) {
+        throw new Exception('IDは必須項目です');
     }
     
-    $pdo->beginTransaction();
+    $id = $input['id'];
     
-    try {
-        // 更新用SQL構築
-        $update_fields = [];
-        $params = ['id' => $company_id];
-        
-        $allowed_fields = [
-            'company_code', 'company_name', 'company_address',
-            'contact_person', 'contact_phone', 'contact_email',
-            'billing_method', 'is_active'
-        ];
-        
-        foreach ($allowed_fields as $field) {
-            if (isset($input[$field])) {
-                $update_fields[] = "{$field} = :{$field}";
-                $params[$field] = $input[$field];
-            }
-        }
-        
-        if (empty($update_fields)) {
-            throw new Exception('更新する項目が指定されていません。');
-        }
-        
-        $update_fields[] = "updated_at = NOW()";
-        
-        $sql = "UPDATE companies SET " . implode(', ', $update_fields) . " WHERE id = :id";
-        
-        $stmt = $pdo->prepare($sql);
-        foreach ($params as $key => $value) {
-            $stmt->bindValue(':' . $key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
-        }
-        $stmt->execute();
-        
-        $pdo->commit();
-        
-        echo json_encode([
-            'success' => true,
-            'message' => '企業情報を正常に更新しました。'
-        ]);
-        
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        throw $e;
+    // 存在チェック
+    $existing = $db->fetch("SELECT * FROM companies WHERE id = ?", [$id]);
+    if (!$existing) {
+        throw new Exception('企業が見つかりません');
     }
+    
+    // 更新データ構築
+    $updateFields = [];
+    $params = [];
+    
+    $allowedFields = [
+        'company_code', 'company_name', 'company_address',
+        'phone', 'email', 'contact_person', 'contact_department',
+        'contact_phone', 'contact_email', 'payment_method',
+        'billing_method', 'payment_cycle', 'payment_due_days',
+        'closing_date', 'is_active'
+    ];
+    
+    foreach ($allowedFields as $field) {
+        if (isset($input[$field])) {
+            $updateFields[] = "{$field} = ?";
+            $params[] = $input[$field];
+        }
+    }
+    
+    if (empty($updateFields)) {
+        throw new Exception('更新するデータがありません');
+    }
+    
+    // 企業コード重複チェック（自分以外）
+    if (isset($input['company_code'])) {
+        $checkSql = "SELECT COUNT(*) as count FROM companies WHERE company_code = ? AND id != ?";
+        $checkResult = $db->fetch($checkSql, [$input['company_code'], $id]);
+        if ($checkResult['count'] > 0) {
+            throw new Exception('この企業コードは既に使用されています');
+        }
+    }
+    
+    // 更新実行
+    $updateFields[] = "updated_at = NOW()";
+    $params[] = $id;
+    
+    $sql = "UPDATE companies SET " . implode(', ', $updateFields) . " WHERE id = ?";
+    $db->execute($sql, $params);
+    
+    // 更新後データ取得
+    $updatedCompany = $db->fetch("SELECT * FROM companies WHERE id = ?", [$id]);
+    
+    // レスポンス
+    echo json_encode([
+        'success' => true,
+        'message' => '企業を更新しました',
+        'data' => $updatedCompany
+    ], JSON_UNESCAPED_UNICODE);
 }
 
 /**
- * DELETE リクエストの処理（企業削除）
+ * DELETE: 企業削除（論理削除）
  */
-function handleDeleteRequest($pdo) {
-    $company_id = $_GET['id'] ?? null;
+function handleDelete($db) {
+    $id = $_GET['id'] ?? null;
     
-    if (!$company_id) {
-        throw new Exception('企業IDが指定されていません。');
+    if (!$id) {
+        throw new Exception('IDが指定されていません');
     }
     
-    // 企業の存在確認
-    $check_sql = "SELECT id FROM companies WHERE id = :id";
-    $check_stmt = $pdo->prepare($check_sql);
-    $check_stmt->bindValue(':id', $company_id, PDO::PARAM_INT);
-    $check_stmt->execute();
-    
-    if (!$check_stmt->fetch()) {
-        http_response_code(404);
-        echo json_encode([
-            'success' => false,
-            'message' => '指定された企業が見つかりません。'
-        ]);
-        return;
+    // 存在チェック
+    $existing = $db->fetch("SELECT * FROM companies WHERE id = ?", [$id]);
+    if (!$existing) {
+        throw new Exception('企業が見つかりません');
     }
     
-    // 関連データの確認
-    $orders_check_sql = "SELECT COUNT(*) as count FROM orders WHERE company_id = :id";
-    $orders_stmt = $pdo->prepare($orders_check_sql);
-    $orders_stmt->bindValue(':id', $company_id, PDO::PARAM_INT);
-    $orders_stmt->execute();
-    $orders_count = $orders_stmt->fetch(PDO::FETCH_ASSOC)['count'];
+    // 論理削除
+    $sql = "UPDATE companies SET is_active = 0, updated_at = NOW() WHERE id = ?";
+    $db->execute($sql, [$id]);
     
-    if ($orders_count > 0) {
-        // 注文データがある場合は論理削除
-        $sql = "UPDATE companies SET is_active = 0, updated_at = NOW() WHERE id = :id";
-        $stmt = $pdo->prepare($sql);
-        $stmt->bindValue(':id', $company_id, PDO::PARAM_INT);
-        $stmt->execute();
-        
-        echo json_encode([
-            'success' => true,
-            'message' => '企業を非アクティブ状態にしました。（注文履歴があるため完全削除はできません）'
-        ]);
-    } else {
-        // 注文データがない場合は物理削除
-        $pdo->beginTransaction();
-        
-        try {
-            // 関連する部署と利用者も削除
-            $pdo->prepare("DELETE FROM users WHERE company_id = :id")->execute(['id' => $company_id]);
-            $pdo->prepare("DELETE FROM departments WHERE company_id = :id")->execute(['id' => $company_id]);
-            $pdo->prepare("DELETE FROM companies WHERE id = :id")->execute(['id' => $company_id]);
-            
-            $pdo->commit();
-            
-            echo json_encode([
-                'success' => true,
-                'message' => '企業を完全に削除しました。'
-            ]);
-            
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            throw $e;
-        }
-    }
+    // レスポンス
+    echo json_encode([
+        'success' => true,
+        'message' => '企業を削除しました'
+    ], JSON_UNESCAPED_UNICODE);
 }
-?>
