@@ -652,6 +652,13 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
             showProgress();
 
             try {
+                console.log('Generating invoices with:', {
+                    invoice_type: currentInvoiceType,
+                    targets: selectedTargets,
+                    period_start: periodStart,
+                    period_end: periodEnd
+                });
+
                 const response = await fetch('../api/invoices.php', {
                     method: 'POST',
                     headers: {
@@ -668,7 +675,18 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                     })
                 });
 
-                const result = await response.json();
+                console.log('Response status:', response.status);
+                
+                const text = await response.text();
+                console.log('Response text:', text);
+                
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (parseError) {
+                    console.error('JSON Parse Error:', parseError);
+                    throw new Error(`サーバーエラー: JSONが不正です\n${text.substring(0, 200)}`);
+                }
 
                 if (result.success) {
                     showSuccess(result);
@@ -676,6 +694,7 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                     showError(result.message || '請求書の生成に失敗しました');
                 }
             } catch (error) {
+                console.error('Generate error:', error);
                 showError('通信エラーが発生しました: ' + error.message);
             } finally {
                 generateButton.disabled = false;
