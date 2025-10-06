@@ -26,7 +26,7 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo htmlspecialchars($pageTitle); ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
     <style>
         :root {
@@ -498,8 +498,21 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                         break;
                 }
 
+                console.log('Loading targets from:', apiUrl);
                 const response = await fetch(apiUrl);
-                const result = await response.json();
+                
+                // レスポンスのテキストを取得
+                const text = await response.text();
+                console.log('Response text:', text.substring(0, 500));
+                
+                // JSONとしてパース
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (parseError) {
+                    console.error('JSON Parse Error:', parseError);
+                    throw new Error(`APIレスポンスが不正です。HTMLエラーページが返された可能性があります。\n最初の100文字: ${text.substring(0, 100)}`);
+                }
 
                 if (result.success) {
                     displayTargets(result.data);
@@ -507,7 +520,21 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                     throw new Error(result.message || '対象の読み込みに失敗しました');
                 }
             } catch (error) {
-                targetList.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i>${error.message}</div>`;
+                console.error('Load targets error:', error);
+                targetList.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>エラー:</strong> ${error.message}
+                        <div class="mt-2 small">
+                            <strong>確認事項:</strong>
+                            <ul class="mb-0">
+                                <li>APIファイルが存在するか確認してください</li>
+                                <li>config/database.phpが正しく設定されているか確認してください</li>
+                                <li>ブラウザのコンソールでエラー詳細を確認してください</li>
+                            </ul>
+                        </div>
+                    </div>
+                `;
             }
         }
 
@@ -539,8 +566,30 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
             let html = '';
             items.forEach(item => {
                 const id = item.id;
-                const name = item.company_name || item.department_name || item.user_name || '名称不明';
-                const code = item.company_code || item.department_code || item.user_code || '';
+                
+                // 請求タイプに応じて適切な名称とコードを取得
+                let name, code, subInfo;
+                
+                switch(currentInvoiceType) {
+                    case 'company_bulk':
+                    case 'mixed':
+                        name = item.company_name || '名称不明';
+                        code = item.company_code || '';
+                        subInfo = '';
+                        break;
+                        
+                    case 'department_bulk':
+                        name = item.department_name || '名称不明';
+                        code = item.department_code || '';
+                        subInfo = item.company_name ? `<small class="text-muted d-block">${item.company_name}</small>` : '';
+                        break;
+                        
+                    case 'individual':
+                        name = item.user_name || '名称不明';
+                        code = item.user_code || '';
+                        subInfo = item.company_name ? `<small class="text-muted d-block">${item.company_name}</small>` : '';
+                        break;
+                }
                 
                 html += `
                     <div class="target-item" data-id="${id}" onclick="toggleTarget(this)">
@@ -549,6 +598,7 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                             <label class="form-check-label" for="target_${id}">
                                 <strong>${name}</strong>
                                 ${code ? `<small class="text-muted ms-2">(${code})</small>` : ''}
+                                ${subInfo}
                             </label>
                         </div>
                     </div>
