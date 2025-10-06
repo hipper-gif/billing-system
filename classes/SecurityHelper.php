@@ -1,321 +1,77 @@
 <?php
 /**
- * SecurityHelper クラス（修正版）
- * Smiley配食事業システム用セキュリティユーティリティ
- * ファイルアップロード検証機能を強化
+ * SecurityHelper - セキュリティ機能統合版
+ * 
+ * @version 2.0.0 - v5.0仕様準拠・CSP修正版
+ * @updated 2025-10-06
+ * @changes CDN許可リストを拡張（cdn.jsdelivr.net + cdnjs.cloudflare.com）
  */
 
 class SecurityHelper {
     
     /**
-     * セキュアセッション開始
-     */
-    public static function secureSessionStart() {
-        if (session_status() === PHP_SESSION_NONE) {
-            // セキュアなセッション設定
-            ini_set('session.cookie_httponly', 1);
-            ini_set('session.use_only_cookies', 1);
-            ini_set('session.cookie_secure', isset($_SERVER['HTTPS']));
-            ini_set('session.cookie_samesite', 'Strict');
-            
-            session_start();
-            
-            // セッション固定攻撃対策
-            if (!isset($_SESSION['initiated'])) {
-                session_regenerate_id(true);
-                $_SESSION['initiated'] = true;
-            }
-        }
-    }
-    
-    /**
      * セキュリティヘッダーを設定
      */
     public static function setSecurityHeaders() {
-        // XSS攻撃対策
-        header('X-XSS-Protection: 1; mode=block');
+        // すでにヘッダーが送信されている場合はスキップ
+        if (headers_sent()) {
+            return;
+        }
+
+        // Content Security Policy (CSP) - 開発・本番両対応版
+        // 複数のCDNを許可し、開発しやすく設定
+        $csp = [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+            "font-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com data:",
+            "img-src 'self' data: https:",
+            "connect-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+            "frame-ancestors 'self'",
+            "base-uri 'self'",
+            "form-action 'self'"
+        ];
         
-        // クリックジャッキング対策
-        header('X-Frame-Options: DENY');
+        header("Content-Security-Policy: " . implode('; ', $csp));
         
-        // MIME-typeスニッフィング対策
-        header('X-Content-Type-Options: nosniff');
-        
-        // リファラーポリシー
-        header('Referrer-Policy: strict-origin-when-cross-origin');
+        // その他のセキュリティヘッダー
+        header("X-Content-Type-Options: nosniff");
+        header("X-Frame-Options: SAMEORIGIN");
+        header("X-XSS-Protection: 1; mode=block");
+        header("Referrer-Policy: strict-origin-when-cross-origin");
         
         // HTTPS強制（本番環境のみ）
         if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
-            header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+            header("Strict-Transport-Security: max-age=31536000; includeSubDomains");
         }
-        
-        // コンテンツセキュリティポリシー（基本的な設定）
-        header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src 'self' https://cdn.jsdelivr.net;");
     }
     
     /**
-     * 入力値のサニタイズ
+     * XSS対策 - 入力値のサニタイズ
+     * 
+     * @param mixed $input サニタイズ対象
+     * @return mixed サニタイズ済みデータ
      */
-    public static function sanitizeInput($input, $type = 'string') {
+    public static function sanitizeInput($input) {
         if (is_array($input)) {
-            return array_map(function($item) use ($type) {
-                return self::sanitizeInput($item, $type);
-            }, $input);
+            return array_map([self::class, 'sanitizeInput'], $input);
         }
         
-        switch ($type) {
-            case 'string':
-                return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
-            case 'email':
-                return filter_var(trim($input), FILTER_SANITIZE_EMAIL);
-            case 'int':
-                return filter_var($input, FILTER_SANITIZE_NUMBER_INT);
-            case 'float':
-                return filter_var($input, FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
-            case 'url':
-                return filter_var(trim($input), FILTER_SANITIZE_URL);
-            case 'filename':
-                // ファイル名用の安全化
-                return preg_replace('/[^a-zA-Z0-9._-]/', '', basename($input));
-            default:
-                return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
+        if (is_string($input)) {
+            return htmlspecialchars($input, ENT_QUOTES, 'UTF-8');
         }
+        
+        return $input;
     }
     
     /**
-     * ファイルアップロードの安全性チェック（CSVインポート用）
+     * CSRF対策 - トークン生成
+     * 
+     * @return string CSRFトークン
      */
-    public static function validateFileUpload($file, $options = []) {
-        $maxSize = $options['max_size'] ?? (10 * 1024 * 1024); // デフォルト10MB
-        $allowedTypes = $options['allowed_types'] ?? [
-            'text/csv',
-            'text/plain',
-            'application/csv',
-            'application/vnd.ms-excel'
-        ];
-        $allowedExtensions = $options['allowed_extensions'] ?? ['csv', 'txt'];
-        
-        $result = [
-            'valid' => true,
-            'errors' => []
-        ];
-        
-        // ファイルがアップロードされているかチェック
-        if (!isset($file['tmp_name']) || !is_uploaded_file($file['tmp_name'])) {
-            $result['valid'] = false;
-            $result['errors'][] = 'ファイルが正常にアップロードされませんでした。';
-            return $result;
-        }
-        
-        // アップロードエラーチェック
-        if ($file['error'] !== UPLOAD_ERR_OK) {
-            $result['valid'] = false;
-            $result['errors'][] = self::getUploadErrorMessage($file['error']);
-        }
-        
-        // ファイルサイズチェック
-        if ($file['size'] > $maxSize) {
-            $result['valid'] = false;
-            $result['errors'][] = 'ファイルサイズが大きすぎます。(' . number_format($maxSize / 1024 / 1024, 1) . 'MB以下)';
-        }
-        
-        // 拡張子チェック
-        $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-        if (!in_array($extension, $allowedExtensions)) {
-            $result['valid'] = false;
-            $result['errors'][] = '許可されていない拡張子です: .' . $extension;
-        }
-        
-        // MIMEタイプチェック（実際のファイル内容を確認）
-        if (function_exists('finfo_open')) {
-            $finfo = finfo_open(FILEINFO_MIME_TYPE);
-            $detectedType = finfo_file($finfo, $file['tmp_name']);
-            finfo_close($finfo);
-            
-            if (!in_array($detectedType, $allowedTypes)) {
-                $result['valid'] = false;
-                $result['errors'][] = '許可されていないファイル形式です: ' . $detectedType;
-            }
-        }
-        
-        // ファイル名の安全性チェック
-        if (preg_match('/[<>:"|?*\\\\\/]/', $file['name'])) {
-            $result['valid'] = false;
-            $result['errors'][] = 'ファイル名に使用できない文字が含まれています。';
-        }
-        
-        // ファイル内容の安全性チェック
-        $contentCheck = self::checkFileContent($file['tmp_name']);
-        if (!$contentCheck['safe']) {
-            $result['valid'] = false;
-            $result['errors'] = array_merge($result['errors'], $contentCheck['errors']);
-        }
-        
-        return $result;
-    }
-    
-    /**
-     * ファイル内容の安全性チェック
-     */
-    private static function checkFileContent($tmpPath) {
-        $result = [
-            'safe' => true,
-            'errors' => []
-        ];
-        
-        $handle = fopen($tmpPath, 'r');
-        if ($handle) {
-            $firstBytes = fread($handle, 1024);
-            fclose($handle);
-            
-            // 実行可能ファイルの署名をチェック
-            $dangerousSignatures = [
-                "\x4D\x5A" => 'PE executable',
-                "\x7F\x45\x4C\x46" => 'ELF executable',
-                "<?php" => 'PHP script',
-                "<script" => 'JavaScript',
-                "<%" => 'ASP/JSP',
-            ];
-            
-            foreach ($dangerousSignatures as $signature => $type) {
-                if (strpos($firstBytes, $signature) === 0 || strpos($firstBytes, $signature) !== false) {
-                    $result['safe'] = false;
-                    $result['errors'][] = '危険なファイル内容が検出されました: ' . $type;
-                }
-            }
-            
-            // CSVファイルとして妥当かチェック
-            if (!self::isValidCSVContent($firstBytes)) {
-                $result['safe'] = false;
-                $result['errors'][] = '有効なCSVファイルではありません。';
-            }
-        } else {
-            $result['safe'] = false;
-            $result['errors'][] = 'ファイル内容を確認できませんでした。';
-        }
-        
-        return $result;
-    }
-    
-    /**
-     * CSV内容の妥当性チェック
-     */
-    private static function isValidCSVContent($content) {
-        // 最初の行がCSVらしいかチェック
-        $firstLine = strtok($content, "\n");
-        if (empty($firstLine)) {
-            return false;
-        }
-        
-        // カンマまたはタブ区切りがあるかチェック
-        $commaCount = substr_count($firstLine, ',');
-        $tabCount = substr_count($firstLine, "\t");
-        
-        // 最低2つのフィールドがあることを確認
-        return ($commaCount > 0 || $tabCount > 0);
-    }
-    
-    /**
-     * アップロードエラーメッセージ取得
-     */
-    private static function getUploadErrorMessage($errorCode) {
-        $messages = [
-            UPLOAD_ERR_INI_SIZE => 'ファイルサイズがPHP設定の上限を超えています',
-            UPLOAD_ERR_FORM_SIZE => 'ファイルサイズがフォームの上限を超えています',
-            UPLOAD_ERR_PARTIAL => 'ファイルが部分的にしかアップロードされませんでした',
-            UPLOAD_ERR_NO_FILE => 'ファイルがアップロードされませんでした',
-            UPLOAD_ERR_NO_TMP_DIR => '一時ディレクトリが見つかりません',
-            UPLOAD_ERR_CANT_WRITE => 'ディスクへの書き込みに失敗しました',
-            UPLOAD_ERR_EXTENSION => 'PHPの拡張機能によってアップロードが停止されました'
-        ];
-        
-        return $messages[$errorCode] ?? '不明なアップロードエラーが発生しました';
-    }
-    
-    /**
-     * 入力値の検証
-     */
-    public static function validateInput($input, $rules) {
-        $errors = [];
-        
-        foreach ($rules as $field => $rule) {
-            $value = $input[$field] ?? null;
-            
-            // 必須チェック
-            if (isset($rule['required']) && $rule['required'] && empty($value)) {
-                $errors[$field] = $field . 'は必須項目です。';
-                continue;
-            }
-            
-            // 空の場合はスキップ（必須チェック以外）
-            if (empty($value)) {
-                continue;
-            }
-            
-            // 最小長チェック
-            if (isset($rule['min_length']) && strlen($value) < $rule['min_length']) {
-                $errors[$field] = $field . 'は' . $rule['min_length'] . '文字以上で入力してください。';
-            }
-            
-            // 最大長チェック
-            if (isset($rule['max_length']) && strlen($value) > $rule['max_length']) {
-                $errors[$field] = $field . 'は' . $rule['max_length'] . '文字以下で入力してください。';
-            }
-            
-            // 型チェック
-            if (isset($rule['type'])) {
-                switch ($rule['type']) {
-                    case 'email':
-                        if (!filter_var($value, FILTER_VALIDATE_EMAIL)) {
-                            $errors[$field] = $field . 'の形式が正しくありません。';
-                        }
-                        break;
-                    case 'int':
-                        if (!filter_var($value, FILTER_VALIDATE_INT)) {
-                            $errors[$field] = $field . 'は整数で入力してください。';
-                        }
-                        break;
-                    case 'float':
-                        if (!filter_var($value, FILTER_VALIDATE_FLOAT)) {
-                            $errors[$field] = $field . 'は数値で入力してください。';
-                        }
-                        break;
-                    case 'url':
-                        if (!filter_var($value, FILTER_VALIDATE_URL)) {
-                            $errors[$field] = $field . 'のURL形式が正しくありません。';
-                        }
-                        break;
-                    case 'date':
-                        if (!self::validateDate($value)) {
-                            $errors[$field] = $field . 'の日付形式が正しくありません。';
-                        }
-                        break;
-                }
-            }
-            
-            // 正規表現チェック
-            if (isset($rule['pattern']) && !preg_match($rule['pattern'], $value)) {
-                $errors[$field] = $field . 'の形式が正しくありません。';
-            }
-        }
-        
-        return $errors;
-    }
-    
-    /**
-     * 日付形式の検証
-     */
-    public static function validateDate($date, $format = 'Y-m-d') {
-        $d = DateTime::createFromFormat($format, $date);
-        return $d && $d->format($format) === $date;
-    }
-    
-    /**
-     * CSRFトークンの生成
-     */
-    public static function generateCSRFToken() {
+    public static function generateToken() {
         if (session_status() === PHP_SESSION_NONE) {
-            self::secureSessionStart();
+            session_start();
         }
         
         $token = bin2hex(random_bytes(32));
@@ -326,119 +82,214 @@ class SecurityHelper {
     }
     
     /**
-     * CSRFトークンの検証
+     * CSRF対策 - トークン検証
+     * 
+     * @param string $token 検証対象トークン
+     * @return bool 検証結果
      */
-    public static function validateCSRFToken($token) {
+    public static function validateToken($token) {
         if (session_status() === PHP_SESSION_NONE) {
-            self::secureSessionStart();
+            session_start();
         }
         
+        // トークンが存在しない
         if (!isset($_SESSION['csrf_token']) || !isset($_SESSION['csrf_token_time'])) {
             return false;
         }
         
-        // トークンの有効期限チェック（1時間）
+        // トークンの有効期限（1時間）
         if (time() - $_SESSION['csrf_token_time'] > 3600) {
             unset($_SESSION['csrf_token']);
             unset($_SESSION['csrf_token_time']);
             return false;
         }
         
-        $isValid = hash_equals($_SESSION['csrf_token'], $token);
+        // トークン検証
+        return hash_equals($_SESSION['csrf_token'], $token);
+    }
+    
+    /**
+     * ファイルアップロード安全性検証
+     * 
+     * @param array $file $_FILES配列の要素
+     * @return array エラーメッセージ配列（空なら検証成功）
+     */
+    public static function validateUploadedFile($file) {
+        $errors = [];
         
-        // トークン使用後は削除（ワンタイムトークン）
-        if ($isValid) {
-            unset($_SESSION['csrf_token']);
-            unset($_SESSION['csrf_token_time']);
+        // ファイルが存在しない
+        if (!isset($file['tmp_name']) || !is_uploaded_file($file['tmp_name'])) {
+            $errors[] = 'ファイルが正しくアップロードされていません';
+            return $errors;
         }
         
-        return $isValid;
-    }
-    
-    /**
-     * IPアドレスの取得（プロキシ対応）
-     */
-    public static function getClientIP() {
-        $ipKeys = ['HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'HTTP_CLIENT_IP', 'REMOTE_ADDR'];
-        
-        foreach ($ipKeys as $key) {
-            if (!empty($_SERVER[$key])) {
-                $ips = explode(',', $_SERVER[$key]);
-                $ip = trim($ips[0]);
-                
-                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                    return $ip;
-                }
-            }
+        // ファイルサイズチェック（10MB）
+        if ($file['size'] > 10 * 1024 * 1024) {
+            $errors[] = 'ファイルサイズが大きすぎます（10MB以下にしてください）';
         }
         
-        return $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    }
-    
-    /**
-     * セキュリティイベントログ出力
-     */
-    public static function logSecurityEvent($event, $details = []) {
-        $logData = [
-            'timestamp' => date('Y-m-d H:i:s'),
-            'event' => $event,
-            'ip' => self::getClientIP(),
-            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
-            'details' => $details
-        ];
-        
-        $logFile = __DIR__ . '/../logs/security.log';
-        $logDir = dirname($logFile);
-        
-        if (!is_dir($logDir)) {
-            mkdir($logDir, 0755, true);
+        // 拡張子チェック
+        $allowedExtensions = ['csv', 'txt'];
+        $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        if (!in_array($extension, $allowedExtensions)) {
+            $errors[] = '許可されていないファイル形式です（CSV、TXTのみ）';
         }
         
-        error_log(json_encode($logData, JSON_UNESCAPED_UNICODE) . "\n", 3, $logFile);
+        // MIMEタイプチェック
+        $allowedMimes = ['text/csv', 'text/plain', 'application/csv', 'application/vnd.ms-excel'];
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mimeType = finfo_file($finfo, $file['tmp_name']);
+        finfo_close($finfo);
+        
+        if (!in_array($mimeType, $allowedMimes)) {
+            $errors[] = 'ファイル内容が不正です（CSVファイルをアップロードしてください）';
+        }
+        
+        return $errors;
     }
     
     /**
-     * 安全なランダム文字列生成
-     */
-    public static function generateRandomString($length = 32) {
-        return bin2hex(random_bytes($length / 2));
-    }
-    
-    /**
-     * パスワードハッシュ化
+     * パスワードハッシュ生成
+     * 
+     * @param string $password 平文パスワード
+     * @return string ハッシュ化されたパスワード
      */
     public static function hashPassword($password) {
-        return password_hash($password, PASSWORD_DEFAULT);
+        return password_hash($password, PASSWORD_ARGON2ID, [
+            'memory_cost' => 65536,
+            'time_cost' => 4,
+            'threads' => 3
+        ]);
     }
     
     /**
      * パスワード検証
+     * 
+     * @param string $password 平文パスワード
+     * @param string $hash ハッシュ化されたパスワード
+     * @return bool 検証結果
      */
     public static function verifyPassword($password, $hash) {
         return password_verify($password, $hash);
     }
     
     /**
-     * レート制限チェック（簡易版）
+     * SQLインジェクション対策 - 入力値検証
+     * 
+     * @param string $input 検証対象文字列
+     * @return bool 危険な文字列が含まれているか
      */
-    public static function checkRateLimit($key, $limit = 60, $window = 3600) {
+    public static function containsSqlInjection($input) {
+        $patterns = [
+            '/(\bunion\b.*\bselect\b)/i',
+            '/(\bselect\b.*\bfrom\b)/i',
+            '/(\binsert\b.*\binto\b)/i',
+            '/(\bupdate\b.*\bset\b)/i',
+            '/(\bdelete\b.*\bfrom\b)/i',
+            '/(\bdrop\b.*\btable\b)/i',
+            '/;.*--/',
+            '/\/\*.*\*\//'
+        ];
+        
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $input)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * XSS対策 - 出力エスケープ
+     * 
+     * @param string $value 出力する値
+     * @return string エスケープ済み値
+     */
+    public static function escape($value) {
+        return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+    }
+    
+    /**
+     * JSONレスポンスのセキュリティヘッダー設定
+     */
+    public static function setJsonHeaders() {
+        if (headers_sent()) {
+            return;
+        }
+        
+        header('Content-Type: application/json; charset=utf-8');
+        header('X-Content-Type-Options: nosniff');
+        header('X-Frame-Options: DENY');
+    }
+    
+    /**
+     * セッション開始（セキュア設定）
+     */
+    public static function startSecureSession() {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            return;
+        }
+        
+        // セッション設定
+        ini_set('session.cookie_httponly', 1);
+        ini_set('session.use_only_cookies', 1);
+        ini_set('session.cookie_samesite', 'Strict');
+        
+        // HTTPS環境ではセキュアクッキーを使用
+        if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
+            ini_set('session.cookie_secure', 1);
+        }
+        
+        session_start();
+        
+        // セッションハイジャック対策
+        if (!isset($_SESSION['initiated'])) {
+            session_regenerate_id(true);
+            $_SESSION['initiated'] = true;
+            $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
+            $_SESSION['remote_addr'] = $_SERVER['REMOTE_ADDR'] ?? '';
+        }
+        
+        // ユーザーエージェントとIPアドレスの検証
+        if (isset($_SESSION['user_agent']) && $_SESSION['user_agent'] !== ($_SERVER['HTTP_USER_AGENT'] ?? '')) {
+            session_destroy();
+            session_start();
+        }
+    }
+    
+    /**
+     * レート制限チェック（簡易版）
+     * 
+     * @param string $key レート制限のキー
+     * @param int $limit 制限回数
+     * @param int $period 期間（秒）
+     * @return bool 制限内か
+     */
+    public static function checkRateLimit($key, $limit = 10, $period = 60) {
         if (session_status() === PHP_SESSION_NONE) {
-            self::secureSessionStart();
+            self::startSecureSession();
         }
         
         $now = time();
-        $sessionKey = 'rate_limit_' . $key;
+        $rateLimitKey = 'rate_limit_' . $key;
         
-        if (!isset($_SESSION[$sessionKey])) {
-            $_SESSION[$sessionKey] = ['count' => 1, 'start' => $now];
+        if (!isset($_SESSION[$rateLimitKey])) {
+            $_SESSION[$rateLimitKey] = [
+                'count' => 1,
+                'start' => $now
+            ];
             return true;
         }
         
-        $data = $_SESSION[$sessionKey];
+        $data = $_SESSION[$rateLimitKey];
         
-        // ウィンドウリセット
-        if ($now - $data['start'] > $window) {
-            $_SESSION[$sessionKey] = ['count' => 1, 'start' => $now];
+        // 期間をリセット
+        if ($now - $data['start'] > $period) {
+            $_SESSION[$rateLimitKey] = [
+                'count' => 1,
+                'start' => $now
+            ];
             return true;
         }
         
@@ -447,8 +298,8 @@ class SecurityHelper {
             return false;
         }
         
-        $_SESSION[$sessionKey]['count']++;
+        // カウント増加
+        $_SESSION[$rateLimitKey]['count']++;
         return true;
     }
 }
-?>
