@@ -3,7 +3,12 @@
  * Smiley配食事業専用CSVインポートクラス v5.1
  * 23フィールドCSVファイルの完全対応
  * Shift_JIS固定エンコーディング対応
+ * 重複スキップ機能実装
  * 法人名「株式会社Smiley」の自動チェック
+ * 
+ * 最終更新: 2025-10-04
+ * 変更履歴:
+ * - v5.1: Shift_JIS固定、重複スキップ、詳細ログ、import_logs仕様書準拠
  */
 
 require_once __DIR__ . '/../config/database.php';
@@ -13,7 +18,7 @@ class SmileyCSVImporter {
     private $batchId;
     private $stats;
     private $errors;
-    private $fieldMapping = []; // フィールドマッピング保存用
+    private $fieldMapping = [];
     private $companyCache = [];
     private $departmentCache = [];
     private $userCache = [];
@@ -57,7 +62,7 @@ class SmileyCSVImporter {
             $this->batchId = 'BATCH_' . date('YmdHis') . '_' . uniqid();
             $this->initializeStats();
             
-            error_log("SmileyCSVImporter初期化完了: バッチID = {$this->batchId}");
+            error_log("SmileyCSVImporter v5.1 初期化完了: バッチID = {$this->batchId}");
         } catch (Exception $e) {
             error_log("SmileyCSVImporter初期化エラー: " . $e->getMessage());
             throw new Exception('データベース接続エラー: ' . $e->getMessage());
@@ -90,7 +95,7 @@ class SmileyCSVImporter {
     public function importCSV($filePath, $options = []) {
         try {
             error_log("========================================");
-            error_log("CSVインポート開始: {$filePath}");
+            error_log("CSVインポート開始 v5.1: {$filePath}");
             error_log("========================================");
             
             // ファイル存在チェック
@@ -120,6 +125,7 @@ class SmileyCSVImporter {
             
             error_log("========================================");
             error_log("CSVインポート完了");
+            error_log("統計: 処理={$this->stats['processed_rows']}, 成功={$this->stats['success_rows']}, エラー={$this->stats['error_rows']}, 重複={$this->stats['duplicate_orders']}");
             error_log("========================================");
             
             return $this->getImportSummary();
@@ -151,7 +157,7 @@ class SmileyCSVImporter {
         $originalSize = strlen($content);
         error_log("元のファイルサイズ: {$originalSize} bytes");
         
-        // ✅ Shift_JIS → UTF-8 固定変換
+        // Shift_JIS → UTF-8 固定変換
         $content = mb_convert_encoding($content, 'UTF-8', 'SJIS-win');
         if ($content === false) {
             throw new Exception('Shift_JISからUTF-8への変換に失敗しました');
@@ -178,7 +184,6 @@ class SmileyCSVImporter {
         foreach ($lines as $index => $line) {
             // 空行スキップ
             if (empty(trim($line))) {
-                error_log("空行をスキップ: 行" . ($index + 1));
                 continue;
             }
             
@@ -194,7 +199,7 @@ class SmileyCSVImporter {
             }
             
             // データ行追加
-            if (count($row) >= 23) {  // 23フィールド期待
+            if (count($row) >= 23) {
                 $data[] = $row;
                 $dataLineCount++;
             } else {
@@ -306,7 +311,7 @@ class SmileyCSVImporter {
                     
                 } catch (Exception $e) {
                     $this->stats['error_rows']++;
-                    $this->logError("行 " . ($rowIndex + 2), $e->getMessage(), $row); // +2 = ヘッダー行+1
+                    $this->logError("行 " . ($rowIndex + 2), $e->getMessage(), $row);
                     
                     // エラーが多すぎる場合は中断
                     if ($this->stats['error_rows'] > 50) {
@@ -672,7 +677,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * 注文データ挿入
+     * 注文データ挿入（重複スキップ対応版）
      */
     private function insertOrderData($data) {
         // 重複チェック
@@ -688,8 +693,10 @@ class SmileyCSVImporter {
         ]);
         
         if ($stmt->fetch()) {
+            // 重複時は静かにスキップ（エラーではない）
             $this->stats['duplicate_orders']++;
-            throw new Exception('重複注文: ' . $data['user_code'] . ' / ' . $data['delivery_date'] . ' / ' . $data['product_code']);
+            error_log('重複スキップ: ' . $data['user_code'] . ' / ' . $data['delivery_date'] . ' / ' . $data['product_code']);
+            return;
         }
         
         // 注文データ挿入
@@ -781,7 +788,7 @@ class SmileyCSVImporter {
     }
     
     /**
-     * インポート結果ログ記録
+     * インポート結果ログ記録（仕様書準拠版）
      */
     private function logImportResult() {
         try {
@@ -793,7 +800,7 @@ class SmileyCSVImporter {
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
             ");
             
-            $status = $this->stats['error_rows'] > 0 ? 'partial_success' : 'success';
+            $status = $this->stats['error_rows'] > 0 ? 'failed' : 'completed';
             $notes = json_encode([
                 'errors' => count($this->errors),
                 'execution_time' => round(microtime(true) - $this->stats['start_time'], 2)
