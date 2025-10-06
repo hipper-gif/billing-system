@@ -1,304 +1,330 @@
 <?php
 /**
- * データ診断・JOIN修正版
- * 注文データが表示されない問題の根本解決
+ * 部署管理API
+ * 完全CRUD対応
  * 
- * 診断ポイント:
- * 1. orders テーブルにデータが存在するか
- * 2. users と orders の関連付けが正しいか
- * 3. department_id の整合性チェック
- * 4. user_code の一致確認
+ * @version 2.0.0 - v5.0仕様準拠版
+ * @updated 2025-10-06
  */
 
-require_once '../config/database.php';
-require_once '../classes/Database.php';
-require_once '../classes/SecurityHelper.php';
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 
-header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+// v5.0仕様: config/database.php から Database クラスを読み込む
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../classes/SecurityHelper.php';
 
-// セキュリティヘッダー設定
-SecurityHelper::setSecurityHeaders();
+SecurityHelper::setJsonHeaders();
 
-// OPTIONS リクエスト対応
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
+$method = $_SERVER['REQUEST_METHOD'];
 
 try {
-    // Database::getInstance() を使用
     $db = Database::getInstance();
     
-    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        
-        $action = $_GET['action'] ?? 'list';
-        
-        switch ($action) {
-            case 'diagnosis':
-                // データ診断機能
-                $diagnosis = [];
-                
-                // 1. orders テーブルのデータ確認
-                $ordersCheck = $db->query("SELECT COUNT(*) as count FROM orders");
-                $ordersCount = $ordersCheck->fetch()['count'];
-                $diagnosis['orders_total'] = $ordersCount;
-                
-                // 2. orders テーブルのサンプルデータ
-                $ordersSample = $db->query("SELECT user_code, user_name, delivery_date, total_amount FROM orders LIMIT 5");
-                $diagnosis['orders_sample'] = $ordersSample->fetchAll();
-                
-                // 3. users テーブルのデータ確認
-                $usersCheck = $db->query("SELECT COUNT(*) as count FROM users");
-                $usersCount = $usersCheck->fetch()['count'];
-                $diagnosis['users_total'] = $usersCount;
-                
-                // 4. users テーブルのサンプルデータ
-                $usersSample = $db->query("SELECT user_code, user_name, department_id FROM users LIMIT 5");
-                $diagnosis['users_sample'] = $usersSample->fetchAll();
-                
-                // 5. user_code の一致確認（MariaDB対応版）
-                $matchCheck = $db->query("
-                    SELECT 
-                        (SELECT COUNT(DISTINCT user_code) FROM users) as users_with_code,
-                        (SELECT COUNT(DISTINCT user_code) FROM orders) as orders_with_code,
-                        COUNT(DISTINCT u.user_code) as matching_codes
-                    FROM users u
-                    INNER JOIN orders o ON u.user_code = o.user_code
-                ");
-                $diagnosis['user_code_match'] = $matchCheck->fetch();
-                
-                // 6. department_id の関連付け確認
-                $deptCheck = $db->query("
-                    SELECT 
-                        d.id as dept_id,
-                        d.department_name,
-                        COUNT(DISTINCT u.id) as users_count,
-                        COUNT(DISTINCT o.id) as orders_count_via_users
-                    FROM departments d
-                    LEFT JOIN users u ON d.id = u.department_id
-                    LEFT JOIN orders o ON u.user_code = o.user_code
-                    GROUP BY d.id, d.department_name
-                ");
-                $diagnosis['department_relation'] = $deptCheck->fetchAll();
-                
-                echo json_encode([
-                    'success' => true,
-                    'data' => $diagnosis
-                ], JSON_UNESCAPED_UNICODE);
-                break;
-                
-            case 'list':
-                // 修正版：複数のJOINパターンを試行
-                $companyId = $_GET['company_id'] ?? null;
-                $isActive = $_GET['is_active'] ?? null;
-                $page = max(1, intval($_GET['page'] ?? 1));
-                $limit = min(100, max(10, intval($_GET['limit'] ?? 50)));
-                $offset = ($page - 1) * $limit;
-                
-                // WHERE句とパラメータを段階的に構築
-                $whereParts = [];
-                $params = [];
-                
-                // 企業IDフィルター
-                if ($companyId) {
-                    $whereParts[] = "d.company_id = ?";
-                    $params[] = $companyId;
-                }
-                
-                // アクティブ状態フィルター
-                if ($isActive !== null) {
-                    $whereParts[] = "d.is_active = ?";
-                    $params[] = $isActive ? 1 : 0;
-                } else {
-                    // デフォルトはアクティブのみ
-                    $whereParts[] = "d.is_active = ?";
-                    $params[] = 1;
-                }
-                
-                // WHERE句構築
-                $whereClause = !empty($whereParts) ? 'WHERE ' . implode(' AND ', $whereParts) : '';
-                
-                // 修正版SQL：複数の関連付けパターンに対応
-                $sql = "
-                    SELECT 
-                        d.id,
-                        d.company_id,
-                        d.department_code,
-                        d.department_name,
-                        d.manager_name,
-                        d.manager_phone,
-                        d.manager_email,
-                        d.is_active,
-                        d.created_at,
-                        d.updated_at,
-                        c.company_name,
-                        c.company_code,
-                        COUNT(DISTINCT u.id) as user_count,
-                        
-                        -- 注文データ取得：複数パターンを統合
-                        COUNT(DISTINCT COALESCE(o1.id, o2.id, o3.id)) as order_count,
-                        COALESCE(SUM(COALESCE(o1.total_amount, o2.total_amount, o3.total_amount)), 0) as total_revenue,
-                        MAX(COALESCE(o1.delivery_date, o2.delivery_date, o3.delivery_date)) as last_order_date,
-                        
-                        COUNT(DISTINCT CASE 
-                            WHEN COALESCE(o1.delivery_date, o2.delivery_date, o3.delivery_date) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) 
-                            THEN COALESCE(o1.id, o2.id, o3.id) 
-                        END) as recent_orders,
-                        
-                        COALESCE(SUM(CASE 
-                            WHEN COALESCE(o1.delivery_date, o2.delivery_date, o3.delivery_date) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) 
-                            THEN COALESCE(o1.total_amount, o2.total_amount, o3.total_amount) 
-                            ELSE 0 
-                        END), 0) as recent_revenue
-                        
-                    FROM departments d
-                    LEFT JOIN companies c ON d.company_id = c.id
-                    LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
-                    
-                    -- パターン1: user_code での関連付け（推奨）
-                    LEFT JOIN orders o1 ON u.user_code = o1.user_code AND o1.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 180 DAY)
-                    
-                    -- パターン2: user_id での関連付け（backup）
-                    LEFT JOIN orders o2 ON u.id = o2.user_id AND o2.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 180 DAY)
-                    
-                    -- パターン3: department_id 直接関連付け（orders テーブルに department_id がある場合）
-                    LEFT JOIN orders o3 ON d.id = o3.department_id AND o3.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 180 DAY)
-                    
-                    {$whereClause}
-                    GROUP BY d.id, d.company_id, d.department_code, d.department_name, d.manager_name, d.manager_phone, d.manager_email, d.is_active, d.created_at, d.updated_at, c.company_name, c.company_code
-                    ORDER BY c.company_name ASC, d.department_name ASC
-                    LIMIT ? OFFSET ?
-                ";
-                
-                // LIMITとOFFSETパラメータを追加
-                $queryParams = array_merge($params, [$limit, $offset]);
-                
-                $stmt = $db->query($sql, $queryParams);
-                $departments = $stmt->fetchAll();
-                
-                // 総件数取得（同じWHERE条件を使用）
-                $countSql = "SELECT COUNT(*) as total FROM departments d {$whereClause}";
-                $countStmt = $db->query($countSql, $params);
-                $totalCount = $countStmt->fetch()['total'];
-                
-                echo json_encode([
-                    'success' => true,
-                    'data' => $departments,
-                    'pagination' => [
-                        'current_page' => $page,
-                        'per_page' => $limit,
-                        'total' => $totalCount,
-                        'total_pages' => ceil($totalCount / $limit)
-                    ],
-                    'debug' => [
-                        'where_clause' => $whereClause,
-                        'params_count' => count($params),
-                        'query_params_count' => count($queryParams),
-                        'sql_preview' => substr($sql, 0, 200) . '...'
-                    ]
-                ], JSON_UNESCAPED_UNICODE);
-                break;
-                
-            case 'detail':
-                // 部署詳細取得（修正版）
-                $departmentId = $_GET['id'] ?? null;
-                if (!$departmentId) {
-                    throw new Exception('部署IDが指定されていません');
-                }
-                
-                // 基本情報取得
-                $sql = "
-                    SELECT 
-                        d.*,
-                        c.company_name,
-                        c.company_code,
-                        COUNT(DISTINCT u.id) as user_count
-                    FROM departments d
-                    LEFT JOIN companies c ON d.company_id = c.id
-                    LEFT JOIN users u ON d.id = u.department_id AND u.is_active = 1
-                    WHERE d.id = ?
-                    GROUP BY d.id
-                ";
-                
-                $stmt = $db->query($sql, [$departmentId]);
-                $department = $stmt->fetch();
-                
-                if (!$department) {
-                    throw new Exception('部署が見つかりません');
-                }
-                
-                // 注文統計取得（修正版：複数パターン対応）
-                $orderStatsSql = "
-                    SELECT 
-                        COUNT(DISTINCT COALESCE(o1.id, o2.id)) as total_orders,
-                        COALESCE(SUM(COALESCE(o1.total_amount, o2.total_amount)), 0) as total_revenue,
-                        MAX(COALESCE(o1.delivery_date, o2.delivery_date)) as last_order_date,
-                        MIN(COALESCE(o1.delivery_date, o2.delivery_date)) as first_order_date,
-                        COALESCE(AVG(COALESCE(o1.total_amount, o2.total_amount)), 0) as avg_order_amount
-                    FROM users u
-                    LEFT JOIN orders o1 ON u.user_code = o1.user_code
-                    LEFT JOIN orders o2 ON u.id = o2.user_id
-                    WHERE u.department_id = ?
-                ";
-                
-                $orderStatsStmt = $db->query($orderStatsSql, [$departmentId]);
-                $orderStats = $orderStatsStmt->fetch();
-                
-                // 利用者情報取得（修正版）
-                $usersSql = "
-                    SELECT 
-                        u.id,
-                        u.user_code,
-                        u.user_name,
-                        u.employee_type_name,
-                        u.is_active,
-                        COUNT(DISTINCT COALESCE(o1.id, o2.id)) as order_count,
-                        COALESCE(SUM(COALESCE(o1.total_amount, o2.total_amount)), 0) as total_spent,
-                        MAX(COALESCE(o1.delivery_date, o2.delivery_date)) as last_order_date
-                    FROM users u
-                    LEFT JOIN orders o1 ON u.user_code = o1.user_code AND o1.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
-                    LEFT JOIN orders o2 ON u.id = o2.user_id AND o2.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
-                    WHERE u.department_id = ? AND u.is_active = 1
-                    GROUP BY u.id, u.user_code, u.user_name, u.employee_type_name, u.is_active
-                    ORDER BY u.user_name ASC
-                ";
-                
-                $usersStmt = $db->query($usersSql, [$departmentId]);
-                $users = $usersStmt->fetchAll();
-                
-                echo json_encode([
-                    'success' => true,
-                    'data' => [
-                        'department' => array_merge($department, $orderStats ?: []),
-                        'users' => $users
-                    ]
-                ], JSON_UNESCAPED_UNICODE);
-                break;
-                
-            default:
-                throw new Exception('不正なアクションです');
-        }
-        
-    } else {
-        throw new Exception('サポートされていないHTTPメソッドです');
+    switch ($method) {
+        case 'GET':
+            handleGet($db);
+            break;
+        case 'POST':
+            handlePost($db);
+            break;
+        case 'PUT':
+            handlePut($db);
+            break;
+        case 'DELETE':
+            handleDelete($db);
+            break;
+        default:
+            throw new Exception('サポートされていないHTTPメソッドです');
     }
     
 } catch (Exception $e) {
-    http_response_code(500);
-    error_log("Data Diagnosis API Error: " . $e->getMessage());
-    echo json_encode([
+    error_log("Departments API Error: " . $e->getMessage());
+    error_log("Stack trace: " . $e->getTraceAsString());
+    
+    // 詳細なエラー情報を返す（開発時のみ）
+    $errorResponse = [
         'success' => false,
-        'message' => 'データ診断エラー: ' . $e->getMessage(),
-        'debug' => [
-            'file' => basename(__FILE__),
-            'line' => $e->getLine(),
-            'request_method' => $_SERVER['REQUEST_METHOD'],
-            'get_params' => $_GET,
-            'timestamp' => date('Y-m-d H:i:s')
+        'message' => $e->getMessage(),
+        'error_type' => get_class($e),
+        'file' => $e->getFile(),
+        'line' => $e->getLine()
+    ];
+    
+    // 開発環境ではスタックトレースも返す
+    if (defined('DEBUG_MODE') && DEBUG_MODE) {
+        $errorResponse['trace'] = $e->getTraceAsString();
+    }
+    
+    echo json_encode($errorResponse, JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * GET: 部署一覧・詳細取得
+ */
+function handleGet($db) {
+    $id = $_GET['id'] ?? null;
+    
+    if ($id) {
+        getDepartmentDetail($db, $id);
+    } else {
+        getDepartmentsList($db);
+    }
+}
+
+/**
+ * 部署一覧取得
+ */
+function getDepartmentsList($db) {
+    $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+    $limit = isset($_GET['limit']) ? min(100, max(1, intval($_GET['limit']))) : 20;
+    $search = $_GET['search'] ?? '';
+    $companyId = $_GET['company_id'] ?? null;
+    $isActive = isset($_GET['is_active']) ? intval($_GET['is_active']) : null;
+    
+    $offset = ($page - 1) * $limit;
+    
+    $sql = "SELECT 
+                d.id,
+                d.department_code,
+                d.department_name,
+                d.company_id,
+                c.company_name,
+                d.contact_person,
+                d.contact_email,
+                d.contact_phone,
+                d.payment_method,
+                d.is_active,
+                d.created_at,
+                d.updated_at
+            FROM departments d
+            LEFT JOIN companies c ON d.company_id = c.id
+            WHERE 1=1";
+    
+    $params = [];
+    
+    if (!empty($search)) {
+        $sql .= " AND (
+            d.department_name LIKE ? OR 
+            d.department_code LIKE ? OR 
+            c.company_name LIKE ?
+        )";
+        $searchParam = "%{$search}%";
+        $params[] = $searchParam;
+        $params[] = $searchParam;
+        $params[] = $searchParam;
+    }
+    
+    if ($companyId) {
+        $sql .= " AND d.company_id = ?";
+        $params[] = $companyId;
+    }
+    
+    if ($isActive !== null) {
+        $sql .= " AND d.is_active = ?";
+        $params[] = $isActive;
+    }
+    
+    $sql .= " ORDER BY c.company_name ASC, d.department_name ASC";
+    
+    // 総件数
+    $countSql = "SELECT COUNT(*) as total FROM departments d 
+                 LEFT JOIN companies c ON d.company_id = c.id 
+                 WHERE 1=1";
+    
+    if (!empty($search)) {
+        $countSql .= " AND (d.department_name LIKE ? OR d.department_code LIKE ? OR c.company_name LIKE ?)";
+    }
+    if ($companyId) {
+        $countSql .= " AND d.company_id = ?";
+    }
+    if ($isActive !== null) {
+        $countSql .= " AND d.is_active = ?";
+    }
+    
+    $totalResult = $db->fetch($countSql, $params);
+    $total = $totalResult['total'] ?? 0;
+    
+    // ページング
+    $sql .= " LIMIT ? OFFSET ?";
+    $params[] = $limit;
+    $params[] = $offset;
+    
+    $departments = $db->fetchAll($sql, $params);
+    
+    echo json_encode([
+        'success' => true,
+        'data' => [
+            'departments' => $departments,
+            'total' => $total,
+            'page' => $page,
+            'limit' => $limit,
+            'total_pages' => ceil($total / $limit)
         ]
     ], JSON_UNESCAPED_UNICODE);
 }
-?>
+
+/**
+ * 部署詳細取得
+ */
+function getDepartmentDetail($db, $id) {
+    $sql = "SELECT d.*, c.company_name
+            FROM departments d
+            LEFT JOIN companies c ON d.company_id = c.id
+            WHERE d.id = ?";
+    
+    $department = $db->fetch($sql, [$id]);
+    
+    if (!$department) {
+        throw new Exception('部署が見つかりません');
+    }
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $department
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * POST: 部署登録
+ */
+function handlePost($db) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('不正なJSONデータです');
+    }
+    
+    $required = ['department_code', 'department_name', 'company_id'];
+    foreach ($required as $field) {
+        if (empty($input[$field])) {
+            throw new Exception("{$field}は必須項目です");
+        }
+    }
+    
+    // コード重複チェック
+    $checkSql = "SELECT COUNT(*) as count FROM departments WHERE department_code = ? AND company_id = ?";
+    $checkResult = $db->fetch($checkSql, [$input['department_code'], $input['company_id']]);
+    if ($checkResult['count'] > 0) {
+        throw new Exception('この部署コードは既に使用されています');
+    }
+    
+    $sql = "INSERT INTO departments (
+        department_code, department_name, company_id,
+        contact_person, contact_email, contact_phone,
+        payment_method, is_active,
+        created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+    
+    $params = [
+        $input['department_code'],
+        $input['department_name'],
+        $input['company_id'],
+        $input['contact_person'] ?? null,
+        $input['contact_email'] ?? null,
+        $input['contact_phone'] ?? null,
+        $input['payment_method'] ?? 'department_bulk',
+        isset($input['is_active']) ? $input['is_active'] : 1
+    ];
+    
+    $db->execute($sql, $params);
+    $newId = $db->lastInsertId();
+    
+    $newDepartment = $db->fetch("SELECT * FROM departments WHERE id = ?", [$newId]);
+    
+    echo json_encode([
+        'success' => true,
+        'message' => '部署を登録しました',
+        'data' => $newDepartment
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * PUT: 部署更新
+ */
+function handlePut($db) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('不正なJSONデータです');
+    }
+    
+    if (empty($input['id'])) {
+        throw new Exception('IDは必須項目です');
+    }
+    
+    $id = $input['id'];
+    
+    $existing = $db->fetch("SELECT * FROM departments WHERE id = ?", [$id]);
+    if (!$existing) {
+        throw new Exception('部署が見つかりません');
+    }
+    
+    $updateFields = [];
+    $params = [];
+    
+    $allowedFields = [
+        'department_code', 'department_name', 'company_id',
+        'contact_person', 'contact_email', 'contact_phone',
+        'payment_method', 'is_active'
+    ];
+    
+    foreach ($allowedFields as $field) {
+        if (isset($input[$field])) {
+            $updateFields[] = "{$field} = ?";
+            $params[] = $input[$field];
+        }
+    }
+    
+    if (empty($updateFields)) {
+        throw new Exception('更新するデータがありません');
+    }
+    
+    // コード重複チェック
+    if (isset($input['department_code']) && isset($input['company_id'])) {
+        $checkSql = "SELECT COUNT(*) as count FROM departments WHERE department_code = ? AND company_id = ? AND id != ?";
+        $checkResult = $db->fetch($checkSql, [$input['department_code'], $input['company_id'], $id]);
+        if ($checkResult['count'] > 0) {
+            throw new Exception('この部署コードは既に使用されています');
+        }
+    }
+    
+    $updateFields[] = "updated_at = NOW()";
+    $params[] = $id;
+    
+    $sql = "UPDATE departments SET " . implode(', ', $updateFields) . " WHERE id = ?";
+    $db->execute($sql, $params);
+    
+    $updatedDepartment = $db->fetch("SELECT * FROM departments WHERE id = ?", [$id]);
+    
+    echo json_encode([
+        'success' => true,
+        'message' => '部署を更新しました',
+        'data' => $updatedDepartment
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * DELETE: 部署削除（論理削除）
+ */
+function handleDelete($db) {
+    $id = $_GET['id'] ?? null;
+    
+    if (!$id) {
+        throw new Exception('IDが指定されていません');
+    }
+    
+    $existing = $db->fetch("SELECT * FROM departments WHERE id = ?", [$id]);
+    if (!$existing) {
+        throw new Exception('部署が見つかりません');
+    }
+    
+    $sql = "UPDATE departments SET is_active = 0, updated_at = NOW() WHERE id = ?";
+    $db->execute($sql, [$id]);
+    
+    echo json_encode([
+        'success' => true,
+        'message' => '部署を削除しました'
+    ], JSON_UNESCAPED_UNICODE);
+}
