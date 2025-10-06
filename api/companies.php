@@ -51,13 +51,23 @@ try {
 } catch (Exception $e) {
     // エラーログ記録
     error_log("Companies API Error: " . $e->getMessage());
+    error_log("Stack trace: " . $e->getTraceAsString());
     
     // エラーレスポンス
-    echo json_encode([
+    $errorResponse = [
         'success' => false,
         'message' => $e->getMessage(),
-        'trace' => $e->getTraceAsString()
-    ], JSON_UNESCAPED_UNICODE);
+        'error_type' => get_class($e),
+        'file' => $e->getFile(),
+        'line' => $e->getLine()
+    ];
+    
+    // 開発環境ではスタックトレースも返す
+    if (defined('DEBUG_MODE') && DEBUG_MODE) {
+        $errorResponse['trace'] = $e->getTraceAsString();
+    }
+    
+    echo json_encode($errorResponse, JSON_UNESCAPED_UNICODE);
 }
 
 /**
