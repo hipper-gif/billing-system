@@ -671,76 +671,74 @@ class SmileyCSVImporter {
         return $productId;
     }
     
-/**
- * 注文データ挿入（重複スキップ対応版）
- */
-private function insertOrderData($data) {
-    // 重複チェック
-    $stmt = $this->pdo->prepare("
-        SELECT id FROM orders 
-        WHERE user_code = ? AND delivery_date = ? AND product_code = ? AND cooperation_code = ?
-    ");
-    $stmt->execute([
-        $data['user_code'],
-        $data['delivery_date'],
-        $data['product_code'],
-        $data['cooperation_code']
-    ]);
-    
-    if ($stmt->fetch()) {
-        // ✅ 重複時は静かにスキップ（エラーではない）
-        $this->stats['duplicate_orders']++;
-        error_log('重複スキップ: ' . $data['user_code'] . ' / ' . $data['delivery_date'] . ' / ' . $data['product_code']);
-        return; // Exception を投げずに return でスキップ
+    /**
+     * 注文データ挿入
+     */
+    private function insertOrderData($data) {
+        // 重複チェック
+        $stmt = $this->pdo->prepare("
+            SELECT id FROM orders 
+            WHERE user_code = ? AND delivery_date = ? AND product_code = ? AND cooperation_code = ?
+        ");
+        $stmt->execute([
+            $data['user_code'],
+            $data['delivery_date'],
+            $data['product_code'],
+            $data['cooperation_code']
+        ]);
+        
+        if ($stmt->fetch()) {
+            $this->stats['duplicate_orders']++;
+            throw new Exception('重複注文: ' . $data['user_code'] . ' / ' . $data['delivery_date'] . ' / ' . $data['product_code']);
+        }
+        
+        // 注文データ挿入
+        $stmt = $this->pdo->prepare("
+            INSERT INTO orders (
+                order_date, delivery_date, user_id, user_code, user_name,
+                company_id, company_code, company_name, department_id,
+                product_id, product_code, product_name, category_code, category_name,
+                supplier_id, quantity, unit_price, total_amount,
+                supplier_code, supplier_name, corporation_code, corporation_name,
+                employee_type_code, employee_type_name, department_code, department_name,
+                import_batch_id, notes, delivery_time, cooperation_code, created_at
+            ) VALUES (
+                NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
+            )
+        ");
+        
+        $stmt->execute([
+            $data['delivery_date'],
+            $data['user_id'],
+            $data['user_code'],
+            $data['user_name'],
+            $data['company_id'],
+            $data['company_code'],
+            $data['company_name'],
+            $data['department_id'],
+            $data['product_id'],
+            $data['product_code'],
+            $data['product_name'],
+            $data['category_code'],
+            $data['category_name'],
+            $data['supplier_id'],
+            $data['quantity'],
+            $data['unit_price'],
+            $data['total_amount'],
+            $data['supplier_code'],
+            $data['supplier_name'],
+            $data['corporation_code'],
+            $data['corporation_name'],
+            $data['employee_type_code'],
+            $data['employee_type_name'],
+            $data['department_code'],
+            $data['department_name'],
+            $this->batchId,
+            $data['notes'],
+            $data['delivery_time'],
+            $data['cooperation_code']
+        ]);
     }
-    
-    // 注文データ挿入
-    $stmt = $this->pdo->prepare("
-        INSERT INTO orders (
-            order_date, delivery_date, user_id, user_code, user_name,
-            company_id, company_code, company_name, department_id,
-            product_id, product_code, product_name, category_code, category_name,
-            supplier_id, quantity, unit_price, total_amount,
-            supplier_code, supplier_name, corporation_code, corporation_name,
-            employee_type_code, employee_type_name, department_code, department_name,
-            import_batch_id, notes, delivery_time, cooperation_code, created_at
-        ) VALUES (
-            NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
-        )
-    ");
-    
-    $stmt->execute([
-        $data['delivery_date'],
-        $data['user_id'],
-        $data['user_code'],
-        $data['user_name'],
-        $data['company_id'],
-        $data['company_code'],
-        $data['company_name'],
-        $data['department_id'],
-        $data['product_id'],
-        $data['product_code'],
-        $data['product_name'],
-        $data['category_code'],
-        $data['category_name'],
-        $data['supplier_id'],
-        $data['quantity'],
-        $data['unit_price'],
-        $data['total_amount'],
-        $data['supplier_code'],
-        $data['supplier_name'],
-        $data['corporation_code'],
-        $data['corporation_name'],
-        $data['employee_type_code'],
-        $data['employee_type_name'],
-        $data['department_code'],
-        $data['department_name'],
-        $this->batchId,
-        $data['notes'],
-        $data['delivery_time'],
-        $data['cooperation_code']
-    ]);
-}
     
     /**
      * 日付検証・フォーマット
