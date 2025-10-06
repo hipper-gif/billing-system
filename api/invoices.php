@@ -1,189 +1,54 @@
 <?php
 /**
- * 請求書API
- * Smiley配食事業専用の請求書生成・管理API
+ * 請求書生成・管理API
  * 
- * @author Claude
- * @version 2.0.0 (修正版)
- * @created 2025-09-12
+ * @version 3.0.0 - v5.0仕様準拠
+ * @updated 2025-10-06
  */
 
-// 出力バッファリング制御
-ob_start();
-
-// エラー出力制御
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+// v5.0仕様
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../classes/SmileyInvoiceGenerator.php';
+require_once __DIR__ . '/../classes/SecurityHelper.php';
+
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    exit(0);
+}
+
+SecurityHelper::setJsonHeaders();
 
 try {
-    // 必要なファイルを読み込み
-    require_once __DIR__ . '/../config/database.php';
-    require_once __DIR__ . '/../classes/Database.php';
-    require_once __DIR__ . '/../classes/SmileyInvoiceGenerator.php';
+    $method = $_SERVER['REQUEST_METHOD'];
+    $invoiceGenerator = new SmileyInvoiceGenerator();
     
-    // ヘッダー設定
-    header('Content-Type: application/json; charset=utf-8');
-    
-    // 出力バッファをクリア
-    ob_clean();
-    
-    // Databaseインスタンス取得（Singletonパターン）
-    $db = Database::getInstance();
-    
-    // SmileyInvoiceGeneratorインスタンス作成
-    $invoiceGenerator = new SmileyInvoiceGenerator($db);
-    
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        
-        $input = json_decode(file_get_contents('php://input'), true);
-        $action = $input['action'] ?? 'generate';
-        
-        switch ($action) {
-            case 'generate':
-                // 請求書生成
-                $params = [
-                    'invoice_type' => $input['invoice_type'] ?? 'company_bulk',
-                    'period_start' => $input['period_start'],
-                    'period_end' => $input['period_end'],
-                    'due_date' => $input['due_date'] ?? null,
-                    'target_ids' => $input['target_ids'] ?? [],
-                    'auto_generate_pdf' => $input['auto_generate_pdf'] ?? false // PDFは後回し
-                ];
-                
-                // 入力値検証
-                $errors = [];
-                if (empty($params['period_start'])) {
-                    $errors[] = '請求期間開始日は必須です';
-                }
-                if (empty($params['period_end'])) {
-                    $errors[] = '請求期間終了日は必須です';
-                }
-                if (!empty($errors)) {
-                    throw new Exception(implode(', ', $errors));
-                }
-                
-                $result = $invoiceGenerator->generateInvoices($params);
-                
-                echo json_encode([
-                    'success' => true,
-                    'message' => "{$result['generated_invoices']}件の請求書を生成しました",
-                    'data' => $result
-                ], JSON_UNESCAPED_UNICODE);
-                break;
-                
-            case 'update_status':
-                // 請求書ステータス更新
-                $invoiceId = $input['invoice_id'];
-                $status = $input['status'];
-                
-                $sql = "UPDATE invoices SET status = ?, updated_at = NOW() WHERE id = ?";
-                $stmt = $db->prepare($sql);
-                $stmt->execute([$status, $invoiceId]);
-                
-                echo json_encode([
-                    'success' => true,
-                    'message' => '請求書ステータスを更新しました'
-                ], JSON_UNESCAPED_UNICODE);
-                break;
-                
-            default:
-                throw new Exception('不正なアクションです: ' . $action);
-        }
-        
-    } elseif ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        
-        $action = $_GET['action'] ?? 'list';
-        
-        switch ($action) {
-            case 'list':
-                // 請求書一覧取得
-                $sql = "SELECT 
-                            id, invoice_number, company_name, 
-                            total_amount, status, invoice_date, due_date,
-                            created_at, updated_at
-                        FROM invoices 
-                        ORDER BY created_at DESC 
-                        LIMIT 50";
-                
-                $stmt = $db->prepare($sql);
-                $stmt->execute();
-                $invoices = $stmt->fetchAll();
-                
-                echo json_encode([
-                    'success' => true,
-                    'data' => [
-                        'invoices' => $invoices,
-                        'total_count' => count($invoices)
-                    ]
-                ], JSON_UNESCAPED_UNICODE);
-                break;
-                
-            case 'detail':
-                // 請求書詳細取得
-                $invoiceId = $_GET['invoice_id'] ?? null;
-                if (empty($invoiceId)) {
-                    throw new Exception('請求書IDが指定されていません');
-                }
-                
-                // 請求書基本情報
-                $sql = "SELECT * FROM invoices WHERE id = ?";
-                $stmt = $db->prepare($sql);
-                $stmt->execute([$invoiceId]);
-                $invoice = $stmt->fetch();
-                
-                if (!$invoice) {
-                    throw new Exception('指定された請求書が見つかりません');
-                }
-                
-                // 請求書明細情報
-                $sql = "SELECT * FROM invoice_details WHERE invoice_id = ? ORDER BY delivery_date, user_name";
-                $stmt = $db->prepare($sql);
-                $stmt->execute([$invoiceId]);
-                $details = $stmt->fetchAll();
-                
-                echo json_encode([
-                    'success' => true,
-                    'data' => [
-                        'invoice' => $invoice,
-                        'details' => $details
-                    ]
-                ], JSON_UNESCAPED_UNICODE);
-                break;
-                
-            case 'summary':
-                // 請求書サマリー（ダッシュボード用）
-                $sql = "SELECT 
-                            COUNT(*) as total_invoices,
-                            SUM(CASE WHEN status = 'issued' THEN total_amount ELSE 0 END) as issued_amount,
-                            SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END) as paid_amount,
-                            SUM(CASE WHEN status = 'draft' THEN total_amount ELSE 0 END) as draft_amount,
-                            COUNT(CASE WHEN status = 'overdue' THEN 1 END) as overdue_count
-                        FROM invoices 
-                        WHERE invoice_date >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)";
-                
-                $stmt = $db->prepare($sql);
-                $stmt->execute();
-                $summary = $stmt->fetch();
-                
-                echo json_encode([
-                    'success' => true,
-                    'data' => [
-                        'summary' => $summary
-                    ]
-                ], JSON_UNESCAPED_UNICODE);
-                break;
-                
-            default:
-                throw new Exception('不正なアクションです: ' . $action);
-        }
-        
-    } else {
-        throw new Exception('サポートされていないHTTPメソッドです: ' . $_SERVER['REQUEST_METHOD']);
+    switch ($method) {
+        case 'GET':
+            handleGetRequest($invoiceGenerator);
+            break;
+        case 'POST':
+            handlePostRequest($invoiceGenerator);
+            break;
+        case 'PUT':
+            handlePutRequest($invoiceGenerator);
+            break;
+        case 'DELETE':
+            handleDeleteRequest($invoiceGenerator);
+            break;
+        default:
+            throw new Exception('未対応のHTTPメソッドです');
     }
-    
+
 } catch (Exception $e) {
-    // エラー時の出力制御
-    ob_clean();
+    error_log("Invoices API Error: " . $e->getMessage());
+    error_log("Stack trace: " . $e->getTraceAsString());
     
     http_response_code(500);
     echo json_encode([
@@ -191,10 +56,190 @@ try {
         'message' => $e->getMessage(),
         'error_type' => get_class($e),
         'file' => basename($e->getFile()),
-        'line' => $e->getLine()
+        'line' => $e->getLine(),
+        'timestamp' => date('Y-m-d H:i:s')
     ], JSON_UNESCAPED_UNICODE);
-} finally {
-    // 出力バッファ終了
-    ob_end_flush();
 }
-?>
+
+function handleGetRequest($invoiceGenerator) {
+    $action = $_GET['action'] ?? 'list';
+    
+    switch ($action) {
+        case 'list':
+            getInvoiceList($invoiceGenerator);
+            break;
+        case 'detail':
+            getInvoiceDetail($invoiceGenerator);
+            break;
+        case 'statistics':
+            getInvoiceStatistics();
+            break;
+        default:
+            throw new Exception('未対応のアクション: ' . $action);
+    }
+}
+
+function handlePostRequest($invoiceGenerator) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('不正なJSONデータ: ' . json_last_error_msg());
+    }
+    
+    $action = $input['action'] ?? 'generate';
+    
+    error_log("POST Action: {$action}");
+    error_log("POST Data: " . json_encode($input));
+    
+    switch ($action) {
+        case 'generate':
+            generateInvoices($invoiceGenerator, $input);
+            break;
+        default:
+            throw new Exception('未対応のアクション: ' . $action);
+    }
+}
+
+function handlePutRequest($invoiceGenerator) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    updateInvoiceStatus($invoiceGenerator, $input);
+}
+
+function handleDeleteRequest($invoiceGenerator) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $invoiceId = $input['invoice_id'] ?? null;
+    
+    if (!$invoiceId) {
+        throw new Exception('請求書IDが必要です');
+    }
+    
+    $invoiceGenerator->deleteInvoice($invoiceId);
+    
+    echo json_encode([
+        'success' => true,
+        'message' => '請求書を削除しました',
+        'invoice_id' => $invoiceId
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+function getInvoiceList($invoiceGenerator) {
+    $page = intval($_GET['page'] ?? 1);
+    $limit = min(intval($_GET['limit'] ?? 50), 100);
+    
+    $filters = [];
+    if (!empty($_GET['company_id'])) $filters['company_id'] = intval($_GET['company_id']);
+    if (!empty($_GET['status'])) $filters['status'] = $_GET['status'];
+    if (!empty($_GET['invoice_type'])) $filters['invoice_type'] = $_GET['invoice_type'];
+    if (!empty($_GET['period_start'])) $filters['period_start'] = $_GET['period_start'];
+    if (!empty($_GET['period_end'])) $filters['period_end'] = $_GET['period_end'];
+    
+    $result = $invoiceGenerator->getInvoiceList($filters, $page, $limit);
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $result,
+        'timestamp' => date('Y-m-d H:i:s')
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+function getInvoiceDetail($invoiceGenerator) {
+    $invoiceId = intval($_GET['invoice_id'] ?? 0);
+    
+    if (!$invoiceId) {
+        throw new Exception('請求書IDが必要です');
+    }
+    
+    $invoice = $invoiceGenerator->getInvoiceData($invoiceId);
+    
+    if (!$invoice) {
+        http_response_code(404);
+        throw new Exception('請求書が見つかりません');
+    }
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $invoice,
+        'timestamp' => date('Y-m-d H:i:s')
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+function generateInvoices($invoiceGenerator, $input) {
+    // 必須パラメータ検証
+    if (empty($input['invoice_type'])) throw new Exception('invoice_typeは必須です');
+    if (empty($input['period_start'])) throw new Exception('period_startは必須です');
+    if (empty($input['period_end'])) throw new Exception('period_endは必須です');
+    
+    $params = [
+        'invoice_type' => $input['invoice_type'],
+        'period_start' => $input['period_start'],
+        'period_end' => $input['period_end'],
+        'due_date' => $input['due_date'] ?? null,
+        'targets' => !empty($input['targets']) ? array_map('intval', $input['targets']) : [],
+        'auto_pdf' => !empty($input['auto_pdf'])
+    ];
+    
+    error_log("Generate Params: " . json_encode($params));
+    
+    // 日付検証
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $params['period_start'])) {
+        throw new Exception('period_startの形式が不正です');
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $params['period_end'])) {
+        throw new Exception('period_endの形式が不正です');
+    }
+    
+    // 対象チェック
+    if (empty($params['targets'])) {
+        throw new Exception('対象を選択してください');
+    }
+    
+    $result = $invoiceGenerator->generateInvoices($params);
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $result,
+        'generated_count' => $result['total_invoices'] ?? 0,
+        'invoices' => $result['invoices'] ?? [],
+        'message' => "請求書を生成しました",
+        'timestamp' => date('Y-m-d H:i:s')
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+function updateInvoiceStatus($invoiceGenerator, $input) {
+    $invoiceId = intval($input['invoice_id'] ?? 0);
+    $status = $input['status'] ?? '';
+    $notes = $input['notes'] ?? '';
+    
+    if (!$invoiceId || !$status) {
+        throw new Exception('請求書IDとステータスが必要です');
+    }
+    
+    $invoiceGenerator->updateInvoiceStatus($invoiceId, $status, $notes);
+    
+    echo json_encode([
+        'success' => true,
+        'message' => 'ステータスを更新しました',
+        'invoice_id' => $invoiceId,
+        'status' => $status
+    ], JSON_UNESCAPED_UNICODE);
+}
+
+function getInvoiceStatistics() {
+    $db = Database::getInstance();
+    
+    $sql = "SELECT 
+                COUNT(*) as total_invoices,
+                COALESCE(SUM(total_amount), 0) as total_amount,
+                COALESCE(SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END), 0) as paid_amount,
+                COALESCE(SUM(CASE WHEN status != 'paid' THEN total_amount ELSE 0 END), 0) as pending_amount
+            FROM invoices
+            WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)";
+    
+    $stats = $db->fetch($sql);
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $stats,
+        'timestamp' => date('Y-m-d H:i:s')
+    ], JSON_UNESCAPED_UNICODE);
+}
