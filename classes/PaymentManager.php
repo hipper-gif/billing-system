@@ -149,7 +149,9 @@ class PaymentManager {
                     'total_amount' => 0,
                     'outstanding_amount' => 0,
                     'outstanding_count' => 0,
-                    'paid_amount' => 0
+                    'paid_amount' => 0,
+                    'invoice_count' => 0,
+                    'order_count' => 0
                 ],
                 'trend' => [],
                 'payment_methods' => [],
@@ -537,14 +539,16 @@ class PaymentManager {
      * 支払いサマリー取得
      */
     private function getPaymentSummary($dateFilter) {
-        $sql = "
+        // 請求書関連の統計
+        $invoiceSql = "
             SELECT 
                 COALESCE(SUM(i.total_amount), 0) as total_amount,
                 COALESCE(SUM(CASE WHEN i.status IN ('issued', 'partial_paid') 
                     THEN i.total_amount - COALESCE(p.paid_amount, 0) 
                     ELSE 0 END), 0) as outstanding_amount,
                 COUNT(CASE WHEN i.status IN ('issued', 'partial_paid') THEN 1 END) as outstanding_count,
-                COALESCE(SUM(CASE WHEN i.status = 'paid' THEN i.total_amount ELSE 0 END), 0) as paid_amount
+                COALESCE(SUM(CASE WHEN i.status = 'paid' THEN i.total_amount ELSE 0 END), 0) as paid_amount,
+                COUNT(*) as invoice_count
             FROM invoices i
             LEFT JOIN (
                 SELECT invoice_id, SUM(amount) as paid_amount 
@@ -555,17 +559,39 @@ class PaymentManager {
             WHERE i.issue_date BETWEEN :start AND :end
         ";
 
-        $stmt = $this->db->query($sql, [
+        $stmt = $this->db->query($invoiceSql, [
             ':start' => $dateFilter['start'],
             ':end' => $dateFilter['end']
         ]);
 
-        return $stmt->fetch(PDO::FETCH_ASSOC) ?: [
+        $summary = $stmt->fetch(PDO::FETCH_ASSOC) ?: [
             'total_amount' => 0,
             'outstanding_amount' => 0,
             'outstanding_count' => 0,
-            'paid_amount' => 0
+            'paid_amount' => 0,
+            'invoice_count' => 0
         ];
+
+        // 注文数を追加取得
+        $orderSql = "
+            SELECT COUNT(*) as order_count 
+            FROM orders 
+            WHERE delivery_date BETWEEN :start AND :end
+        ";
+
+        try {
+            $orderStmt = $this->db->query($orderSql, [
+                ':start' => $dateFilter['start'],
+                ':end' => $dateFilter['end']
+            ]);
+            $orderResult = $orderStmt->fetch(PDO::FETCH_ASSOC);
+            $summary['order_count'] = $orderResult['order_count'] ?? 0;
+        } catch (Exception $e) {
+            // ordersテーブルが存在しない場合のフォールバック
+            $summary['order_count'] = 0;
+        }
+
+        return $summary;
     }
 
     /**
