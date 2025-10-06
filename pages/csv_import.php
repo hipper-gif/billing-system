@@ -394,31 +394,33 @@
             progressBarInner.textContent = percent + '%';
         }
 
-        // アップロード成功処理
-        function handleUploadSuccess(data) {
-            console.log('アップロード成功:', data);
-            
-            resultsSection.style.display = 'block';
-            
-            // 成功結果表示
-            successResults.innerHTML = `
-                <div class="mb-3">
-                    <span class="status-indicator status-success"></span>
-                    <strong>インポート完了</strong>
-                </div>
-                <ul class="list-unstyled">
-                    <li><i class="bi bi-check2"></i> 処理件数: ${data.data?.total_records || 0}件</li>
-                    <li><i class="bi bi-check2"></i> 成功: ${data.data?.success_records || 0}件</li>
-                    <li><i class="bi bi-exclamation-triangle text-warning"></i> エラー: ${data.data?.error_records || 0}件</li>
-                    <li><i class="bi bi-info-circle"></i> 重複: ${data.data?.duplicate_records || 0}件</li>
-                </ul>
-                <div class="mt-2">
-                    <small class="text-muted">
-                        処理時間: ${data.data?.processing_time || 0}秒<br>
-                        バッチID: ${data.data?.batch_id || 'N/A'}
-                    </small>
-                </div>
-            `;
+// アップロード成功処理
+function handleUploadSuccess(data) {
+    console.log('アップロード成功:', data);
+    
+    resultsSection.style.display = 'block';
+    
+    const stats = data.data?.stats || {};
+    
+    // 成功結果表示
+    successResults.innerHTML = `
+        <div class="mb-3">
+            <span class="status-indicator status-success"></span>
+            <strong>インポート完了</strong>
+        </div>
+        <ul class="list-unstyled">
+            <li><i class="bi bi-check2"></i> 処理件数: ${stats.total_records || 0}件</li>
+            <li><i class="bi bi-check2"></i> 成功: ${stats.success_records || 0}件</li>
+            <li><i class="bi bi-exclamation-triangle text-warning"></i> エラー: ${stats.error_records || 0}件</li>
+            <li><i class="bi bi-info-circle"></i> 重複: ${stats.duplicate_orders || 0}件</li>
+        </ul>
+        <div class="mt-2">
+            <small class="text-muted">
+                処理時間: ${stats.processing_time || '0'}秒<br>
+                バッチID: ${data.data?.batch_id || 'N/A'}
+            </small>
+        </div>
+    `;
 
             // エラー詳細表示
             if (data.errors && data.errors.length > 0) {
