@@ -1,15 +1,13 @@
 <?php
 /**
  * エラーログ確認ツール
- * 最新のエラーログを表示
+ * PHPエラーログの最新50行を表示
  */
 
-header('Content-Type: text/html; charset=utf-8');
-
 $logFiles = [
-    'System Error Log' => '../logs/error.log',
     'PHP Error Log' => ini_get('error_log'),
-    'Apache Error Log (if accessible)' => '/var/log/apache2/error.log'
+    'Apache Error Log' => '/home/twinklemark/twinklemark.xsrv.jp/log/twinklemark.xsrv.jp/error.log',
+    'Local Error Log' => __DIR__ . '/../logs/error.log'
 ];
 
 ?>
@@ -17,144 +15,91 @@ $logFiles = [
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>エラーログ確認 - Smiley配食システム</title>
+    <title>エラーログ確認</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body {
-            font-family: 'Courier New', monospace;
-            margin: 20px;
-            background: #1e1e1e;
-            color: #d4d4d4;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: #252526;
-            padding: 20px;
-            border-radius: 8px;
-        }
-        h1 {
-            color: #4CAF50;
-            border-bottom: 2px solid #4CAF50;
-            padding-bottom: 10px;
-        }
-        h2 {
-            color: #2196F3;
-            margin-top: 30px;
-        }
-        .log-section {
-            margin: 20px 0;
-            background: #1e1e1e;
-            padding: 15px;
-            border-radius: 4px;
-            border-left: 4px solid #4CAF50;
-        }
-        .log-content {
-            white-space: pre-wrap;
-            word-wrap: break-word;
+        pre { 
+            background: #1e1e1e; 
+            color: #d4d4d4; 
+            padding: 20px; 
+            border-radius: 5px;
+            max-height: 600px;
+            overflow: auto;
             font-size: 12px;
-            line-height: 1.5;
-            max-height: 400px;
-            overflow-y: auto;
         }
-        .error-line {
-            color: #f44336;
-        }
-        .warning-line {
-            color: #FFC107;
-        }
-        .info-line {
-            color: #2196F3;
-        }
-        .not-found {
-            color: #999;
-            font-style: italic;
-        }
-        .timestamp {
-            color: #4CAF50;
-        }
-        pre {
-            margin: 0;
+        .error-line { color: #f48771; }
+        .warning-line { color: #dcdcaa; }
+        .fatal-line { 
+            color: #ff0000; 
+            font-weight: bold;
+            background: #3a0000;
         }
     </style>
 </head>
-<body>
-    <div class="container">
-        <h1>🔍 エラーログ確認ツール</h1>
-        <p>最新のエラーログを表示します（最新50行）</p>
+<body class="bg-light">
+    <div class="container mt-5">
+        <h1 class="mb-4">🔍 エラーログ確認</h1>
         
-        <?php foreach ($logFiles as $title => $logPath): ?>
-            <div class="log-section">
-                <h2><?= htmlspecialchars($title) ?></h2>
-                <p style="color: #999; font-size: 12px;">ログファイル: <?= htmlspecialchars($logPath) ?></p>
-                
-                <div class="log-content">
+        <?php foreach ($logFiles as $name => $logFile): ?>
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5><?php echo $name; ?></h5>
+                    <small class="text-muted"><?php echo $logFile; ?></small>
+                </div>
+                <div class="card-body">
                     <?php
-                    if (file_exists($logPath) && is_readable($logPath)) {
-                        $lines = file($logPath);
-                        if ($lines !== false) {
-                            // 最新50行を取得
-                            $recentLines = array_slice($lines, -50);
+                    if (file_exists($logFile) && is_readable($logFile)) {
+                        $lines = file($logFile);
+                        $recentLines = array_slice($lines, -50); // 最新50行
+                        
+                        echo '<pre>';
+                        foreach ($recentLines as $line) {
+                            $line = htmlspecialchars($line);
                             
-                            foreach ($recentLines as $line) {
-                                $line = htmlspecialchars($line);
-                                
-                                // エラーレベルで色分け
-                                if (stripos($line, 'error') !== false || stripos($line, 'fatal') !== false) {
-                                    echo '<div class="error-line">' . $line . '</div>';
-                                } elseif (stripos($line, 'warning') !== false) {
-                                    echo '<div class="warning-line">' . $line . '</div>';
-                                } elseif (preg_match('/\d{4}-\d{2}-\d{2}/', $line)) {
-                                    echo '<div class="timestamp">' . $line . '</div>';
-                                } else {
-                                    echo '<div>' . $line . '</div>';
-                                }
+                            // エラー種別で色分け
+                            if (stripos($line, 'Fatal error') !== false || stripos($line, 'Parse error') !== false) {
+                                echo '<span class="fatal-line">' . $line . '</span>';
+                            } elseif (stripos($line, 'Warning') !== false) {
+                                echo '<span class="warning-line">' . $line . '</span>';
+                            } elseif (stripos($line, 'Error') !== false) {
+                                echo '<span class="error-line">' . $line . '</span>';
+                            } else {
+                                echo $line;
                             }
-                            
-                            echo '<hr style="border-color: #444; margin: 10px 0;">';
-                            echo '<p style="color: #4CAF50;">✅ 合計 ' . count($lines) . ' 行（最新50行を表示）</p>';
-                        } else {
-                            echo '<p class="not-found">❌ ログファイルを読み込めませんでした</p>';
                         }
+                        echo '</pre>';
                     } else {
-                        echo '<p class="not-found">❌ ログファイルが見つからないか、読み込み権限がありません</p>';
+                        echo '<p class="text-danger">ログファイルが見つからないか、読み取れません</p>';
                     }
                     ?>
                 </div>
             </div>
         <?php endforeach; ?>
         
-        <div class="log-section">
-            <h2>📊 PHP設定情報</h2>
-            <div class="log-content">
-                <pre><?php
-                echo "display_errors: " . ini_get('display_errors') . "\n";
-                echo "error_reporting: " . error_reporting() . "\n";
-                echo "log_errors: " . ini_get('log_errors') . "\n";
-                echo "error_log: " . ini_get('error_log') . "\n";
-                echo "upload_max_filesize: " . ini_get('upload_max_filesize') . "\n";
-                echo "post_max_size: " . ini_get('post_max_size') . "\n";
-                echo "memory_limit: " . ini_get('memory_limit') . "\n";
-                echo "max_execution_time: " . ini_get('max_execution_time') . "\n";
-                ?></pre>
+        <div class="card">
+            <div class="card-header">
+                <h5>PHPエラー設定</h5>
             </div>
-        </div>
-        
-        <div style="margin-top: 30px; padding: 15px; background: #1e3a1e; border-radius: 4px;">
-            <h3 style="color: #4CAF50; margin-top: 0;">💡 トラブルシューティング</h3>
-            <ul style="line-height: 1.8;">
-                <li>500エラーの場合: 上記のエラーログでPHPのfatal errorやparse errorを確認</li>
-                <li>ファイルが見つからない: パス設定やrequire_onceを確認</li>
-                <li>データベース接続エラー: config/database.phpの設定を確認</li>
-                <li>クラスが見つからない: オートローダーの設定を確認</li>
-            </ul>
-        </div>
-        
-        <div style="margin-top: 20px; text-align: center; color: #666;">
-            <p>最終更新: <?= date('Y-m-d H:i:s') ?></p>
-            <button onclick="location.reload()" style="background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
-                🔄 再読み込み
-            </button>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tr>
+                        <th>display_errors</th>
+                        <td><?php echo ini_get('display_errors'); ?></td>
+                    </tr>
+                    <tr>
+                        <th>log_errors</th>
+                        <td><?php echo ini_get('log_errors'); ?></td>
+                    </tr>
+                    <tr>
+                        <th>error_log</th>
+                        <td><?php echo ini_get('error_log'); ?></td>
+                    </tr>
+                    <tr>
+                        <th>error_reporting</th>
+                        <td><?php echo error_reporting(); ?></td>
+                    </tr>
+                </table>
+            </div>
         </div>
     </div>
 </body>
