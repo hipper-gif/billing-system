@@ -5,10 +5,14 @@
  * @version 3.0.0 - v5.0仕様準拠
  * @updated 2025-10-06
  */
-
+/**
+ * デバッグ用：エラー表示を強制有効化
+ * TODO: 問題解決後に削除
+ */
 error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
+ini_set('display_errors', '1');
+ini_set('display_startup_errors', '1');
+
 
 // v5.0仕様
 require_once __DIR__ . '/../config/database.php';
