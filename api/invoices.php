@@ -16,7 +16,6 @@ ini_set('display_startup_errors', '1');
 
 // v5.0仕様
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../classes/SmileyInvoiceGenerator.php';
 require_once __DIR__ . '/../classes/SecurityHelper.php';
 
 header('Access-Control-Allow-Origin: *');
