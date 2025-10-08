@@ -8,7 +8,7 @@
  * @created 2025-08-28
  */
 
-require_once __DIR__ . '/../classes/Database.php';
+require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../classes/SecurityHelper.php';
 
 // セキュリティヘッダー設定
