@@ -21,7 +21,7 @@ if (!class_exists('Database')) {
     require_once __DIR__ . '/../config/database.php';
 }
 
-class InvoiceGenerator {
+class SmileyInvoiceGenerator {
     private $db;
     
     // 請求タイプ定数
