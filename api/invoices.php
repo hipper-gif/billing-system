@@ -66,13 +66,16 @@ function handleGetRequest() {
         case 'statistics':
             getInvoiceStatistics();
             break;
+        case 'pdf':
+            outputInvoicePDF();
+            break;
         default:
             throw new Exception('未対応のアクション');
     }
 }
 
 /**
- * 請求書一覧取得（v5.0仕様: Database直接使用）
+ * 請求書一覧取得（実際のテーブル構造に対応）
  */
 function getInvoiceList() {
     $db = Database::getInstance();
@@ -85,9 +88,9 @@ function getInvoiceList() {
     $whereClauses = [];
     $params = [];
     
-    if (!empty($_GET['company_id'])) {
-        $whereClauses[] = "i.company_id = ?";
-        $params[] = intval($_GET['company_id']);
+    if (!empty($_GET['company_name'])) {
+        $whereClauses[] = "i.company_name LIKE ?";
+        $params[] = '%' . $_GET['company_name'] . '%';
     }
     
     if (!empty($_GET['status'])) {
@@ -111,8 +114,9 @@ function getInvoiceList() {
     }
     
     if (!empty($_GET['keyword'])) {
-        $whereClauses[] = "(i.invoice_number LIKE ? OR c.company_name LIKE ?)";
+        $whereClauses[] = "(i.invoice_number LIKE ? OR i.company_name LIKE ? OR i.user_name LIKE ?)";
         $keyword = '%' . $_GET['keyword'] . '%';
+        $params[] = $keyword;
         $params[] = $keyword;
         $params[] = $keyword;
     }
@@ -120,11 +124,7 @@ function getInvoiceList() {
     $whereSQL = !empty($whereClauses) ? 'WHERE ' . implode(' AND ', $whereClauses) : '';
     
     // 総件数取得
-    $countSQL = "SELECT COUNT(*) as total 
-                 FROM invoices i
-                 LEFT JOIN companies c ON i.company_id = c.id
-                 {$whereSQL}";
-    
+    $countSQL = "SELECT COUNT(*) as total FROM invoices i {$whereSQL}";
     $countResult = $db->fetch($countSQL, $params);
     $totalCount = (int)$countResult['total'];
     
@@ -133,7 +133,7 @@ function getInvoiceList() {
                 i.id,
                 i.invoice_number,
                 i.invoice_type,
-                i.issue_date,
+                i.invoice_date as issue_date,
                 i.due_date,
                 i.period_start,
                 i.period_end,
@@ -144,11 +144,10 @@ function getInvoiceList() {
                 i.notes,
                 i.created_at,
                 i.updated_at,
-                c.company_name as billing_company_name,
-                c.company_code,
-                c.contact_person as billing_contact_person
+                i.company_name as billing_company_name,
+                i.user_name,
+                i.department
             FROM invoices i
-            LEFT JOIN companies c ON i.company_id = c.id
             {$whereSQL}
             ORDER BY i.created_at DESC
             LIMIT ? OFFSET ?";
@@ -158,11 +157,17 @@ function getInvoiceList() {
     
     $invoices = $db->fetchAll($sql, $params);
     
-    // 各請求書の注文件数を取得
+    // 各請求書の注文件数を取得（invoice_detailsテーブルが存在する場合）
     foreach ($invoices as &$invoice) {
-        $detailCountSQL = "SELECT COUNT(*) as count FROM invoice_details WHERE invoice_id = ?";
-        $detailCount = $db->fetch($detailCountSQL, [$invoice['id']]);
-        $invoice['order_count'] = (int)$detailCount['count'];
+        // invoice_detailsテーブルの存在確認
+        try {
+            $detailCountSQL = "SELECT COUNT(*) as count FROM invoice_details WHERE invoice_id = ?";
+            $detailCount = $db->fetch($detailCountSQL, [$invoice['id']]);
+            $invoice['order_count'] = (int)($detailCount['count'] ?? 0);
+        } catch (Exception $e) {
+            // invoice_detailsテーブルが存在しない場合は0
+            $invoice['order_count'] = 0;
+        }
     }
     
     $totalPages = $limit > 0 ? ceil($totalCount / $limit) : 1;
@@ -181,7 +186,7 @@ function getInvoiceList() {
 }
 
 /**
- * 請求書詳細取得（v5.0仕様: Database直接使用）
+ * 請求書詳細取得（実際のテーブル構造に対応）
  */
 function getInvoiceDetail() {
     $invoiceId = intval($_GET['invoice_id'] ?? 0);
@@ -195,13 +200,8 @@ function getInvoiceDetail() {
     // 基本情報取得
     $sql = "SELECT 
                 i.*,
-                c.company_name as billing_company_name,
-                c.company_code,
-                c.contact_person as billing_contact_person,
-                c.email as billing_email,
-                c.company_address as billing_address
+                i.invoice_date as issue_date
             FROM invoices i
-            LEFT JOIN companies c ON i.company_id = c.id
             WHERE i.id = ?";
     
     $invoice = $db->fetch($sql, [$invoiceId]);
@@ -211,24 +211,32 @@ function getInvoiceDetail() {
         throw new Exception('請求書が見つかりません');
     }
     
-    // 明細取得
-    $detailSQL = "SELECT 
-                    id,
-                    delivery_date,
-                    user_name,
-                    product_name,
-                    quantity,
-                    unit_price,
-                    total_amount
-                  FROM invoice_details
-                  WHERE invoice_id = ?
-                  ORDER BY delivery_date, user_name";
-    
-    $invoice['details'] = $db->fetchAll($detailSQL, [$invoiceId]);
+    // 明細取得（invoice_detailsテーブルが存在する場合）
+    try {
+        $detailSQL = "SELECT 
+                        id,
+                        delivery_date,
+                        user_name,
+                        product_name,
+                        quantity,
+                        unit_price,
+                        total_amount
+                      FROM invoice_details
+                      WHERE invoice_id = ?
+                      ORDER BY delivery_date, user_name";
+        
+        $invoice['details'] = $db->fetchAll($detailSQL, [$invoiceId]);
+    } catch (Exception $e) {
+        // invoice_detailsテーブルが存在しない場合は空配列
+        $invoice['details'] = [];
+    }
     
     // 統計計算
     $invoice['order_count'] = count($invoice['details']);
     $invoice['total_quantity'] = array_sum(array_column($invoice['details'], 'quantity'));
+    
+    // company_nameをbilling_company_nameとしても返す（互換性のため）
+    $invoice['billing_company_name'] = $invoice['company_name'];
     
     echo json_encode([
         'success' => true,
@@ -416,5 +424,22 @@ function handleDeleteRequest() {
         'message' => '請求書を削除しました',
         'invoice_id' => $invoiceId
     ], JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * 請求書PDF出力
+ */
+function outputInvoicePDF() {
+    $invoiceId = intval($_GET['invoice_id'] ?? 0);
+    
+    if (!$invoiceId) {
+        throw new Exception('請求書IDが必要です');
+    }
+    
+    // SmileyInvoiceGenerator を使用してPDF出力
+    $generator = new SmileyInvoiceGenerator();
+    $generator->outputPDF($invoiceId);
+    
+    exit; // PDF出力後は終了
 }
 ?>
