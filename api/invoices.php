@@ -1,7 +1,7 @@
 <?php
 /**
- * 請求書API v5.0仕様準拠
- * Database直接使用、SmileyInvoiceGeneratorは不使用
+ * 請求書API v5.0仕様準拠（修正版）
+ * Database直接使用、請求書生成はSmileyInvoiceGeneratorを使用
  */
 
 error_reporting(E_ALL);
@@ -9,6 +9,7 @@ ini_set('display_errors', '1');
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../classes/SecurityHelper.php';
+require_once __DIR__ . '/../classes/SmileyInvoiceGenerator.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -267,11 +268,82 @@ function getInvoiceStatistics() {
 }
 
 /**
- * POSTリクエスト処理
+ * POSTリクエスト処理（修正版）
  */
 function handlePostRequest() {
-    // 請求書生成機能は別APIで実装
-    throw new Exception('請求書生成はinvoice_generate APIを使用してください');
+    $input = json_decode(file_get_contents('php://input'), true);
+    $action = $input['action'] ?? 'generate';
+    
+    if ($action === 'generate') {
+        generateInvoices($input);
+    } else {
+        throw new Exception('未対応のアクション');
+    }
+}
+
+/**
+ * 請求書生成（新規実装）
+ * pages/invoice_generate.php からの呼び出しに対応
+ */
+function generateInvoices($input) {
+    // 必須パラメータ検証
+    $requiredParams = ['invoice_type', 'period_start', 'period_end'];
+    foreach ($requiredParams as $param) {
+        if (empty($input[$param])) {
+            throw new Exception("{$param}は必須です");
+        }
+    }
+    
+    // 日付形式検証
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $input['period_start']) || 
+        !preg_match('/^\d{4}-\d{2}-\d{2}$/', $input['period_end'])) {
+        throw new Exception('日付形式が正しくありません（YYYY-MM-DD形式で入力してください）');
+    }
+    
+    // SmileyInvoiceGeneratorインスタンス作成
+    $generator = new SmileyInvoiceGenerator();
+    
+    // パラメータ構築
+    $params = [
+        'invoice_type' => $input['invoice_type'],
+        'period_start' => $input['period_start'],
+        'period_end' => $input['period_end'],
+        'due_date' => $input['due_date'] ?? null,
+        'target_ids' => $input['targets'] ?? [],
+        'auto_generate_pdf' => $input['auto_pdf'] ?? false
+    ];
+    
+    // 支払期限が未設定の場合、期間終了日+30日を設定
+    if (empty($params['due_date'])) {
+        $endDate = new DateTime($params['period_end']);
+        $endDate->modify('+30 days');
+        $params['due_date'] = $endDate->format('Y-m-d');
+    }
+    
+    // 請求書生成実行
+    try {
+        $result = $generator->generateInvoices($params);
+        
+        // レスポンス構築
+        $response = [
+            'success' => true,
+            'generated_count' => $result['total_invoices'] ?? count($result['invoices'] ?? []),
+            'invoices' => $result['invoices'] ?? [],
+            'message' => '請求書を生成しました',
+            'timestamp' => date('Y-m-d H:i:s')
+        ];
+        
+        // エラーがある場合は追加
+        if (!empty($result['errors'])) {
+            $response['errors'] = $result['errors'];
+        }
+        
+        echo json_encode($response, JSON_UNESCAPED_UNICODE);
+        
+    } catch (Exception $e) {
+        error_log("Invoice generation error: " . $e->getMessage());
+        throw new Exception('請求書生成に失敗しました: ' . $e->getMessage());
+    }
 }
 
 /**
