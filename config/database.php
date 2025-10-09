@@ -1,61 +1,117 @@
 <?php
 /**
- * config/database.php - Database完全統一版
- * 
- * 🎯 設計方針:
- * - 全クラスが使用する全メソッドを網羅
- * - 仕様書の「自己完結原則」完全準拠
- * - メソッド不整合の完全排除
- * - エックスサーバー最適化
- * 
- * @version 5.0 - 完全統一版
- * @date 2025-10-02
+ * 修正版データベース設定（メソッド追加版）
+ * config/database.php
+ * エックスサーバー4文字制限対応版
  */
 
-// 🔧 データベース設定値
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'twinklemark_billing');  
-define('DB_USER', 'twinklemark_bill');
-define('DB_PASS', 'Smiley2525');
-define('DB_CHARSET', 'utf8mb4');
+// 環境自動判定
+$host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 
-// 🌍 環境設定
-define('ENVIRONMENT', 'development'); // production, development, testing （一時的にdevelopmentに変更）
-define('DEBUG_MODE', true); // デバッグモード強制有効
+if (strpos($host, 'twinklemark.xsrv.jp') !== false) {
+    // テスト環境（エックスサーバー）
+    define('DB_HOST', 'localhost');
+    define('DB_NAME', 'twinklemark_billing');
+    define('DB_USER', 'twinklemark_bill');
+    define('DB_PASS', 'Smiley2525');
+    define('ENVIRONMENT', 'test');
+    define('BASE_URL', 'https://twinklemark.xsrv.jp/Smiley/meal-delivery/billing-system/');
+    define('DEBUG_MODE', true);
+    
+} elseif (strpos($host, 'tw1nkle.com') !== false) {
+    // 本番環境（エックスサーバー）
+    define('DB_HOST', 'localhost');
+    define('DB_NAME', 'tw1nkle_billing');
+    define('DB_USER', 'tw1nkle_bill');
+    define('DB_PASS', 'Smiley2525');
+    define('ENVIRONMENT', 'production');
+    define('BASE_URL', 'https://tw1nkle.com/Smiley/meal-delivery/billing-system/');
+    define('DEBUG_MODE', false);
+    
+} else {
+    // ローカル開発環境
+    define('DB_HOST', 'localhost');
+    define('DB_NAME', 'billing_local');
+    define('DB_USER', 'root');
+    define('DB_PASS', '');
+    define('ENVIRONMENT', 'local');
+    define('BASE_URL', 'http://localhost/billing-system/');
+    define('DEBUG_MODE', true);
+}
+
+// 共通設定
+define('SYSTEM_NAME', 'Smiley配食 請求書管理システム');
+define('SYSTEM_VERSION', '1.0.0');
+
+// パス設定
+define('BASE_PATH', realpath(__DIR__ . '/../') . '/');
+define('UPLOAD_DIR', BASE_PATH . 'uploads/');
+define('TEMP_DIR', BASE_PATH . 'temp/');
+define('LOG_DIR', BASE_PATH . 'logs/');
+define('CACHE_DIR', BASE_PATH . 'cache/');
+
+// エックスサーバー固有設定
+if (ENVIRONMENT === 'test' || ENVIRONMENT === 'production') {
+    ini_set('max_execution_time', 300);
+    ini_set('memory_limit', '256M');
+    ini_set('upload_max_filesize', '10M');
+    ini_set('post_max_size', '10M');
+    date_default_timezone_set('Asia/Tokyo');
+}
+
+// セキュリティ設定
+define('SESSION_TIMEOUT', 3600);
+define('CSRF_TOKEN_EXPIRE', 3600);
+
+// ファイル設定
+define('UPLOAD_MAX_SIZE', 10 * 1024 * 1024);
+define('ALLOWED_FILE_TYPES', ['csv']);
+define('CSV_MAX_RECORDS', 10000);
+
+// PDF設定
+define('PDF_FONT', 'kozgopromedium');
+define('PDF_AUTHOR', 'Smiley配食事業');
+
+// メール設定
+if (ENVIRONMENT === 'production') {
+    define('MAIL_FROM', 'billing@tw1nkle.com');
+    define('MAIL_FROM_NAME', 'Smiley配食 請求システム');
+} else {
+    define('MAIL_FROM', 'test-billing@tw1nkle.com');
+    define('MAIL_FROM_NAME', 'Smiley配食 請求システム（テスト）');
+}
+
+// エラー報告設定
+if (DEBUG_MODE) {
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+    ini_set('log_errors', 1);
+    ini_set('error_log', LOG_DIR . 'error.log');
+} else {
+    error_reporting(E_ERROR | E_WARNING | E_PARSE);
+    ini_set('display_errors', 0);
+    ini_set('log_errors', 1);
+    ini_set('error_log', LOG_DIR . 'error.log');
+}
+
+// セッション設定
+ini_set('session.gc_maxlifetime', SESSION_TIMEOUT);
+ini_set('session.cookie_lifetime', SESSION_TIMEOUT);
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_secure', ENVIRONMENT !== 'local');
+ini_set('session.cookie_samesite', 'Strict');
 
 /**
- * Database クラス - 完全統一版
- * 
- * 🏆 網羅するメソッド:
- * 1. getInstance() - Singleton
- * 2. getConnection() - PDO取得（SmileyCSVImporter用）
- * 3. query() - 汎用クエリ実行
- * 4. fetchAll() - 全行取得
- * 5. fetch() - 1行取得
- * 6. fetchColumn() - 単一値取得
- * 7. execute() - INSERT/UPDATE/DELETE
- * 8. lastInsertId() - 最終挿入ID
- * 9. beginTransaction() - トランザクション開始
- * 10. commit() - コミット
- * 11. rollback() - ロールバック
- * 12. tableExists() - テーブル存在確認
- * 13. getTableInfo() - テーブル情報取得
- * 14. testConnection() - 接続テスト
- * 15. getDatabaseStats() - DB統計
- * 16. getDebugInfo() - デバッグ情報
+ * エックスサーバー最適化データベース接続クラス（メソッド追加版）
  */
 class Database {
     private static $instance = null;
     private $pdo;
     
-    // ========================================
-    // Singleton パターン
-    // ========================================
+    private function __construct() {
+        $this->connect();
+    }
     
-    /**
-     * インスタンス取得（Singleton）
-     * @return Database
-     */
     public static function getInstance() {
         if (self::$instance === null) {
             self::$instance = new self();
@@ -63,88 +119,41 @@ class Database {
         return self::$instance;
     }
     
-    /**
-     * プライベートコンストラクタ
-     */
-    private function __construct() {
-        $this->connect();
-    }
-    
-    /**
-     * クローン防止
-     */
-    private function __clone() {}
-    
-    /**
-     * アンシリアライズ防止
-     */
-    public function __wakeup() {
-        throw new Exception("Cannot unserialize singleton");
-    }
-    
-    // ========================================
-    // データベース接続
-    // ========================================
-    
-    /**
-     * データベース接続
-     */
     private function connect() {
         try {
-            $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
-            
-            // エックスサーバー最適化オプション
+            $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4";
             $options = [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
-                PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES " . DB_CHARSET . " COLLATE " . DB_CHARSET . "_unicode_ci",
-                PDO::ATTR_TIMEOUT => 30,
                 PDO::ATTR_PERSISTENT => false,
-                PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true
+                PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4",
+                PDO::ATTR_TIMEOUT => 10
             ];
             
             $this->pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
             
-            // タイムゾーン設定
+            // エックスサーバー用の追加設定
             $this->pdo->exec("SET time_zone = '+09:00'");
+            $this->pdo->exec("SET sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO'");
             
         } catch (PDOException $e) {
-            error_log("Database Connection Error: " . $e->getMessage());
+            error_log("Database connection failed: " . $e->getMessage());
             
             if (DEBUG_MODE) {
                 throw new Exception("データベース接続エラー: " . $e->getMessage());
             } else {
-                throw new Exception("データベース接続に失敗しました");
+                throw new Exception("データベース接続に失敗しました。管理者にお問い合わせください。");
             }
         }
     }
     
-    // ========================================
-    // PDO直接アクセス（SmileyCSVImporter用）
-    // ========================================
-    
-    /**
-     * PDO接続オブジェクト取得
-     * 
-     * 用途: SmileyCSVImporterで直接PDOを使用
-     * @return PDO
-     */
     public function getConnection() {
         return $this->pdo;
     }
     
-    // ========================================
-    // クエリ実行系メソッド
-    // ========================================
-    
     /**
-     * SQLクエリ実行（プリペアドステートメント）
-     * 
-     * @param string $sql SQL文
-     * @param array $params パラメータ配列
-     * @return PDOStatement
-     * @throws Exception
+     * クエリ実行（PDOStatement返却）
      */
     public function query($sql, $params = []) {
         try {
@@ -152,68 +161,56 @@ class Database {
             $stmt->execute($params);
             return $stmt;
         } catch (PDOException $e) {
-            error_log("Database Query Error: " . $e->getMessage() . " | SQL: " . $sql . " | Params: " . json_encode($params));
-            
-            if (DEBUG_MODE) {
-                throw new Exception("クエリエラー: " . $e->getMessage() . " | SQL: " . $sql);
-            } else {
-                throw new Exception("データベース処理でエラーが発生しました");
-            }
+            error_log("Query error: " . $e->getMessage() . " | SQL: " . $sql);
+            throw new Exception("クエリエラー: " . $e->getMessage() . " | SQL: " . $sql);
         }
     }
     
     /**
      * 全行取得
-     * 
-     * @param string $sql SQL文
-     * @param array $params パラメータ配列
-     * @return array 結果の配列
      */
     public function fetchAll($sql, $params = []) {
-        return $this->query($sql, $params)->fetchAll();
+        try {
+            $stmt = $this->query($sql, $params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            throw $e;
+        }
     }
     
     /**
      * 1行取得
-     * 
-     * @param string $sql SQL文
-     * @param array $params パラメータ配列
-     * @return array|false 結果の連想配列、またはfalse
      */
     public function fetch($sql, $params = []) {
-        return $this->query($sql, $params)->fetch();
+        try {
+            $stmt = $this->query($sql, $params);
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            throw $e;
+        }
     }
     
     /**
-     * 単一値取得
-     * 
-     * @param string $sql SQL文
-     * @param array $params パラメータ配列
-     * @return mixed 単一値
-     */
-    public function fetchColumn($sql, $params = []) {
-        return $this->query($sql, $params)->fetchColumn();
-    }
-    
-    /**
-     * INSERT・UPDATE・DELETE実行
-     * 
-     * @param string $sql SQL文
-     * @param array $params パラメータ配列
-     * @return int 影響を受けた行数
+     * INSERT/UPDATE/DELETE実行
      */
     public function execute($sql, $params = []) {
-        $stmt = $this->query($sql, $params);
-        return $stmt->rowCount();
+        try {
+            $stmt = $this->query($sql, $params);
+            return $stmt->rowCount();
+        } catch (Exception $e) {
+            throw $e;
+        }
     }
     
-    // ========================================
-    // トランザクション管理
-    // ========================================
+    /**
+     * 最後に挿入されたID取得
+     */
+    public function lastInsertId() {
+        return $this->pdo->lastInsertId();
+    }
     
     /**
      * トランザクション開始
-     * @return bool
      */
     public function beginTransaction() {
         return $this->pdo->beginTransaction();
@@ -221,7 +218,6 @@ class Database {
     
     /**
      * コミット
-     * @return bool
      */
     public function commit() {
         return $this->pdo->commit();
@@ -229,160 +225,76 @@ class Database {
     
     /**
      * ロールバック
-     * @return bool
      */
     public function rollback() {
         return $this->pdo->rollback();
     }
+}
+
+/**
+ * 必要なディレクトリ作成
+ */
+function createRequiredDirectories() {
+    $directories = [
+        UPLOAD_DIR,
+        TEMP_DIR,
+        LOG_DIR,
+        CACHE_DIR,
+        BASE_PATH . 'backups/',
+        BASE_PATH . 'pdf/',
+        BASE_PATH . 'storage/',
+        BASE_PATH . 'storage/invoices/'
+    ];
     
-    /**
-     * 最後のINSERT ID取得
-     * @return string
-     */
-    public function lastInsertId() {
-        return $this->pdo->lastInsertId();
-    }
-    
-    // ========================================
-    // ユーティリティメソッド
-    // ========================================
-    
-    /**
-     * テーブル存在確認
-     * 
-     * @param string $tableName テーブル名
-     * @return bool 存在する場合true
-     */
-    public function tableExists($tableName) {
-        try {
-            $sql = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES 
-                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?";
-            $count = $this->fetchColumn($sql, [DB_NAME, $tableName]);
-            return $count > 0;
-        } catch (Exception $e) {
-            error_log("Table exists check error: " . $e->getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * テーブル情報取得
-     * 
-     * @param string $tableName テーブル名
-     * @return array|null カラム情報の配列
-     */
-    public function getTableInfo($tableName) {
-        try {
-            if (!$this->tableExists($tableName)) {
-                return null;
+    foreach ($directories as $dir) {
+        if (!is_dir($dir)) {
+            if (mkdir($dir, 0755, true)) {
+                // セキュリティ用.htaccess作成
+                if (in_array($dir, [UPLOAD_DIR, TEMP_DIR, LOG_DIR])) {
+                    file_put_contents($dir . '.htaccess', "Order Deny,Allow\nDeny from all\n");
+                }
+                
+                if (DEBUG_MODE) {
+                    error_log("ディレクトリ作成: {$dir}");
+                }
+            } else {
+                error_log("ディレクトリ作成失敗: {$dir}");
             }
-            
-            $sql = "SELECT 
-                        COLUMN_NAME as column_name,
-                        DATA_TYPE as data_type,
-                        IS_NULLABLE as is_nullable,
-                        COLUMN_DEFAULT as column_default,
-                        COLUMN_KEY as column_key,
-                        EXTRA as extra
-                    FROM INFORMATION_SCHEMA.COLUMNS 
-                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-                    ORDER BY ORDINAL_POSITION";
-            
-            return $this->fetchAll($sql, [DB_NAME, $tableName]);
-        } catch (Exception $e) {
-            error_log("Get table info error: " . $e->getMessage());
-            return null;
-        }
-    }
-    
-    /**
-     * 接続テスト
-     * @return bool 接続成功の場合true
-     */
-    public function testConnection() {
-        try {
-            $stmt = $this->pdo->query("SELECT 1 as test");
-            $result = $stmt->fetch();
-            return $result['test'] == 1;
-        } catch (Exception $e) {
-            error_log("Connection test error: " . $e->getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * データベース統計取得
-     * @return array 統計情報の配列
-     */
-    public function getDatabaseStats() {
-        try {
-            $stats = [];
-            
-            // テーブル一覧・行数取得
-            $sql = "SELECT TABLE_NAME, TABLE_ROWS, 
-                           ROUND(DATA_LENGTH / 1024 / 1024, 2) as size_mb
-                    FROM INFORMATION_SCHEMA.TABLES 
-                    WHERE TABLE_SCHEMA = ?
-                    ORDER BY TABLE_NAME";
-            $tables = $this->fetchAll($sql, [DB_NAME]);
-            
-            $stats['database_name'] = DB_NAME;
-            $stats['tables'] = $tables;
-            $stats['total_tables'] = count($tables);
-            $stats['total_rows'] = array_sum(array_column($tables, 'TABLE_ROWS'));
-            $stats['total_size_mb'] = array_sum(array_column($tables, 'size_mb'));
-            $stats['connection_test'] = $this->testConnection();
-            $stats['timestamp'] = date('Y-m-d H:i:s');
-            
-            return $stats;
-        } catch (Exception $e) {
-            error_log("Get database stats error: " . $e->getMessage());
-            return [
-                'error' => $e->getMessage(),
-                'connection_test' => false,
-                'timestamp' => date('Y-m-d H:i:s')
-            ];
-        }
-    }
-    
-    /**
-     * デバッグ情報取得
-     * @return array デバッグ情報の配列
-     */
-    public function getDebugInfo() {
-        try {
-            return [
-                'environment' => ENVIRONMENT,
-                'debug_mode' => DEBUG_MODE,
-                'db_host' => DB_HOST,
-                'db_name' => DB_NAME,
-                'db_user' => DB_USER,
-                'db_charset' => DB_CHARSET,
-                'connection_test' => $this->testConnection(),
-                'php_version' => PHP_VERSION,
-                'pdo_version' => $this->pdo->getAttribute(PDO::ATTR_SERVER_VERSION),
-                'available_methods' => get_class_methods($this),
-                'timestamp' => date('Y-m-d H:i:s')
-            ];
-        } catch (Exception $e) {
-            return [
-                'error' => $e->getMessage(),
-                'environment' => ENVIRONMENT,
-                'timestamp' => date('Y-m-d H:i:s')
-            ];
         }
     }
 }
 
-// ========================================
-// 初期化確認
-// ========================================
+// 必要なディレクトリを作成
+createRequiredDirectories();
 
-if (class_exists('Database')) {
-    if (DEBUG_MODE) {
-        error_log("✅ Database class (v5.0 Unified) loaded successfully");
+/**
+ * データベース接続テスト関数
+ */
+function testDatabaseConnection() {
+    try {
+        $db = Database::getInstance();
+        $stmt = $db->query("SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = ?", [DB_NAME]);
+        $result = $stmt->fetch();
+        
+        return [
+            'success' => true,
+            'message' => '接続成功',
+            'environment' => ENVIRONMENT,
+            'database' => DB_NAME,
+            'user' => DB_USER,
+            'host' => DB_HOST,
+            'table_count' => $result['table_count']
+        ];
+        
+    } catch (Exception $e) {
+        return [
+            'success' => false,
+            'message' => '接続失敗: ' . $e->getMessage(),
+            'environment' => ENVIRONMENT,
+            'database' => DB_NAME,
+            'user' => DB_USER,
+            'host' => DB_HOST
+        ];
     }
-} else {
-    error_log("❌ Database class loading failed");
 }
 ?>
