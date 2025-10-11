@@ -1,37 +1,12 @@
-<?php
 /**
- * Smiley配食事業 請求書生成エンジン
- * 請求書データ生成・管理・PDF出力を担当
- * 
- * @author Claude
- * @version 1.0.0
- */
-
-require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/SmileyInvoicePDF.php';
-
-class SmileyInvoiceGenerator {
-    
-    private $db;
-    
-    // 請求書タイプ定数
-    const TYPE_COMPANY_BULK = 'company_bulk';
-    const TYPE_DEPARTMENT_BULK = 'department_bulk';
-    const TYPE_INDIVIDUAL = 'individual';
-    const TYPE_MIXED = 'mixed';
-    
-    public function __construct() {
-        $this->db = Database::getInstance();
-    }
-    
-    /**
      * 請求書生成メイン処理
      * 
      * @param array $params 生成パラメータ
      * @return array 生成結果
      */
     public function generateInvoices($params) {
-        $invoiceType = $params['invoice_type'] ?? self::TYPE_COMPANY_BULK;
+        // invoice_type を実際のテーブル定義に合わせて変換
+        $invoiceType = $this->normalizeInvoiceType($params['invoice_type'] ?? self::TYPE_COMPANY_BULK);
         $periodStart = $params['period_start'];
         $periodEnd = $params['period_end'];
         $dueDate = $params['due_date'] ?? $this->calculateDueDate($periodEnd);
@@ -54,15 +29,90 @@ class SmileyInvoiceGenerator {
                     break;
                     
                 case self::TYPE_INDIVIDUAL:
+                    $generatedInvoices = $this->generateIndividualInvoices($targetIds, $periodStart, $periodEnd, $<?php
+/**
+ * Smiley配食事業 請求書生成エンジン
+ * 請求書データ生成・管理・PDF出力を担当
+ * 
+ * @author Claude
+ * @version 1.0.0
+ */
+
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/SmileyInvoicePDF.php';
+
+class SmileyInvoiceGenerator {
+    
+    private $db;
+    
+    // 請求書タイプ定数（データベースENUMに合わせる）
+    const TYPE_COMPANY_BULK = 'company';        // 企業一括請求
+    const TYPE_DEPARTMENT_BULK = 'department';   // 部署別一括請求
+    const TYPE_INDIVIDUAL = 'individual';        // 個人請求
+    const TYPE_MIXED = 'mixed';                  // 混合請求
+    
+    /**
+     * フロントエンドからの invoice_type を正規化
+     * 'company_bulk' → 'company' のように変換
+     */
+    private function normalizeInvoiceType($type) {
+        $mapping = [
+            'company_bulk' => 'company',
+            'department_bulk' => 'department',
+            'individual' => 'individual',
+            'mixed' => 'mixed',
+            // 既に正規化されている場合はそのまま
+            'company' => 'company',
+            'department' => 'department'
+        ];
+        
+        return $mapping[$type] ?? 'company';
+    }
+    
+    public function __construct() {
+        $this->db = Database::getInstance();
+    }
+    
+    /**
+     * 請求書生成メイン処理
+     * 
+     * @param array $params 生成パラメータ
+     * @return array 生成結果
+     */
+    public function generateInvoices($params) {
+        // invoice_type を正規化（'company_bulk' → 'company' など）
+        $invoiceType = $this->normalizeInvoiceType($params['invoice_type'] ?? 'company_bulk');
+        $periodStart = $params['period_start'];
+        $periodEnd = $params['period_end'];
+        $dueDate = $params['due_date'] ?? $this->calculateDueDate($periodEnd);
+        $targetIds = $params['target_ids'] ?? [];
+        $autoPdf = $params['auto_generate_pdf'] ?? false;
+        
+        $generatedInvoices = [];
+        $errors = [];
+        
+        try {
+            $this->db->beginTransaction();
+            
+            switch ($invoiceType) {
+                case 'company':
+                    $generatedInvoices = $this->generateCompanyBulkInvoices($targetIds, $periodStart, $periodEnd, $dueDate);
+                    break;
+                    
+                case 'department':
+                    $generatedInvoices = $this->generateDepartmentBulkInvoices($targetIds, $periodStart, $periodEnd, $dueDate);
+                    break;
+                    
+                case 'individual':
                     $generatedInvoices = $this->generateIndividualInvoices($targetIds, $periodStart, $periodEnd, $dueDate);
                     break;
                     
-                case self::TYPE_MIXED:
+                case 'mixed':
                     $generatedInvoices = $this->generateMixedInvoices($periodStart, $periodEnd, $dueDate);
                     break;
                     
                 default:
-                    throw new Exception('未対応の請求書タイプです');
+                    throw new Exception('未対応の請求書タイプです: ' . $invoiceType);
             }
             
             // PDF自動生成
@@ -244,10 +294,10 @@ class SmileyInvoiceGenerator {
     }
     
     /**
-     * 請求書データベースレコード作成（実際のテーブル構造に対応）
+     * 請求書データベースレコード作成（invoice_details構造対応版）
      */
     private function createInvoice($data) {
-        $invoiceType = $data['invoice_type'];
+        $invoiceType = $this->normalizeInvoiceType($data['invoice_type']);
         $orders = $data['orders'];
         $periodStart = $data['period_start'];
         $periodEnd = $data['period_end'];
@@ -270,7 +320,7 @@ class SmileyInvoiceGenerator {
         $userCode = $firstOrder['user_code'] ?? '';
         $userName = $firstOrder['user_name'] ?? '';
         
-        // 請求書レコード挿入（実際のテーブル構造に対応）
+        // 請求書レコード挿入
         $sql = "INSERT INTO invoices (
                     invoice_number, user_id, user_code, user_name,
                     company_name, department,
@@ -294,35 +344,61 @@ class SmileyInvoiceGenerator {
             $taxRate,
             $taxAmount,
             $totalAmount,
-            $invoiceType
+            $invoiceType  // 正規化済みの値を使用
         ];
         
-        $this->db->execute($sql, $params);
-        $invoiceId = $this->db->lastInsertId();
+        try {
+            error_log("Attempting to insert invoice: " . json_encode([
+                'invoice_number' => $invoiceNumber,
+                'company_name' => $companyName,
+                'invoice_type' => $invoiceType,
+                'total_amount' => $totalAmount
+            ]));
+            
+            $this->db->execute($sql, $params);
+            $invoiceId = $this->db->lastInsertId();
+            
+            error_log("Invoice created successfully: ID={$invoiceId}, Number={$invoiceNumber}");
+            
+        } catch (Exception $e) {
+            error_log("Invoice creation failed: " . $e->getMessage());
+            error_log("SQL: " . $sql);
+            error_log("Params: " . json_encode($params));
+            throw $e;
+        }
         
-        // 請求書明細挿入（invoice_detailsテーブルが存在する場合）
+        // 請求書明細挿入（実際のinvoice_details構造に対応）
         try {
             foreach ($orders as $order) {
                 $detailSql = "INSERT INTO invoice_details (
-                                invoice_id, delivery_date, user_id, user_name,
-                                product_id, product_name, quantity, unit_price, total_amount
-                              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                                invoice_id, 
+                                order_id, 
+                                order_date, 
+                                product_code, 
+                                product_name, 
+                                quantity, 
+                                unit_price, 
+                                amount,
+                                created_at
+                              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
                 
                 $this->db->execute($detailSql, [
                     $invoiceId,
+                    $order['id'] ?? null,
                     $order['delivery_date'],
-                    $order['user_id'] ?? null,
-                    $order['user_name'],
-                    $order['product_id'] ?? null,
+                    $order['product_code'] ?? null,
                     $order['product_name'],
                     $order['quantity'],
                     $order['unit_price'],
                     $order['total_amount']
                 ]);
             }
+            
+            error_log("Invoice details inserted: " . count($orders) . " items");
+            
         } catch (Exception $e) {
-            // invoice_detailsテーブルが存在しない場合はスキップ
             error_log("Invoice details insertion failed: " . $e->getMessage());
+            // 明細挿入失敗してもメイン請求書は保持
         }
         
         return $invoiceId;
