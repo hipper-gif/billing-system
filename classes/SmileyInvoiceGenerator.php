@@ -1,41 +1,10 @@
-/**
-     * 請求書生成メイン処理
-     * 
-     * @param array $params 生成パラメータ
-     * @return array 生成結果
-     */
-    public function generateInvoices($params) {
-        // invoice_type を実際のテーブル定義に合わせて変換
-        $invoiceType = $this->normalizeInvoiceType($params['invoice_type'] ?? self::TYPE_COMPANY_BULK);
-        $periodStart = $params['period_start'];
-        $periodEnd = $params['period_end'];
-        $dueDate = $params['due_date'] ?? $this->calculateDueDate($periodEnd);
-        $targetIds = $params['target_ids'] ?? [];
-        $autoPdf = $params['auto_generate_pdf'] ?? false;
-        
-        $generatedInvoices = [];
-        $errors = [];
-        
-        try {
-            $this->db->beginTransaction();
-            
-            switch ($invoiceType) {
-                case self::TYPE_COMPANY_BULK:
-                    $generatedInvoices = $this->generateCompanyBulkInvoices($targetIds, $periodStart, $periodEnd, $dueDate);
-                    break;
-                    
-                case self::TYPE_DEPARTMENT_BULK:
-                    $generatedInvoices = $this->generateDepartmentBulkInvoices($targetIds, $periodStart, $periodEnd, $dueDate);
-                    break;
-                    
-                case self::TYPE_INDIVIDUAL:
-                    $generatedInvoices = $this->generateIndividualInvoices($targetIds, $periodStart, $periodEnd, $<?php
+<?php
 /**
  * Smiley配食事業 請求書生成エンジン
  * 請求書データ生成・管理・PDF出力を担当
  * 
  * @author Claude
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 require_once __DIR__ . '/../config/database.php';
@@ -46,14 +15,17 @@ class SmileyInvoiceGenerator {
     private $db;
     
     // 請求書タイプ定数（データベースENUMに合わせる）
-    const TYPE_COMPANY_BULK = 'company';        // 企業一括請求
-    const TYPE_DEPARTMENT_BULK = 'department';   // 部署別一括請求
-    const TYPE_INDIVIDUAL = 'individual';        // 個人請求
-    const TYPE_MIXED = 'mixed';                  // 混合請求
+    const TYPE_COMPANY_BULK = 'company';
+    const TYPE_DEPARTMENT_BULK = 'department';
+    const TYPE_INDIVIDUAL = 'individual';
+    const TYPE_MIXED = 'mixed';
+    
+    public function __construct() {
+        $this->db = Database::getInstance();
+    }
     
     /**
      * フロントエンドからの invoice_type を正規化
-     * 'company_bulk' → 'company' のように変換
      */
     private function normalizeInvoiceType($type) {
         $mapping = [
@@ -61,7 +33,6 @@ class SmileyInvoiceGenerator {
             'department_bulk' => 'department',
             'individual' => 'individual',
             'mixed' => 'mixed',
-            // 既に正規化されている場合はそのまま
             'company' => 'company',
             'department' => 'department'
         ];
@@ -69,18 +40,10 @@ class SmileyInvoiceGenerator {
         return $mapping[$type] ?? 'company';
     }
     
-    public function __construct() {
-        $this->db = Database::getInstance();
-    }
-    
     /**
      * 請求書生成メイン処理
-     * 
-     * @param array $params 生成パラメータ
-     * @return array 生成結果
      */
     public function generateInvoices($params) {
-        // invoice_type を正規化（'company_bulk' → 'company' など）
         $invoiceType = $this->normalizeInvoiceType($params['invoice_type'] ?? 'company_bulk');
         $periodStart = $params['period_start'];
         $periodEnd = $params['period_end'];
@@ -115,7 +78,6 @@ class SmileyInvoiceGenerator {
                     throw new Exception('未対応の請求書タイプです: ' . $invoiceType);
             }
             
-            // PDF自動生成
             if ($autoPdf) {
                 foreach ($generatedInvoices as &$invoice) {
                     try {
@@ -148,25 +110,25 @@ class SmileyInvoiceGenerator {
     private function generateCompanyBulkInvoices($companyIds, $periodStart, $periodEnd, $dueDate) {
         $invoices = [];
         
-        // 対象企業が指定されていない場合は全企業
         if (empty($companyIds)) {
-            $sql = "SELECT id FROM companies WHERE is_active = 1";
+            $sql = "SELECT DISTINCT company_name FROM orders WHERE delivery_date >= ? AND delivery_date <= ?";
+            $companies = $this->db->fetchAll($sql, [$periodStart, $periodEnd]);
+            $companyNames = array_column($companies, 'company_name');
+        } else {
+            $sql = "SELECT company_name FROM companies WHERE id IN (" . implode(',', array_map('intval', $companyIds)) . ")";
             $companies = $this->db->fetchAll($sql);
-            $companyIds = array_column($companies, 'id');
+            $companyNames = array_column($companies, 'company_name');
         }
         
-        foreach ($companyIds as $companyId) {
-            // 企業の注文データ取得
-            $orders = $this->getOrdersByCompany($companyId, $periodStart, $periodEnd);
+        foreach ($companyNames as $companyName) {
+            $orders = $this->getOrdersByCompanyName($companyName, $periodStart, $periodEnd);
             
             if (empty($orders)) {
-                continue; // 注文がない企業はスキップ
+                continue;
             }
             
-            // 請求書データ作成
             $invoiceId = $this->createInvoice([
-                'invoice_type' => self::TYPE_COMPANY_BULK,
-                'company_id' => $companyId,
+                'invoice_type' => 'company',
                 'period_start' => $periodStart,
                 'period_end' => $periodEnd,
                 'due_date' => $dueDate,
@@ -185,25 +147,27 @@ class SmileyInvoiceGenerator {
     private function generateDepartmentBulkInvoices($departmentIds, $periodStart, $periodEnd, $dueDate) {
         $invoices = [];
         
-        // 対象部署が指定されていない場合は全部署
         if (empty($departmentIds)) {
-            $sql = "SELECT id FROM departments WHERE is_active = 1";
+            $sql = "SELECT DISTINCT company_name, department_name FROM orders 
+                    WHERE delivery_date >= ? AND delivery_date <= ? AND department_name IS NOT NULL";
+            $departments = $this->db->fetchAll($sql, [$periodStart, $periodEnd]);
+        } else {
+            $sql = "SELECT c.company_name, d.department_name 
+                    FROM departments d 
+                    JOIN companies c ON d.company_id = c.id 
+                    WHERE d.id IN (" . implode(',', array_map('intval', $departmentIds)) . ")";
             $departments = $this->db->fetchAll($sql);
-            $departmentIds = array_column($departments, 'id');
         }
         
-        foreach ($departmentIds as $departmentId) {
-            // 部署の注文データ取得
-            $orders = $this->getOrdersByDepartment($departmentId, $periodStart, $periodEnd);
+        foreach ($departments as $dept) {
+            $orders = $this->getOrdersByDepartmentName($dept['company_name'], $dept['department_name'], $periodStart, $periodEnd);
             
             if (empty($orders)) {
                 continue;
             }
             
-            // 請求書データ作成
             $invoiceId = $this->createInvoice([
-                'invoice_type' => self::TYPE_DEPARTMENT_BULK,
-                'department_id' => $departmentId,
+                'invoice_type' => 'department',
                 'period_start' => $periodStart,
                 'period_end' => $periodEnd,
                 'due_date' => $dueDate,
@@ -222,25 +186,25 @@ class SmileyInvoiceGenerator {
     private function generateIndividualInvoices($userIds, $periodStart, $periodEnd, $dueDate) {
         $invoices = [];
         
-        // 対象利用者が指定されていない場合は全利用者
         if (empty($userIds)) {
-            $sql = "SELECT id FROM users WHERE is_active = 1";
+            $sql = "SELECT DISTINCT user_id, user_code, user_name FROM orders 
+                    WHERE delivery_date >= ? AND delivery_date <= ?";
+            $users = $this->db->fetchAll($sql, [$periodStart, $periodEnd]);
+        } else {
+            $sql = "SELECT id as user_id, user_code, user_name FROM users WHERE id IN (" . implode(',', array_map('intval', $userIds)) . ")";
             $users = $this->db->fetchAll($sql);
-            $userIds = array_column($users, 'id');
         }
         
-        foreach ($userIds as $userId) {
-            // 利用者の注文データ取得
-            $orders = $this->getOrdersByUser($userId, $periodStart, $periodEnd);
+        foreach ($users as $user) {
+            $orders = $this->getOrdersByUserId($user['user_id'], $periodStart, $periodEnd);
             
             if (empty($orders)) {
                 continue;
             }
             
-            // 請求書データ作成
             $invoiceId = $this->createInvoice([
-                'invoice_type' => self::TYPE_INDIVIDUAL,
-                'user_id' => $userId,
+                'invoice_type' => 'individual',
+                'user_id' => $user['user_id'],
                 'period_start' => $periodStart,
                 'period_end' => $periodEnd,
                 'due_date' => $dueDate,
@@ -254,13 +218,12 @@ class SmileyInvoiceGenerator {
     }
     
     /**
-     * 混合請求書生成（企業設定に基づいて自動判定）
+     * 混合請求書生成
      */
     private function generateMixedInvoices($periodStart, $periodEnd, $dueDate) {
         $invoices = [];
         
-        // 全企業の支払い方法を取得
-        $sql = "SELECT id, payment_method FROM companies WHERE is_active = 1";
+        $sql = "SELECT id, company_name, payment_method FROM companies WHERE is_active = 1";
         $companies = $this->db->fetchAll($sql);
         
         foreach ($companies as $company) {
@@ -270,17 +233,7 @@ class SmileyInvoiceGenerator {
                     $invoices = array_merge($invoices, $companyInvoices);
                     break;
                     
-                case 'department_bulk':
-                    // この企業の全部署
-                    $sql = "SELECT id FROM departments WHERE company_id = ? AND is_active = 1";
-                    $departments = $this->db->fetchAll($sql, [$company['id']]);
-                    $departmentIds = array_column($departments, 'id');
-                    $deptInvoices = $this->generateDepartmentBulkInvoices($departmentIds, $periodStart, $periodEnd, $dueDate);
-                    $invoices = array_merge($invoices, $deptInvoices);
-                    break;
-                    
                 case 'individual':
-                    // この企業の全利用者
                     $sql = "SELECT id FROM users WHERE company_id = ? AND is_active = 1";
                     $users = $this->db->fetchAll($sql, [$company['id']]);
                     $userIds = array_column($users, 'id');
@@ -294,7 +247,7 @@ class SmileyInvoiceGenerator {
     }
     
     /**
-     * 請求書データベースレコード作成（invoice_details構造対応版）
+     * 請求書データベースレコード作成
      */
     private function createInvoice($data) {
         $invoiceType = $this->normalizeInvoiceType($data['invoice_type']);
@@ -303,16 +256,13 @@ class SmileyInvoiceGenerator {
         $periodEnd = $data['period_end'];
         $dueDate = $data['due_date'];
         
-        // 金額計算
         $subtotal = array_sum(array_column($orders, 'total_amount'));
-        $taxRate = 10.00; // 10%
+        $taxRate = 10.00;
         $taxAmount = round($subtotal * 0.10);
         $totalAmount = $subtotal + $taxAmount;
         
-        // 請求書番号生成
         $invoiceNumber = $this->generateInvoiceNumber();
         
-        // 注文データから情報を取得
         $firstOrder = $orders[0];
         $companyName = $firstOrder['company_name'] ?? '';
         $department = $firstOrder['department_name'] ?? null;
@@ -320,7 +270,6 @@ class SmileyInvoiceGenerator {
         $userCode = $firstOrder['user_code'] ?? '';
         $userName = $firstOrder['user_name'] ?? '';
         
-        // 請求書レコード挿入
         $sql = "INSERT INTO invoices (
                     invoice_number, user_id, user_code, user_name,
                     company_name, department,
@@ -331,109 +280,57 @@ class SmileyInvoiceGenerator {
                 ) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, 'draft', NOW(), NOW())";
         
         $params = [
-            $invoiceNumber,
-            $userId,
-            $userCode,
-            $userName,
-            $companyName,
-            $department,
-            $dueDate,
-            $periodStart,
-            $periodEnd,
-            $subtotal,
-            $taxRate,
-            $taxAmount,
-            $totalAmount,
-            $invoiceType  // 正規化済みの値を使用
+            $invoiceNumber, $userId, $userCode, $userName,
+            $companyName, $department, $dueDate, $periodStart, $periodEnd,
+            $subtotal, $taxRate, $taxAmount, $totalAmount, $invoiceType
         ];
         
-        try {
-            error_log("Attempting to insert invoice: " . json_encode([
-                'invoice_number' => $invoiceNumber,
-                'company_name' => $companyName,
-                'invoice_type' => $invoiceType,
-                'total_amount' => $totalAmount
-            ]));
-            
-            $this->db->execute($sql, $params);
-            $invoiceId = $this->db->lastInsertId();
-            
-            error_log("Invoice created successfully: ID={$invoiceId}, Number={$invoiceNumber}");
-            
-        } catch (Exception $e) {
-            error_log("Invoice creation failed: " . $e->getMessage());
-            error_log("SQL: " . $sql);
-            error_log("Params: " . json_encode($params));
-            throw $e;
-        }
+        $this->db->execute($sql, $params);
+        $invoiceId = $this->db->lastInsertId();
         
-        // 請求書明細挿入（実際のinvoice_details構造に対応）
         try {
             foreach ($orders as $order) {
                 $detailSql = "INSERT INTO invoice_details (
-                                invoice_id, 
-                                order_id, 
-                                order_date, 
-                                product_code, 
-                                product_name, 
-                                quantity, 
-                                unit_price, 
-                                amount,
-                                created_at
+                                invoice_id, order_id, order_date, 
+                                product_code, product_name, 
+                                quantity, unit_price, amount, created_at
                               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
                 
                 $this->db->execute($detailSql, [
-                    $invoiceId,
-                    $order['id'] ?? null,
-                    $order['delivery_date'],
-                    $order['product_code'] ?? null,
-                    $order['product_name'],
-                    $order['quantity'],
-                    $order['unit_price'],
-                    $order['total_amount']
+                    $invoiceId, $order['id'] ?? null, $order['delivery_date'],
+                    $order['product_code'] ?? null, $order['product_name'],
+                    $order['quantity'], $order['unit_price'], $order['total_amount']
                 ]);
             }
-            
-            error_log("Invoice details inserted: " . count($orders) . " items");
-            
         } catch (Exception $e) {
             error_log("Invoice details insertion failed: " . $e->getMessage());
-            // 明細挿入失敗してもメイン請求書は保持
         }
         
         return $invoiceId;
     }
     
-    /**
-     * 企業別注文データ取得
-     */
-    private function getOrdersByCompany($companyId, $periodStart, $periodEnd) {
+    private function getOrdersByCompanyName($companyName, $periodStart, $periodEnd) {
         $sql = "SELECT * FROM orders 
-                WHERE company_id = ? 
+                WHERE company_name = ? 
                 AND delivery_date >= ? 
                 AND delivery_date <= ?
                 ORDER BY delivery_date, user_name";
         
-        return $this->db->fetchAll($sql, [$companyId, $periodStart, $periodEnd]);
+        return $this->db->fetchAll($sql, [$companyName, $periodStart, $periodEnd]);
     }
     
-    /**
-     * 部署別注文データ取得
-     */
-    private function getOrdersByDepartment($departmentId, $periodStart, $periodEnd) {
+    private function getOrdersByDepartmentName($companyName, $departmentName, $periodStart, $periodEnd) {
         $sql = "SELECT * FROM orders 
-                WHERE department_id = ? 
+                WHERE company_name = ? 
+                AND department_name = ?
                 AND delivery_date >= ? 
                 AND delivery_date <= ?
                 ORDER BY delivery_date, user_name";
         
-        return $this->db->fetchAll($sql, [$departmentId, $periodStart, $periodEnd]);
+        return $this->db->fetchAll($sql, [$companyName, $departmentName, $periodStart, $periodEnd]);
     }
     
-    /**
-     * 個人別注文データ取得
-     */
-    private function getOrdersByUser($userId, $periodStart, $periodEnd) {
+    private function getOrdersByUserId($userId, $periodStart, $periodEnd) {
         $sql = "SELECT * FROM orders 
                 WHERE user_id = ? 
                 AND delivery_date >= ? 
@@ -443,14 +340,10 @@ class SmileyInvoiceGenerator {
         return $this->db->fetchAll($sql, [$userId, $periodStart, $periodEnd]);
     }
     
-    /**
-     * 請求書番号生成
-     */
     private function generateInvoiceNumber() {
         $year = date('Y');
         $month = date('m');
         
-        // 同月の最新番号取得
         $sql = "SELECT invoice_number FROM invoices 
                 WHERE invoice_number LIKE ? 
                 ORDER BY created_at DESC LIMIT 1";
@@ -459,7 +352,6 @@ class SmileyInvoiceGenerator {
         $lastInvoice = $this->db->fetch($sql, [$prefix . '%']);
         
         if ($lastInvoice) {
-            // 既存番号から連番取得
             $lastNumber = intval(substr($lastInvoice['invoice_number'], -3));
             $newNumber = $lastNumber + 1;
         } else {
@@ -469,35 +361,16 @@ class SmileyInvoiceGenerator {
         return $prefix . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
     }
     
-    /**
-     * 支払期限計算（期間終了日+30日）
-     */
     private function calculateDueDate($periodEnd) {
         $date = new DateTime($periodEnd);
         $date->modify('+30 days');
         return $date->format('Y-m-d');
     }
     
-    /**
-     * 注文データから企業ID取得
-     */
-    private function getCompanyIdFromOrders($orders) {
-        if (empty($orders)) {
-            return null;
-        }
-        return $orders[0]['company_id'] ?? null;
-    }
-    
-    /**
-     * 請求書データ取得（実際のテーブル構造に対応）
-     */
     public function getInvoiceData($invoiceId) {
-        // 基本情報
-        $sql = "SELECT i.*,
-                       i.invoice_date as issue_date,
+        $sql = "SELECT i.*, i.invoice_date as issue_date,
                        i.company_name as billing_company_name
-                FROM invoices i
-                WHERE i.id = ?";
+                FROM invoices i WHERE i.id = ?";
         
         $invoice = $this->db->fetch($sql, [$invoiceId]);
         
@@ -505,25 +378,19 @@ class SmileyInvoiceGenerator {
             throw new Exception('請求書が見つかりません');
         }
         
-        // 明細取得（invoice_detailsテーブルが存在する場合）
         try {
-            $detailSql = "SELECT * FROM invoice_details WHERE invoice_id = ? ORDER BY delivery_date, user_name";
+            $detailSql = "SELECT * FROM invoice_details WHERE invoice_id = ? ORDER BY order_date";
             $invoice['details'] = $this->db->fetchAll($detailSql, [$invoiceId]);
         } catch (Exception $e) {
-            // invoice_detailsテーブルが存在しない場合は空配列
             $invoice['details'] = [];
         }
         
-        // 統計計算
         $invoice['order_count'] = count($invoice['details']);
         $invoice['total_quantity'] = array_sum(array_column($invoice['details'], 'quantity'));
         
         return $invoice;
     }
     
-    /**
-     * 請求書一覧取得（実際のテーブル構造に対応）
-     */
     public function getInvoiceList($filters = [], $page = 1, $limit = 50) {
         $offset = ($page - 1) * $limit;
         $whereClauses = [];
@@ -546,17 +413,13 @@ class SmileyInvoiceGenerator {
         
         $whereSQL = !empty($whereClauses) ? 'WHERE ' . implode(' AND ', $whereClauses) : '';
         
-        // 総件数
         $countSQL = "SELECT COUNT(*) as total FROM invoices i {$whereSQL}";
         $countResult = $this->db->fetch($countSQL, $params);
         $totalCount = $countResult['total'];
         
-        // データ取得
-        $sql = "SELECT i.*,
-                       i.invoice_date as issue_date,
+        $sql = "SELECT i.*, i.invoice_date as issue_date,
                        i.company_name as billing_company_name
-                FROM invoices i
-                {$whereSQL}
+                FROM invoices i {$whereSQL}
                 ORDER BY i.created_at DESC
                 LIMIT ? OFFSET ?";
         
@@ -573,45 +436,25 @@ class SmileyInvoiceGenerator {
         ];
     }
     
-    /**
-     * 請求書ステータス更新
-     */
     public function updateInvoiceStatus($invoiceId, $status, $notes = '') {
         $sql = "UPDATE invoices SET status = ?, notes = ?, updated_at = NOW() WHERE id = ?";
         $this->db->execute($sql, [$status, $notes, $invoiceId]);
         return true;
     }
     
-    /**
-     * 請求書削除（論理削除）
-     */
     public function deleteInvoice($invoiceId) {
         return $this->updateInvoiceStatus($invoiceId, 'cancelled', '削除');
     }
     
-    /**
-     * PDF生成
-     * 
-     * @param int $invoiceId 請求書ID
-     * @return string PDFファイルパス
-     */
     public function generatePDF($invoiceId) {
-        // 請求書データ取得
         $invoiceData = $this->getInvoiceData($invoiceId);
-        
-        // SmileyInvoicePDF を使用してPDF生成
         $pdfGenerator = new SmileyInvoicePDF();
         $pdfPath = $pdfGenerator->generateInvoicePDF($invoiceData);
-        
         return $pdfPath;
     }
     
-    /**
-     * PDFをブラウザに出力
-     */
     public function outputPDF($invoiceId) {
         $invoiceData = $this->getInvoiceData($invoiceId);
-        
         $pdfGenerator = new SmileyInvoicePDF();
         $pdfGenerator->outputInvoicePDF($invoiceData);
     }
