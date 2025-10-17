@@ -9,10 +9,10 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 // データベース接続情報
-define('DB_HOST', 'mysql1086.xserver.jp');
+define('DB_HOST', 'localhost');
 define('DB_NAME', 'twinklemark_billing');
-define('DB_USER', 'twinklemark_admin');
-define('DB_PASS', 'Kiyoshi07171120');
+define('DB_USER', 'twinklemark_bill');
+define('DB_PASS', 'Smiley2525');
 
 try {
     $pdo = new PDO(
