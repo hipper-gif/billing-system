@@ -21,8 +21,7 @@ function respond($success, $message, $data = []) {
 try {
     // 1. Database クラス読み込み
     require_once '../config/database.php';
-    require_once '../classes/Database.php';
-    
+
     // 2. Database クラスの詳細情報取得
     $reflection = new ReflectionClass('Database');
     $constructor = $reflection->getConstructor();

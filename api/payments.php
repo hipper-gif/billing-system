@@ -32,7 +32,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 // 必要なクラスを読み込み
 require_once __DIR__ . '/../classes/PaymentManager.php';
-require_once __DIR__ . '/../classes/Database.php';
 require_once __DIR__ . '/../classes/SecurityHelper.php';
 
 /**

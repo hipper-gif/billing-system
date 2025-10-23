@@ -11,7 +11,6 @@
  */
 
 require_once '../config/database.php';
-require_once '../classes/Database.php';
 require_once '../classes/SecurityHelper.php';
 
 // セキュリティヘッダー設定
