@@ -18,8 +18,7 @@ ini_set('display_errors', 0);
 try {
     // 必要なファイルを読み込み
     require_once __DIR__ . '/../config/database.php';
-    require_once __DIR__ . '/../classes/Database.php';
-    
+
     // ヘッダー設定
     header('Content-Type: application/json; charset=utf-8');
     

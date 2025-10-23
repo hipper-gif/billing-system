@@ -1,7 +1,6 @@
 <?php
 // ✅ 修正版: classes/Database.php の重複読み込み問題を解決
 require_once __DIR__ . '/../config/database.php';
-// require_once __DIR__ . '/../classes/Database.php';  // ❌ 削除: 重複・存在しないファイル
 require_once __DIR__ . '/../classes/PaymentManager.php';
 require_once __DIR__ . '/../classes/InvoiceGenerator.php';
 

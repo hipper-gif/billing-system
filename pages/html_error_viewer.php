@@ -97,7 +97,6 @@ echo "<pre>";
 
 $requiredFiles = [
     '../config/database.php',
-    '../classes/Database.php',
     '../classes/SmileyCSVImporter.php',
     '../classes/SecurityHelper.php',
     '../classes/FileUploadHandler.php'
@@ -142,10 +141,7 @@ try {
     echo "Loading config/database.php...\n";
     require_once '../config/database.php';
     echo "OK\n";
-    
-    echo "Loading classes/Database.php...\n";
-    require_once '../classes/Database.php';
-    echo "OK\n";
+
     echo "Database class exists: " . (class_exists('Database') ? 'YES' : 'NO') . "\n";
     
     echo "Testing Database::getInstance()...\n";

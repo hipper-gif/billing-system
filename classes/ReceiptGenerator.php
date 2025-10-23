@@ -11,8 +11,6 @@
  * - PDF生成・ファイル管理
  */
 
-require_once 'Database.php';
-
 class ReceiptGenerator 
 {
     private $db;

@@ -4,7 +4,6 @@
  * Smiley配食事業 集金管理システム
  */
 require_once '../config/database.php';
-require_once '../classes/Database.php';
 require_once '../classes/ReceiptGenerator.php';
 
 // セキュリティ: 直接アクセスを防ぐ

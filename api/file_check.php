@@ -85,10 +85,11 @@ echo "log_errors: " . (ini_get('log_errors') ? 'ON' : 'OFF') . "\n";
 // 5. require_once テスト
 echo "\n5. require_once テスト:\n";
 try {
-    if (file_exists('../classes/Database.php')) {
-        require_once '../classes/Database.php';
-        echo "✅ Database.php 読み込み成功\n";
-        
+    // Note: Database class is now defined in config/database.php, not in classes/Database.php
+    if (file_exists('../config/database.php')) {
+        require_once '../config/database.php';
+        echo "✅ config/database.php 読み込み成功\n";
+
         if (class_exists('Database')) {
             echo "✅ Database クラス利用可能\n";
         } else {

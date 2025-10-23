@@ -1,6 +1,5 @@
 <?php
 require_once __DIR__ . '/config/database.php';
-require_once __DIR__ . '/classes/Database.php';
 
 // セキュリティヘッダー
 header('X-Content-Type-Options: nosniff');

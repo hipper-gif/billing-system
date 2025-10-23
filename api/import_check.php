@@ -31,8 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 try {
     // 必須ファイル読み込み
     require_once '../config/database.php';
-    require_once '../classes/Database.php';
-    
+
     // データベース接続
     $db = Database::getInstance();
     

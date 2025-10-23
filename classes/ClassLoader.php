@@ -72,7 +72,6 @@ class ClassLoader {
         }
         
         $classes = [
-            'Database' => $baseDir . '/Database.php',
             'SmileyCSVImporter' => $baseDir . '/SmileyCSVImporter.php',
             'SecurityHelper' => $baseDir . '/SecurityHelper.php'
         ];
