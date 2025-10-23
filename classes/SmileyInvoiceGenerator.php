@@ -11,15 +11,16 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/SmileyInvoicePDF.php';
 
 class SmileyInvoiceGenerator {
-    
+
     private $db;
-    
+    private $lastInvoiceNumber = null; // セッション内で生成された最後の請求書番号を追跡
+
     // 請求書タイプ定数（データベースENUMに合わせる）
     const TYPE_COMPANY_BULK = 'company';
     const TYPE_DEPARTMENT_BULK = 'department';
     const TYPE_INDIVIDUAL = 'individual';
     const TYPE_MIXED = 'mixed';
-    
+
     public function __construct() {
         $this->db = Database::getInstance();
     }
@@ -381,22 +382,35 @@ class SmileyInvoiceGenerator {
     private function generateInvoiceNumber() {
         $year = date('Y');
         $month = date('m');
-        
-        $sql = "SELECT invoice_number FROM invoices 
-                WHERE invoice_number LIKE ? 
-                ORDER BY created_at DESC LIMIT 1";
-        
         $prefix = "SMY-{$year}{$month}-";
-        $lastInvoice = $this->db->fetch($sql, [$prefix . '%']);
-        
-        if ($lastInvoice) {
-            $lastNumber = intval(substr($lastInvoice['invoice_number'], -3));
+
+        // セッション内で既に請求書番号を生成している場合は、それをベースにする
+        if ($this->lastInvoiceNumber !== null && strpos($this->lastInvoiceNumber, $prefix) === 0) {
+            // 同じ月の請求書番号が既に生成されている場合、インクリメント
+            $lastNumber = intval(substr($this->lastInvoiceNumber, -3));
             $newNumber = $lastNumber + 1;
         } else {
-            $newNumber = 1;
+            // データベースから最後の請求書番号を取得
+            $sql = "SELECT invoice_number FROM invoices
+                    WHERE invoice_number LIKE ?
+                    ORDER BY created_at DESC LIMIT 1";
+
+            $lastInvoice = $this->db->fetch($sql, [$prefix . '%']);
+
+            if ($lastInvoice) {
+                $lastNumber = intval(substr($lastInvoice['invoice_number'], -3));
+                $newNumber = $lastNumber + 1;
+            } else {
+                $newNumber = 1;
+            }
         }
-        
-        return $prefix . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
+
+        $invoiceNumber = $prefix . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
+
+        // 生成した請求書番号を記憶
+        $this->lastInvoiceNumber = $invoiceNumber;
+
+        return $invoiceNumber;
     }
     
     private function calculateDueDate($periodEnd) {
