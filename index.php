@@ -50,6 +50,28 @@ try {
 require_once __DIR__ . '/includes/header.php';
 ?>
 
+<!-- デバッグ情報（開発中のみ表示） -->
+<?php if (defined('DEBUG_MODE') && DEBUG_MODE): ?>
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="alert alert-info alert-dismissible fade show" role="alert">
+            <h6><strong>🔧 デバッグ情報</strong></h6>
+            <small>
+                <strong>データ取得状況:</strong><br>
+                - 総注文数: <?php echo $orderCount; ?>件<br>
+                - 入金済み: <?php echo number_format($totalSales); ?>円<br>
+                - 未回収: <?php echo number_format($outstandingAmount); ?>円<br>
+                - 期限切れ: <?php echo $overdueCount; ?>件<br>
+                - 要対応: <?php echo $dueSoonCount; ?>件<br>
+                - 月別推移データ: <?php echo count($trendData); ?>ヶ月分<br>
+                - 環境: <?php echo ENVIRONMENT; ?>
+            </small>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- ダッシュボードヘッダー -->
 <div class="row mb-4">
     <div class="col-12">
@@ -63,6 +85,28 @@ require_once __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<!-- データがない場合の案内 -->
+<?php if ($orderCount === 0): ?>
+<div class="row mb-4">
+    <div class="col-12">
+        <div style="background: rgba(255, 255, 255, 0.95); border-radius: 20px; padding: 2rem; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1); border-left: 5px solid #FFC107;">
+            <h4><span class="material-icons" style="vertical-align: middle; color: #FFC107;">info</span> ようこそ！</h4>
+            <p>データ取込を行うことで、集金管理を開始できます。</p>
+            <div class="d-flex gap-3 mt-3">
+                <a href="pages/csv_import.php" class="btn btn-material btn-warning btn-material-large">
+                    <span class="material-icons" style="vertical-align: middle;">upload_file</span>
+                    CSVデータを取込む
+                </a>
+                <a href="collection_flow.php" class="btn btn-material btn-flat btn-material-large">
+                    <span class="material-icons" style="vertical-align: middle;">help_outline</span>
+                    使い方ガイド
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- 統計カード -->
 <div class="row g-4 mb-4">
