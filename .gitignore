@@ -1,0 +1,28 @@
+# ログディレクトリ
+/logs/
+*.log
+
+# 一時ファイル
+/temp/
+/tmp/
+
+# アップロードディレクトリ
+/uploads/
+
+# キャッシュ
+/cache/
+
+# システムファイル
+.DS_Store
+Thumbs.db
+
+# IDE設定
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 環境設定ファイル（機密情報を含む可能性）
+.env
+.env.local

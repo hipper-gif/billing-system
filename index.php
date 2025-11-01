@@ -5,7 +5,7 @@
  */
 
 require_once __DIR__ . '/config/database.php';
-require_once __DIR__ . '/classes/PaymentManager.php';
+require_once __DIR__ . '/classes/SimpleCollectionManager.php';
 
 // ページ設定
 $pageTitle = 'ダッシュボード - Smiley配食事業システム';
@@ -14,23 +14,20 @@ $basePath = '.';
 $includeChartJS = true;
 
 try {
-    $paymentManager = new PaymentManager();
+    $collectionManager = new SimpleCollectionManager();
 
-    // 統計データ取得
-    $statistics = $paymentManager->getPaymentStatistics('month');
-    $alerts = $paymentManager->getPaymentAlerts();
-    $outstanding = $paymentManager->getOutstandingAmounts(['overdue_only' => false]);
+    // 統計データ取得（ordersテーブルから直接）
+    $statistics = $collectionManager->getMonthlyCollectionStats();
+    $alerts = $collectionManager->getAlerts();
+    $trendData = $collectionManager->getMonthlyTrend(6);
 
     // 表示データ準備
-    $totalSales = $statistics['summary']['total_amount'] ?? 0;
-    $outstandingAmount = $statistics['summary']['outstanding_amount'] ?? 0;
+    $totalSales = $statistics['collected_amount'] ?? 0;
+    $outstandingAmount = $statistics['outstanding_amount'] ?? 0;
     $alertCount = $alerts['alert_count'] ?? 0;
-    $orderCount = $statistics['summary']['order_count'] ?? 0;
+    $orderCount = $statistics['total_orders'] ?? 0;
     $overdueCount = $alerts['overdue']['count'] ?? 0;
     $dueSoonCount = $alerts['due_soon']['count'] ?? 0;
-
-    // Chart.js用データ準備
-    $trendData = $statistics['trend'] ?? [];
 
     // 現在日時
     $currentDateTime = date('Y年m月d日 H:i');
