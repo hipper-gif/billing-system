@@ -158,8 +158,8 @@ class SmileyCSVImporter {
         $originalSize = strlen($content);
         error_log("元のファイルサイズ: {$originalSize} bytes");
         
-        // エンコーディング自動検出
-        $encodingPriority = ['UTF-8', 'SJIS-win', 'CP932', 'SJIS', 'Shift_JIS', 'EUC-JP'];
+        // エンコーディング自動検出（Shift_JISを優先）
+        $encodingPriority = ['SJIS-win', 'CP932', 'Shift_JIS', 'SJIS', 'UTF-8', 'EUC-JP'];
         $detectedEncoding = mb_detect_encoding($content, $encodingPriority, true);
         
         if ($detectedEncoding === false) {
@@ -328,12 +328,21 @@ class SmileyCSVImporter {
                     
                 } catch (Exception $e) {
                     $this->stats['error_rows']++;
+                    $errorMsg = "行 " . ($rowIndex + 2) . ": " . $e->getMessage();
+
+                    // 最初の10件のエラーは詳細ログ出力
+                    if ($this->stats['error_rows'] <= 10) {
+                        error_log("詳細エラー[{$this->stats['error_rows']}]: {$errorMsg}");
+                        error_log("データ内容: " . implode('|', array_slice($row, 0, 10)));
+                    }
+
                     $this->logError("行 " . ($rowIndex + 2), $e->getMessage(), $row);
-                    
+
                     // エラーが多すぎる場合は中断
                     if ($this->stats['error_rows'] > 50) {
                         error_log("エラーが多すぎます（50件超）。処理を中断します。");
-                        throw new Exception('エラーが多すぎます（50件超）。処理を中断します。');
+                        error_log("最初のエラー例: " . (isset($this->errors[0]) ? $this->errors[0]['message'] : 'N/A'));
+                        throw new Exception('エラーが多すぎます（50件超）。処理を中断します。最初のエラー: ' . (isset($this->errors[0]) ? $this->errors[0]['message'] : 'N/A'));
                     }
                 }
             }
@@ -414,23 +423,26 @@ class SmileyCSVImporter {
     }
     
     /**
-     * Smiley配食事業データ検証
+     * Smiley配食事業データ検証（緩和版）
      */
     private function validateSmileyData($data) {
-        // 法人名チェック
-        if (empty($data['corporation_name']) || 
-            !preg_match('/株式会社\s*smiley/iu', $data['corporation_name'])) {
-            throw new Exception('法人名が「株式会社Smiley」ではありません: ' . $data['corporation_name']);
+        // 法人名チェック（空欄も許可、警告のみ）
+        if (!empty($data['corporation_name'])) {
+            // より柔軟な法人名チェック：Smiley、smiley、スマイリー等を許可
+            if (!preg_match('/(株式会社|㈱)?\s*(smiley|スマイリー|すまいりー)/iu', $data['corporation_name'])) {
+                error_log("警告: 法人名が想定と異なります: " . $data['corporation_name']);
+                // エラーにはせず、警告のみ
+            }
         }
-        
-        // 配達先企業名の妥当性チェック
-        if (strlen($data['company_name']) < 2) {
-            throw new Exception('配達先企業名が短すぎます: ' . $data['company_name']);
+
+        // 配達先企業名の妥当性チェック（緩和）
+        if (empty($data['company_name']) || mb_strlen($data['company_name']) < 1) {
+            throw new Exception('配達先企業名が未入力です');
         }
-        
-        // 商品コード形式チェック
-        if (strlen($data['product_code']) < 3) {
-            throw new Exception('商品コードが短すぎます: ' . $data['product_code']);
+
+        // 商品コード形式チェック（緩和）
+        if (empty($data['product_code']) || mb_strlen($data['product_code']) < 1) {
+            throw new Exception('商品コードが未入力です');
         }
     }
     
