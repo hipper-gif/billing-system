@@ -1,476 +1,326 @@
 <?php
 /**
- * Smiley配食事業システム メインダッシュボード
- * 
- * 🔧 修正内容:
- * - Database読み込み順序問題解決
- * - config/database.php を最初に読み込み
- * - PaymentManager エラー "Class Database not found" 完全解決
+ * Smiley配食事業システム - ダッシュボード（集金管理中心）
+ * メインエントリーポイント
  */
 
-// 🔧 統合版Database読み込み（設定値+クラス統合済み）
 require_once __DIR__ . '/config/database.php';
-
-// ✅ PaymentManager読み込み
 require_once __DIR__ . '/classes/PaymentManager.php';
 
-// 🛡️ セキュリティ対策
-require_once __DIR__ . '/classes/SecurityHelper.php';
-
-// セッション開始
-session_start();
+// ページ設定
+$pageTitle = 'ダッシュボード - Smiley配食事業システム';
+$activePage = 'dashboard';
+$basePath = '.';
+$includeChartJS = true;
 
 try {
-    // 📊 PaymentManager初期化（エラー解消）
     $paymentManager = new PaymentManager();
-    
-    // 📈 統計データ取得
+
+    // 統計データ取得
     $statistics = $paymentManager->getPaymentStatistics('month');
     $alerts = $paymentManager->getPaymentAlerts();
     $outstanding = $paymentManager->getOutstandingAmounts(['overdue_only' => false]);
-    
-    // 🎯 表示データ準備
-    $totalSales = $statistics['summary']['total_amount'];
-    $outstandingAmount = $statistics['summary']['outstanding_amount'];
-    $alertCount = $alerts['alert_count'];
-    $orderCount = $statistics['summary']['order_count'];
-    $invoiceCount = $statistics['summary']['invoice_count'];
-    
-    // 📊 Chart.js用データ準備
-    $trendData = $statistics['trend'];
-    $methodData = $statistics['payment_methods'];
-    
-    // 📅 現在日時
+
+    // 表示データ準備
+    $totalSales = $statistics['summary']['total_amount'] ?? 0;
+    $outstandingAmount = $statistics['summary']['outstanding_amount'] ?? 0;
+    $alertCount = $alerts['alert_count'] ?? 0;
+    $orderCount = $statistics['summary']['order_count'] ?? 0;
+    $overdueCount = $alerts['overdue']['count'] ?? 0;
+    $dueSoonCount = $alerts['due_soon']['count'] ?? 0;
+
+    // Chart.js用データ準備
+    $trendData = $statistics['trend'] ?? [];
+
+    // 現在日時
     $currentDateTime = date('Y年m月d日 H:i');
-    
+
 } catch (Exception $e) {
-    error_log("Index Dashboard Error: " . $e->getMessage());
-    
-    // 🚨 エラー時のデフォルト値
+    error_log("Dashboard Error: " . $e->getMessage());
+
+    // エラー時のデフォルト値
     $totalSales = 0;
     $outstandingAmount = 0;
     $alertCount = 0;
     $orderCount = 0;
-    $invoiceCount = 0;
+    $overdueCount = 0;
+    $dueSoonCount = 0;
     $trendData = [];
-    $methodData = [];
     $currentDateTime = date('Y年m月d日 H:i');
 }
+
+// ヘッダー読み込み
+require_once __DIR__ . '/includes/header.php';
 ?>
 
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smiley配食事業システム - ダッシュボード</title>
-    
-    <!-- 🎨 Bootstrap & Material Design -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
-    
-    <!-- 📊 Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
-    <style>
-        :root {
-            --primary-color: #2196F3;
-            --success-color: #4CAF50;
-            --warning-color: #FFC107;
-            --error-color: #F44336;
-            --info-color: #03A9F4;
-        }
-        
-        body {
-            font-family: 'Roboto', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-        }
-        
-        .dashboard-container {
-            padding: 2rem 0;
-        }
-        
-        .main-header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
-        
-        .stat-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            border-left: 5px solid var(--primary-color);
-        }
-        
-        .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-        }
-        
-        .stat-card.success {
-            border-left-color: var(--success-color);
-        }
-        
-        .stat-card.warning {
-            border-left-color: var(--warning-color);
-        }
-        
-        .stat-card.error {
-            border-left-color: var(--error-color);
-        }
-        
-        .stat-card.info {
-            border-left-color: var(--info-color);
-        }
-        
-        .stat-value {
-            font-size: 3rem;
-            font-weight: 700;
-            margin: 0;
-            line-height: 1;
-        }
-        
-        .stat-label {
-            font-size: 1.1rem;
-            color: #666;
-            margin-top: 0.5rem;
-        }
-        
-        .stat-icon {
-            font-size: 4rem;
-            opacity: 0.7;
-        }
-        
-        .action-button {
-            background: linear-gradient(45deg, var(--primary-color), #1976D2);
-            border: none;
-            border-radius: 15px;
-            color: white;
-            font-size: 1.5rem;
-            font-weight: 500;
-            min-height: 80px;
-            margin: 1rem 0;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3);
-        }
-        
-        .action-button:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(33, 150, 243, 0.4);
-            color: white;
-        }
-        
-        .chart-container {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-            height: 400px;
-        }
-        
-        .alert-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-            border-left: 4px solid var(--warning-color);
-        }
-        
-        .alert-card.error {
-            border-left-color: var(--error-color);
-        }
-        
-        .alert-card.info {
-            border-left-color: var(--info-color);
-        }
-        
-        .counter {
-            transition: all 0.5s ease;
-        }
-        
-        @media (max-width: 768px) {
-            .stat-value {
-                font-size: 2rem;
-            }
-            
-            .action-button {
-                font-size: 1.2rem;
-                min-height: 60px;
-            }
-        }
-    </style>
-</head>
-
-<body>
-    <div class="container-fluid dashboard-container">
-        <!-- 🏢 メインヘッダー -->
-        <div class="main-header text-center">
-            <h1 class="mb-0">
-                <i class="material-icons" style="font-size: 3rem; vertical-align: middle;">restaurant</i>
-                <strong>Smiley配食事業システム</strong>
+<!-- ダッシュボードヘッダー -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div style="background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-radius: 20px; padding: 2rem; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);">
+            <h1 class="h3 mb-2">
+                <span class="material-icons" style="font-size: 2.5rem; vertical-align: middle; color: #2196F3;">dashboard</span>
+                <strong>集金管理ダッシュボード</strong>
             </h1>
-            <p class="lead mb-0">請求書・集金管理ダッシュボード</p>
+            <p class="text-muted mb-1">配食事業の入金状況と未回収金額を一目で確認</p>
             <small class="text-muted">最終更新: <?php echo $currentDateTime; ?></small>
         </div>
-        
-        <!-- 📊 統計カード -->
-        <div class="row">
-            <!-- 💰 今月売上 -->
-            <div class="col-md-3">
-                <div class="stat-card success">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <div class="stat-value counter" data-target="<?php echo (int)$totalSales; ?>">0</div>
-                            <div class="stat-label">今月売上 (円)</div>
-                        </div>
-                        <i class="material-icons stat-icon" style="color: var(--success-color);">attach_money</i>
-                    </div>
+    </div>
+</div>
+
+<!-- 統計カード -->
+<div class="row g-4 mb-4">
+    <!-- 未回収金額（最優先） -->
+    <div class="col-lg-3 col-md-6">
+        <div class="stat-card warning">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="stat-value"><?php echo number_format($outstandingAmount); ?></div>
+                    <div class="stat-label">未回収金額 (円)</div>
                 </div>
-            </div>
-            
-            <!-- 📄 未回収金額 -->
-            <div class="col-md-3">
-                <div class="stat-card warning">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <div class="stat-value counter" data-target="<?php echo (int)$outstandingAmount; ?>">0</div>
-                            <div class="stat-label">未回収金額 (円)</div>
-                        </div>
-                        <i class="material-icons stat-icon" style="color: var(--warning-color);">account_balance_wallet</i>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- 🚨 アラート件数 -->
-            <div class="col-md-3">
-                <div class="stat-card <?php echo $alertCount > 0 ? 'error' : 'info'; ?>">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <div class="stat-value counter" data-target="<?php echo $alertCount; ?>">0</div>
-                            <div class="stat-label">アラート件数</div>
-                        </div>
-                        <i class="material-icons stat-icon" style="color: var(<?php echo $alertCount > 0 ? '--error-color' : '--info-color'; ?>);">
-                            <?php echo $alertCount > 0 ? 'warning' : 'check_circle'; ?>
-                        </i>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- 📋 注文件数 -->
-            <div class="col-md-3">
-                <div class="stat-card info">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <div class="stat-value counter" data-target="<?php echo $orderCount; ?>">0</div>
-                            <div class="stat-label">今月注文件数</div>
-                        </div>
-                        <i class="material-icons stat-icon" style="color: var(--info-color);">receipt</i>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 🎯 アクションボタン -->
-        <div class="row mb-4">
-            <div class="col-md-3">
-                <button class="btn action-button w-100" onclick="location.href='pages/csv_import.php'">
-                    <i class="material-icons me-2">upload_file</i>
-                    CSVインポート
-                </button>
-            </div>
-            <div class="col-md-3">
-                <button class="btn action-button w-100" onclick="location.href='pages/invoice_generate.php'">
-                    <i class="material-icons me-2">description</i>
-                    請求書生成
-                </button>
-            </div>
-            <div class="col-md-3">
-                <button class="btn action-button w-100" onclick="location.href='pages/payments.php'">
-                    <i class="material-icons me-2">payment</i>
-                    支払い管理
-                </button>
-            </div>
-            <div class="col-md-3">
-                <button class="btn action-button w-100" onclick="location.href='pages/receipts.php'">
-                    <i class="material-icons me-2">receipt_long</i>
-                    領収書管理
-                </button>
-            </div>
-        </div>
-        
-        <!-- 📊 グラフエリア -->
-        <div class="row">
-            <!-- 📈 月別売上推移 -->
-            <div class="col-md-8">
-                <div class="chart-container">
-                    <h4 class="mb-3">
-                        <i class="material-icons me-2">trending_up</i>
-                        月別売上推移
-                    </h4>
-                    <canvas id="trendChart"></canvas>
-                </div>
-            </div>
-            
-            <!-- 🔔 アラート一覧 -->
-            <div class="col-md-4">
-                <div class="chart-container">
-                    <h4 class="mb-3">
-                        <i class="material-icons me-2">notifications</i>
-                        アラート一覧
-                    </h4>
-                    <div id="alertsList" style="max-height: 300px; overflow-y: auto;">
-                        <?php if (empty($alerts['alerts'])): ?>
-                            <div class="alert-card info">
-                                <div class="d-flex align-items-center">
-                                    <i class="material-icons me-2" style="color: var(--success-color);">check_circle</i>
-                                    <span>現在アラートはありません</span>
-                                </div>
-                            </div>
-                        <?php else: ?>
-                            <?php foreach ($alerts['alerts'] as $alert): ?>
-                                <div class="alert-card <?php echo $alert['type']; ?>">
-                                    <div class="d-flex justify-content-between align-items-start">
-                                        <div>
-                                            <strong><?php echo htmlspecialchars($alert['title']); ?></strong>
-                                            <p class="mb-1"><?php echo htmlspecialchars($alert['message']); ?></p>
-                                            <?php if ($alert['action_url']): ?>
-                                                <a href="<?php echo $alert['action_url']; ?>" class="btn btn-sm btn-outline-primary">
-                                                    詳細確認
-                                                </a>
-                                            <?php endif; ?>
-                                        </div>
-                                        <i class="material-icons">
-                                            <?php 
-                                                echo $alert['type'] === 'error' ? 'error' : 
-                                                    ($alert['type'] === 'warning' ? 'warning' : 'info');
-                                            ?>
-                                        </i>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 🏢 企業管理リンク -->
-        <div class="row">
-            <div class="col-md-4">
-                <div class="stat-card">
-                    <h5><i class="material-icons me-2">business</i>企業管理</h5>
-                    <p class="text-muted">配達先企業の管理・統計表示</p>
-                    <a href="pages/companies.php" class="btn btn-outline-primary">企業一覧</a>
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="stat-card">
-                    <h5><i class="material-icons me-2">people</i>利用者管理</h5>
-                    <p class="text-muted">個人利用者の管理・注文履歴</p>
-                    <a href="pages/users.php" class="btn btn-outline-primary">利用者一覧</a>
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="stat-card">
-                    <h5><i class="material-icons me-2">inventory</i>請求書一覧</h5>
-                    <p class="text-muted">生成済み請求書の管理・確認</p>
-                    <a href="pages/invoices.php" class="btn btn-outline-primary">請求書一覧</a>
-                </div>
+                <span class="material-icons stat-icon" style="color: var(--warning-amber);">account_balance_wallet</span>
             </div>
         </div>
     </div>
-    
-    <!-- 🔧 JavaScript -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    
-    <script>
-        // 📊 Chart.js 設定
-        const chartData = {
-            trend: <?php echo json_encode($trendData); ?>,
-            methods: <?php echo json_encode($methodData); ?>
-        };
-        
-        // 📈 月別売上推移チャート
-        const trendCtx = document.getElementById('trendChart').getContext('2d');
-        new Chart(trendCtx, {
-            type: 'line',
-            data: {
-                labels: chartData.trend.map(item => item.month),
-                datasets: [{
-                    label: '月別売上',
-                    data: chartData.trend.map(item => item.monthly_amount),
-                    borderColor: '#2196F3',
-                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
-                    borderWidth: 3,
-                    fill: true,
-                    tension: 0.4
-                }]
+
+    <!-- 期限切れ件数 -->
+    <div class="col-lg-3 col-md-6">
+        <div class="stat-card error">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="stat-value"><?php echo $overdueCount; ?></div>
+                    <div class="stat-label">期限切れ件数</div>
+                </div>
+                <span class="material-icons stat-icon" style="color: var(--error-red);">error</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 今月入金額 -->
+    <div class="col-lg-3 col-md-6">
+        <div class="stat-card success">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="stat-value"><?php echo number_format($totalSales); ?></div>
+                    <div class="stat-label">今月入金額 (円)</div>
+                </div>
+                <span class="material-icons stat-icon" style="color: var(--success-green);">payments</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 要対応件数 -->
+    <div class="col-lg-3 col-md-6">
+        <div class="stat-card info">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="stat-value"><?php echo $dueSoonCount; ?></div>
+                    <div class="stat-label">要対応（3日以内）</div>
+                </div>
+                <span class="material-icons stat-icon" style="color: var(--info-blue);">schedule</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- メインアクション -->
+<div class="row g-4 mb-4">
+    <!-- 集金管理（最優先） -->
+    <div class="col-md-6">
+        <a href="pages/payments.php" class="action-card" style="min-height: 220px;">
+            <span class="material-icons" style="font-size: 5rem;">payment</span>
+            <h3 style="font-size: 1.75rem;">集金管理</h3>
+            <p style="font-size: 1rem;">入金記録・未回収確認・入金履歴</p>
+            <div class="mt-3">
+                <?php if ($overdueCount > 0): ?>
+                <span class="payment-badge overdue">期限切れ <?php echo $overdueCount; ?>件</span>
+                <?php endif; ?>
+                <?php if ($dueSoonCount > 0): ?>
+                <span class="payment-badge pending ms-2">要対応 <?php echo $dueSoonCount; ?>件</span>
+                <?php endif; ?>
+            </div>
+        </a>
+    </div>
+
+    <!-- データ取込 -->
+    <div class="col-md-6">
+        <a href="pages/csv_import.php" class="action-card" style="background: linear-gradient(135deg, #4CAF50, #388E3C); min-height: 220px;">
+            <span class="material-icons" style="font-size: 5rem;">upload_file</span>
+            <h3 style="font-size: 1.75rem;">データ取込</h3>
+            <p style="font-size: 1rem;">CSVファイルから注文データを一括登録</p>
+        </a>
+    </div>
+</div>
+
+<!-- サブアクション -->
+<div class="row g-4 mb-4">
+    <!-- 企業管理 -->
+    <div class="col-md-4">
+        <a href="pages/companies.php" class="action-card" style="background: linear-gradient(135deg, #9C27B0, #7B1FA2);">
+            <span class="material-icons">business</span>
+            <h3>企業管理</h3>
+            <p>配達先企業の管理</p>
+        </a>
+    </div>
+
+    <!-- 利用者管理 -->
+    <div class="col-md-4">
+        <a href="pages/users.php" class="action-card" style="background: linear-gradient(135deg, #FF9800, #F57C00);">
+            <span class="material-icons">people</span>
+            <h3>利用者管理</h3>
+            <p>個人利用者の管理</p>
+        </a>
+    </div>
+
+    <!-- その他機能 -->
+    <div class="col-md-4">
+        <a href="#" onclick="toggleAdvancedMenu(); return false;" class="action-card" style="background: linear-gradient(135deg, #607D8B, #455A64);">
+            <span class="material-icons">more_horiz</span>
+            <h3>その他機能</h3>
+            <p>請求書・領収書など</p>
+        </a>
+    </div>
+</div>
+
+<!-- その他機能メニュー（折りたたみ） -->
+<div id="advancedMenu" style="display: none;">
+    <div class="row g-4 mb-4">
+        <div class="col-md-4">
+            <div class="stat-card">
+                <h5>
+                    <span class="material-icons" style="vertical-align: middle;">description</span>
+                    請求書作成
+                </h5>
+                <p class="text-muted">請求書の生成・管理</p>
+                <a href="pages/invoice_generate.php" class="btn btn-material btn-primary">請求書作成</a>
+                <a href="pages/invoices.php" class="btn btn-material btn-flat ms-2">請求書一覧</a>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="stat-card">
+                <h5>
+                    <span class="material-icons" style="vertical-align: middle;">receipt_long</span>
+                    領収書管理
+                </h5>
+                <p class="text-muted">領収書の発行・管理</p>
+                <a href="pages/receipts.php" class="btn btn-material btn-primary">領収書管理</a>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="stat-card">
+                <h5>
+                    <span class="material-icons" style="vertical-align: middle;">settings</span>
+                    システム設定
+                </h5>
+                <p class="text-muted">各種設定・管理</p>
+                <a href="pages/settings.php" class="btn btn-material btn-primary">設定画面</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- グラフエリア -->
+<div class="row">
+    <!-- 月別売上推移 -->
+    <div class="col-md-12">
+        <div style="background: rgba(255, 255, 255, 0.98); backdrop-filter: blur(10px); border-radius: 20px; padding: 2rem; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);">
+            <h4 class="mb-3">
+                <span class="material-icons" style="vertical-align: middle;">trending_up</span>
+                月別入金推移
+            </h4>
+            <div style="height: 300px;">
+                <canvas id="trendChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<?php
+$customJS = <<<'JAVASCRIPT'
+<script>
+// Chart.js 設定
+const chartData = {
+    trend: <?php echo json_encode($trendData); ?>
+};
+
+// 月別売上推移チャート
+if (document.getElementById('trendChart')) {
+    const trendCtx = document.getElementById('trendChart').getContext('2d');
+    new Chart(trendCtx, {
+        type: 'line',
+        data: {
+            labels: chartData.trend.map(item => item.month),
+            datasets: [{
+                label: '月別入金額',
+                data: chartData.trend.map(item => item.monthly_amount),
+                borderColor: '#2196F3',
+                backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                borderWidth: 3,
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                }
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return '¥' + value.toLocaleString();
-                            }
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '¥' + value.toLocaleString();
                         }
                     }
                 }
             }
-        });
-        
-        // 🔢 カウントアップアニメーション
-        function animateCounters() {
-            const counters = document.querySelectorAll('.counter');
-            const speed = 200;
-            
-            counters.forEach(counter => {
-                const target = +counter.getAttribute('data-target');
-                const count = +counter.innerText;
-                const inc = target / speed;
-                
-                if (count < target) {
-                    counter.innerText = Math.ceil(count + inc).toLocaleString();
-                    setTimeout(() => animateCounters(), 1);
-                } else {
-                    counter.innerText = target.toLocaleString();
-                }
-            });
         }
-        
-        // 🎬 ページ読み込み時のアニメーション
-        document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(animateCounters, 500);
-        });
-        
-        // 🔄 リアルタイム更新（5分間隔）
-        setInterval(function() {
-            location.reload();
-        }, 300000);
-    </script>
-</body>
-</html>
+    });
+}
+
+// その他機能メニューの表示切替
+function toggleAdvancedMenu() {
+    const menu = document.getElementById('advancedMenu');
+    if (menu.style.display === 'none') {
+        menu.style.display = 'block';
+        menu.style.animation = 'fadeIn 0.5s ease-out';
+    } else {
+        menu.style.display = 'none';
+    }
+}
+
+// 統計値のカウントアップアニメーション
+function animateValue(element, start, end, duration) {
+    const range = end - start;
+    const increment = range / (duration / 16);
+    let current = start;
+
+    const timer = setInterval(() => {
+        current += increment;
+        if ((increment > 0 && current >= end) || (increment < 0 && current <= end)) {
+            current = end;
+            clearInterval(timer);
+        }
+        element.textContent = Math.floor(current).toLocaleString();
+    }, 16);
+}
+
+// ページ読み込み時のアニメーション
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.stat-value').forEach(el => {
+        const target = parseInt(el.textContent.replace(/,/g, ''));
+        el.textContent = '0';
+        setTimeout(() => animateValue(el, 0, target, 1000), 300);
+    });
+});
+</script>
+JAVASCRIPT;
+
+// フッター読み込み
+require_once __DIR__ . '/includes/footer.php';
+?>
