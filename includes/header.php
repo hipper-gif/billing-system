@@ -240,6 +240,15 @@ $showBackButton = $showBackButton ?? false;
                     <span class="material-icons">upload_file</span>
                     <span>データ取込</span>
                 </a>
+
+                <?php if (defined('DEBUG_MODE') && DEBUG_MODE): ?>
+                <a href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/pages/diagnosis.php"
+                   class="nav-item-btn <?php echo $activePage === 'diagnosis' ? 'active' : ''; ?>"
+                   style="background: rgba(255, 193, 7, 0.1);">
+                    <span class="material-icons">bug_report</span>
+                    <span>診断</span>
+                </a>
+                <?php endif; ?>
             </nav>
         </div>
     </header>
