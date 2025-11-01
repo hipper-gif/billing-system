@@ -5,7 +5,7 @@
  */
 
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../classes/PaymentManager.php';
+require_once __DIR__ . '/../classes/SimpleCollectionManager.php';
 
 // ページ設定
 $pageTitle = '集金管理 - Smiley配食事業システム';
@@ -13,21 +13,21 @@ $activePage = 'payments';
 $basePath = '..';
 
 try {
-    $paymentManager = new PaymentManager();
+    $collectionManager = new SimpleCollectionManager();
 
-    // 統計データ取得
-    $statistics = $paymentManager->getPaymentStatistics('month');
-    $alerts = $paymentManager->getPaymentAlerts();
-    $outstanding = $paymentManager->getOutstandingAmounts(['overdue_only' => false]);
+    // 統計データ取得（ordersテーブルから直接）
+    $statistics = $collectionManager->getMonthlyCollectionStats();
+    $alerts = $collectionManager->getAlerts();
+    $outstanding = $collectionManager->getOutstandingOrders(['limit' => 100]);
 
     // 企業リスト取得
     $db = Database::getInstance();
-    $companies = $db->fetchAll("SELECT id, company_name FROM companies WHERE is_active = 1 ORDER BY company_name");
+    $companies = $db->fetchAll("SELECT id, company_name FROM companies ORDER BY company_name");
 
 } catch (Exception $e) {
     error_log("集金管理画面エラー: " . $e->getMessage());
     $error = "データの取得に失敗しました: " . $e->getMessage();
-    $statistics = ['summary' => ['total_amount' => 0, 'outstanding_amount' => 0]];
+    $statistics = ['collected_amount' => 0, 'outstanding_amount' => 0];
     $alerts = ['alert_count' => 0, 'overdue' => ['count' => 0], 'due_soon' => ['count' => 0]];
     $outstanding = [];
     $companies = [];
@@ -55,7 +55,7 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="stat-card success">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <div class="stat-value"><?php echo number_format($statistics['summary']['total_amount'] ?? 0); ?></div>
+                    <div class="stat-value"><?php echo number_format($statistics['collected_amount'] ?? 0); ?></div>
                     <div class="stat-label">今月入金額 (円)</div>
                 </div>
                 <span class="material-icons stat-icon" style="color: var(--success-green);">payments</span>
@@ -68,7 +68,7 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="stat-card warning">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <div class="stat-value"><?php echo number_format($statistics['summary']['outstanding_amount'] ?? 0); ?></div>
+                    <div class="stat-value"><?php echo number_format($statistics['outstanding_amount'] ?? 0); ?></div>
                     <div class="stat-label">未回収金額 (円)</div>
                 </div>
                 <span class="material-icons stat-icon" style="color: var(--warning-amber);">account_balance_wallet</span>
