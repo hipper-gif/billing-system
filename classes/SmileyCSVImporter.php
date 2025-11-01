@@ -414,11 +414,13 @@ class SmileyCSVImporter {
             $data['total_amount'] = $expectedTotal;
         }
         
-        // 時間フィールド処理
+        // 時間フィールド処理（空の場合はNULLに設定）
         if (!empty($data['delivery_time'])) {
             $data['delivery_time'] = $this->normalizeTime($data['delivery_time']);
+        } else {
+            $data['delivery_time'] = null;
         }
-        
+
         return $data;
     }
     
@@ -793,12 +795,19 @@ class SmileyCSVImporter {
     }
     
     /**
-     * 時間正規化
+     * 時間正規化（空文字列対応版）
      */
     private function normalizeTime($timeStr) {
+        // 空文字列チェック
+        if (empty($timeStr) || trim($timeStr) === '') {
+            return null;
+        }
+
+        // 時刻形式チェック
         if (preg_match('/(\d{1,2}):(\d{2})/', $timeStr, $matches)) {
             return sprintf('%02d:%02d:00', $matches[1], $matches[2]);
         }
+
         return null;
     }
     
