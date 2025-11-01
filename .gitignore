@@ -26,3 +26,7 @@ Thumbs.db
 # 環境設定ファイル（機密情報を含む可能性）
 .env
 .env.local
+
+# デバッグファイル
+debug_*.php
+test_*.php

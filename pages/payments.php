@@ -48,6 +48,54 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
+<!-- デバッグ情報（開発中のみ表示） -->
+<?php if (defined('DEBUG_MODE') && DEBUG_MODE): ?>
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="alert alert-info">
+            <h6><strong>デバッグ情報</strong></h6>
+            <small>
+                <strong>統計データ:</strong><br>
+                - 成功: <?php echo $statistics['success'] ?? 'N/A'; ?><br>
+                - 総注文数: <?php echo $statistics['total_orders'] ?? 0; ?><br>
+                - 総金額: <?php echo number_format($statistics['total_amount'] ?? 0); ?>円<br>
+                - 入金済み: <?php echo number_format($statistics['collected_amount'] ?? 0); ?>円<br>
+                - 未回収: <?php echo number_format($statistics['outstanding_amount'] ?? 0); ?>円<br>
+                - 対象期間: <?php echo $statistics['period']['start'] ?? ''; ?> 〜 <?php echo $statistics['period']['end'] ?? ''; ?><br>
+                <?php if (isset($statistics['error'])): ?>
+                - <span class="text-danger">エラー: <?php echo htmlspecialchars($statistics['error']); ?></span><br>
+                <?php endif; ?>
+                <strong>未回収件数:</strong> <?php echo count($outstanding); ?>件<br>
+                <?php if (isset($error)): ?>
+                - <span class="text-danger">ページエラー: <?php echo htmlspecialchars($error); ?></span><br>
+                <?php endif; ?>
+            </small>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- データがない場合の案内 -->
+<?php if (($statistics['total_orders'] ?? 0) === 0): ?>
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="alert alert-warning">
+            <h5><span class="material-icons" style="vertical-align: middle;">info</span> データがまだ登録されていません</h5>
+            <p class="mb-2">集金管理を開始するには、まず注文データを登録してください。</p>
+            <ol class="mb-3">
+                <li><strong>CSVファイルを準備</strong> - 注文データを含むCSVファイル</li>
+                <li><strong>データ取込</strong> - ヘッダーメニューの「データ取込」からCSVをアップロード</li>
+                <li><strong>集金管理</strong> - データ登録後、こちらのページで集金状況を確認</li>
+            </ol>
+            <a href="<?php echo $basePath; ?>/pages/csv_import.php" class="btn btn-warning">
+                <span class="material-icons" style="vertical-align: middle; font-size: 1.2rem;">upload_file</span>
+                データ取込ページへ
+            </a>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- 統計カード -->
 <div class="row g-4 mb-4">
     <!-- 今月入金額 -->
