@@ -229,6 +229,28 @@ class Database {
     public function rollback() {
         return $this->pdo->rollback();
     }
+
+    /**
+     * データベース接続テスト
+     */
+    public function testConnection() {
+        try {
+            $stmt = $this->pdo->query("SELECT 1 as test");
+            $result = $stmt->fetch();
+
+            return [
+                'success' => true,
+                'message' => 'データベース接続成功',
+                'test_result' => $result['test'] ?? null
+            ];
+
+        } catch (PDOException $e) {
+            return [
+                'success' => false,
+                'message' => 'データベース接続テスト失敗: ' . $e->getMessage()
+            ];
+        }
+    }
 }
 
 /**
