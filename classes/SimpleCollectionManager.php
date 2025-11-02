@@ -75,12 +75,12 @@ class SimpleCollectionManager {
     }
 
     /**
-     * 先月の集金統計を取得（デフォルト）
+     * 今月の集金統計を取得（デフォルト）
      */
     public function getMonthlyCollectionStats() {
-        // 先月のデータを取得（デフォルト）
-        $startDate = date('Y-m-01', strtotime('first day of last month'));
-        $endDate = date('Y-m-t', strtotime('last day of last month'));
+        // 今月のデータを取得（デフォルト）
+        $startDate = date('Y-m-01');
+        $endDate = date('Y-m-t');
 
         return $this->getCollectionStats($startDate, $endDate);
     }
@@ -93,8 +93,8 @@ class SimpleCollectionManager {
             $limit = $filters['limit'] ?? 100;
             $company_id = $filters['company_id'] ?? null;
             $search = $filters['search'] ?? '';
-            $startDate = $filters['start_date'] ?? date('Y-m-01', strtotime('first day of last month'));
-            $endDate = $filters['end_date'] ?? date('Y-m-t', strtotime('last day of last month'));
+            $startDate = $filters['start_date'] ?? date('Y-m-01');
+            $endDate = $filters['end_date'] ?? date('Y-m-t');
 
             $sql = "
                 SELECT
@@ -172,10 +172,10 @@ class SimpleCollectionManager {
      */
     public function getAlerts($startDate = null, $endDate = null) {
         try {
-            // 期間指定がない場合は先月
+            // 期間指定がない場合は今月
             if (!$startDate || !$endDate) {
-                $startDate = date('Y-m-01', strtotime('first day of last month'));
-                $endDate = date('Y-m-t', strtotime('last day of last month'));
+                $startDate = date('Y-m-01');
+                $endDate = date('Y-m-t');
             }
 
             // 期限切れ（30日以上経過）
