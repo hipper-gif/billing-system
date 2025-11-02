@@ -12,26 +12,22 @@ class SimpleCollectionManager {
     }
 
     /**
-     * 今月の集金統計を取得（ordersテーブルから直接）
+     * 指定期間の集金統計を取得（ordersテーブルから直接）
+     * @param string $startDate 開始日 (YYYY-MM-DD)
+     * @param string $endDate 終了日 (YYYY-MM-DD)
      */
-    public function getMonthlyCollectionStats() {
+    public function getCollectionStats($startDate, $endDate) {
         try {
-            // 今月の開始日・終了日
-            $startDate = date('Y-m-01');
-            $endDate = date('Y-m-t');
-
-            // 今月の注文データから集計
+            // 期間内の注文データから集計
+            // 注意: paymentsテーブルはinvoice_idしか持たないため、
+            // ordersとの直接のJOINはできません
+            // そのため、すべてのordersを「未回収」として扱います
             $sql = "
                 SELECT
                     COUNT(*) as total_orders,
                     COUNT(DISTINCT o.user_id) as total_users,
-                    COALESCE(SUM(o.total_amount), 0) as total_amount,
-                    COALESCE(SUM(CASE WHEN p.id IS NOT NULL THEN o.total_amount ELSE 0 END), 0) as collected_amount,
-                    COALESCE(SUM(CASE WHEN p.id IS NULL THEN o.total_amount ELSE 0 END), 0) as outstanding_amount,
-                    COUNT(CASE WHEN p.id IS NOT NULL THEN 1 END) as paid_count,
-                    COUNT(CASE WHEN p.id IS NULL THEN 1 END) as outstanding_count
+                    COALESCE(SUM(o.total_amount), 0) as total_amount
                 FROM orders o
-                LEFT JOIN payments p ON o.id = p.order_id AND p.status = 'completed'
                 WHERE o.order_date BETWEEN :start_date AND :end_date
             ";
 
@@ -48,10 +44,10 @@ class SimpleCollectionManager {
                 'total_orders' => (int)($result['total_orders'] ?? 0),
                 'total_users' => (int)($result['total_users'] ?? 0),
                 'total_amount' => (float)($result['total_amount'] ?? 0),
-                'collected_amount' => (float)($result['collected_amount'] ?? 0),
-                'outstanding_amount' => (float)($result['outstanding_amount'] ?? 0),
-                'paid_count' => (int)($result['paid_count'] ?? 0),
-                'outstanding_count' => (int)($result['outstanding_count'] ?? 0),
+                'collected_amount' => 0, // 現在は未実装（請求書・支払いシステムと連携が必要）
+                'outstanding_amount' => (float)($result['total_amount'] ?? 0),
+                'paid_count' => 0,
+                'outstanding_count' => (int)($result['total_orders'] ?? 0),
                 'period' => [
                     'start' => $startDate,
                     'end' => $endDate
@@ -59,7 +55,7 @@ class SimpleCollectionManager {
             ];
 
         } catch (Exception $e) {
-            error_log("SimpleCollectionManager::getMonthlyCollectionStats Error: " . $e->getMessage());
+            error_log("SimpleCollectionManager::getCollectionStats Error: " . $e->getMessage());
             return [
                 'success' => false,
                 'total_orders' => 0,
@@ -69,9 +65,24 @@ class SimpleCollectionManager {
                 'outstanding_amount' => 0,
                 'paid_count' => 0,
                 'outstanding_count' => 0,
+                'period' => [
+                    'start' => $startDate,
+                    'end' => $endDate
+                ],
                 'error' => $e->getMessage()
             ];
         }
+    }
+
+    /**
+     * 先月の集金統計を取得（デフォルト）
+     */
+    public function getMonthlyCollectionStats() {
+        // 先月のデータを取得（デフォルト）
+        $startDate = date('Y-m-01', strtotime('first day of last month'));
+        $endDate = date('Y-m-t', strtotime('last day of last month'));
+
+        return $this->getCollectionStats($startDate, $endDate);
     }
 
     /**
@@ -82,6 +93,8 @@ class SimpleCollectionManager {
             $limit = $filters['limit'] ?? 100;
             $company_id = $filters['company_id'] ?? null;
             $search = $filters['search'] ?? '';
+            $startDate = $filters['start_date'] ?? date('Y-m-01', strtotime('first day of last month'));
+            $endDate = $filters['end_date'] ?? date('Y-m-t', strtotime('last day of last month'));
 
             $sql = "
                 SELECT
@@ -96,11 +109,13 @@ class SimpleCollectionManager {
                 FROM orders o
                 LEFT JOIN users u ON o.user_id = u.id
                 LEFT JOIN companies c ON u.company_id = c.id
-                LEFT JOIN payments p ON o.id = p.order_id AND p.status = 'completed'
-                WHERE p.id IS NULL
+                WHERE o.order_date BETWEEN :start_date AND :end_date
             ";
 
-            $params = [];
+            $params = [
+                ':start_date' => $startDate,
+                ':end_date' => $endDate
+            ];
 
             if ($company_id) {
                 $sql .= " AND u.company_id = :company_id";
@@ -155,20 +170,26 @@ class SimpleCollectionManager {
     /**
      * アラート情報を取得
      */
-    public function getAlerts() {
+    public function getAlerts($startDate = null, $endDate = null) {
         try {
+            // 期間指定がない場合は先月
+            if (!$startDate || !$endDate) {
+                $startDate = date('Y-m-01', strtotime('first day of last month'));
+                $endDate = date('Y-m-t', strtotime('last day of last month'));
+            }
+
             // 期限切れ（30日以上経過）
             $overdueSql = "
                 SELECT
                     COUNT(*) as count,
                     COALESCE(SUM(o.total_amount), 0) as total_amount
                 FROM orders o
-                LEFT JOIN payments p ON o.id = p.order_id AND p.status = 'completed'
-                WHERE p.id IS NULL
+                WHERE o.order_date BETWEEN :start_date AND :end_date
                 AND DATEDIFF(CURDATE(), o.order_date) > 30
             ";
 
-            $stmt = $this->db->getConnection()->query($overdueSql);
+            $stmt = $this->db->getConnection()->prepare($overdueSql);
+            $stmt->execute([':start_date' => $startDate, ':end_date' => $endDate]);
             $overdue = $stmt->fetch(PDO::FETCH_ASSOC);
 
             // 期限間近（14-30日）
@@ -177,12 +198,12 @@ class SimpleCollectionManager {
                     COUNT(*) as count,
                     COALESCE(SUM(o.total_amount), 0) as total_amount
                 FROM orders o
-                LEFT JOIN payments p ON o.id = p.order_id AND p.status = 'completed'
-                WHERE p.id IS NULL
+                WHERE o.order_date BETWEEN :start_date AND :end_date
                 AND DATEDIFF(CURDATE(), o.order_date) BETWEEN 14 AND 30
             ";
 
-            $stmt = $this->db->getConnection()->query($dueSoonSql);
+            $stmt = $this->db->getConnection()->prepare($dueSoonSql);
+            $stmt->execute([':start_date' => $startDate, ':end_date' => $endDate]);
             $dueSoon = $stmt->fetch(PDO::FETCH_ASSOC);
 
             return [
