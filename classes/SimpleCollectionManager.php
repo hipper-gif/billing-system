@@ -19,15 +19,15 @@ class SimpleCollectionManager {
     public function getCollectionStats($startDate, $endDate) {
         try {
             // 期間内の注文データから集計
-            // 注意: paymentsテーブルはinvoice_idしか持たないため、
-            // ordersとの直接のJOINはできません
-            // そのため、すべてのordersを「未回収」として扱います
             $sql = "
                 SELECT
                     COUNT(*) as total_orders,
                     COUNT(DISTINCT o.user_id) as total_users,
-                    COALESCE(SUM(o.total_amount), 0) as total_amount
+                    COALESCE(SUM(o.total_amount), 0) as total_amount,
+                    COALESCE(SUM(opd.allocated_amount), 0) as collected_amount,
+                    COUNT(DISTINCT CASE WHEN opd.id IS NOT NULL THEN o.id END) as paid_count
                 FROM orders o
+                LEFT JOIN order_payment_details opd ON o.id = opd.order_id
                 WHERE o.order_date BETWEEN :start_date AND :end_date
             ";
 
@@ -39,15 +39,18 @@ class SimpleCollectionManager {
 
             $result = $stmt->fetch(PDO::FETCH_ASSOC);
 
+            $totalAmount = (float)($result['total_amount'] ?? 0);
+            $collectedAmount = (float)($result['collected_amount'] ?? 0);
+
             return [
                 'success' => true,
                 'total_orders' => (int)($result['total_orders'] ?? 0),
                 'total_users' => (int)($result['total_users'] ?? 0),
-                'total_amount' => (float)($result['total_amount'] ?? 0),
-                'collected_amount' => 0, // 現在は未実装（請求書・支払いシステムと連携が必要）
-                'outstanding_amount' => (float)($result['total_amount'] ?? 0),
-                'paid_count' => 0,
-                'outstanding_count' => (int)($result['total_orders'] ?? 0),
+                'total_amount' => $totalAmount,
+                'collected_amount' => $collectedAmount,
+                'outstanding_amount' => $totalAmount - $collectedAmount,
+                'paid_count' => (int)($result['paid_count'] ?? 0),
+                'outstanding_count' => (int)($result['total_orders'] ?? 0) - (int)($result['paid_count'] ?? 0),
                 'period' => [
                     'start' => $startDate,
                     'end' => $endDate
@@ -252,6 +255,401 @@ class SimpleCollectionManager {
 
         } catch (Exception $e) {
             error_log("SimpleCollectionManager::getMonthlyTrend Error: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * 個人単位の入金を記録
+     * @param array $params 入金パラメータ
+     * @return array 結果
+     */
+    public function recordPayment($params) {
+        try {
+            $conn = $this->db->getConnection();
+            $conn->beginTransaction();
+
+            $userId = $params['user_id'];
+            $paymentDate = $params['payment_date'] ?? date('Y-m-d');
+            $amount = $params['amount'];
+            $paymentMethod = $params['payment_method'] ?? 'cash';
+            $referenceNumber = $params['reference_number'] ?? '';
+            $notes = $params['notes'] ?? '';
+            $createdBy = $params['created_by'] ?? 'system';
+
+            // ユーザー情報を取得
+            $userSql = "SELECT * FROM users WHERE id = :user_id";
+            $stmt = $conn->prepare($userSql);
+            $stmt->execute([':user_id' => $userId]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$user) {
+                throw new Exception('ユーザーが見つかりません');
+            }
+
+            // 未払いの注文を取得
+            $ordersSql = "
+                SELECT o.id, o.total_amount,
+                    COALESCE(SUM(opd.allocated_amount), 0) as paid_amount,
+                    (o.total_amount - COALESCE(SUM(opd.allocated_amount), 0)) as outstanding
+                FROM orders o
+                LEFT JOIN order_payment_details opd ON o.id = opd.order_id
+                WHERE o.user_id = :user_id
+                GROUP BY o.id
+                HAVING outstanding > 0
+                ORDER BY o.order_date ASC
+            ";
+            $stmt = $conn->prepare($ordersSql);
+            $stmt->execute([':user_id' => $userId]);
+            $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if (empty($orders)) {
+                throw new Exception('未払いの注文がありません');
+            }
+
+            // 合計未払い額を計算
+            $totalOutstanding = array_sum(array_column($orders, 'outstanding'));
+
+            if ($amount > $totalOutstanding) {
+                throw new Exception("入金額（¥" . number_format($amount) . "）が未払い合計（¥" . number_format($totalOutstanding) . "）を超えています");
+            }
+
+            // 入金レコードを作成
+            $paymentSql = "
+                INSERT INTO order_payments (
+                    user_id, user_code, user_name, company_name,
+                    payment_date, amount, payment_method, payment_type,
+                    reference_number, notes, created_by
+                ) VALUES (
+                    :user_id, :user_code, :user_name, :company_name,
+                    :payment_date, :amount, :payment_method, 'individual',
+                    :reference_number, :notes, :created_by
+                )
+            ";
+            $stmt = $conn->prepare($paymentSql);
+            $stmt->execute([
+                ':user_id' => $userId,
+                ':user_code' => $user['user_code'],
+                ':user_name' => $user['user_name'],
+                ':company_name' => $user['company_name'],
+                ':payment_date' => $paymentDate,
+                ':amount' => $amount,
+                ':payment_method' => $paymentMethod,
+                ':reference_number' => $referenceNumber,
+                ':notes' => $notes,
+                ':created_by' => $createdBy
+            ]);
+
+            $paymentId = $conn->lastInsertId();
+
+            // 入金を注文に按分
+            $remainingAmount = $amount;
+            foreach ($orders as $order) {
+                if ($remainingAmount <= 0) break;
+
+                $allocateAmount = min($remainingAmount, $order['outstanding']);
+
+                $detailSql = "
+                    INSERT INTO order_payment_details (payment_id, order_id, allocated_amount)
+                    VALUES (:payment_id, :order_id, :allocated_amount)
+                ";
+                $stmt = $conn->prepare($detailSql);
+                $stmt->execute([
+                    ':payment_id' => $paymentId,
+                    ':order_id' => $order['id'],
+                    ':allocated_amount' => $allocateAmount
+                ]);
+
+                $remainingAmount -= $allocateAmount;
+            }
+
+            $conn->commit();
+
+            return [
+                'success' => true,
+                'payment_id' => $paymentId,
+                'message' => '入金を記録しました'
+            ];
+
+        } catch (Exception $e) {
+            if (isset($conn)) {
+                $conn->rollBack();
+            }
+            error_log("SimpleCollectionManager::recordPayment Error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * 企業単位の入金を記録（合計チェック + 按分）
+     * @param array $params 入金パラメータ
+     * @return array 結果
+     */
+    public function recordCompanyPayment($params) {
+        try {
+            $conn = $this->db->getConnection();
+            $conn->beginTransaction();
+
+            $companyName = $params['company_name'];
+            $paymentDate = $params['payment_date'] ?? date('Y-m-d');
+            $amount = $params['amount'];
+            $paymentMethod = $params['payment_method'] ?? 'bank_transfer';
+            $referenceNumber = $params['reference_number'] ?? '';
+            $notes = $params['notes'] ?? '';
+            $createdBy = $params['created_by'] ?? 'system';
+
+            // 企業の未払い注文を取得
+            $ordersSql = "
+                SELECT o.id, o.user_id, o.user_code, o.user_name, o.total_amount,
+                    COALESCE(SUM(opd.allocated_amount), 0) as paid_amount,
+                    (o.total_amount - COALESCE(SUM(opd.allocated_amount), 0)) as outstanding
+                FROM orders o
+                LEFT JOIN order_payment_details opd ON o.id = opd.order_id
+                WHERE o.company_name = :company_name
+                GROUP BY o.id
+                HAVING outstanding > 0
+                ORDER BY o.order_date ASC
+            ";
+            $stmt = $conn->prepare($ordersSql);
+            $stmt->execute([':company_name' => $companyName]);
+            $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if (empty($orders)) {
+                throw new Exception('該当企業の未払い注文がありません');
+            }
+
+            // 合計未払い額を計算
+            $totalOutstanding = array_sum(array_column($orders, 'outstanding'));
+
+            // 合計チェック
+            if (abs($amount - $totalOutstanding) > 0.01) { // 浮動小数点の誤差を考慮
+                return [
+                    'success' => false,
+                    'check_failed' => true,
+                    'expected_amount' => $totalOutstanding,
+                    'actual_amount' => $amount,
+                    'difference' => $amount - $totalOutstanding,
+                    'message' => sprintf(
+                        '入金額（¥%s）と未払い合計（¥%s）が一致しません。差額: ¥%s',
+                        number_format($amount),
+                        number_format($totalOutstanding),
+                        number_format($amount - $totalOutstanding)
+                    )
+                ];
+            }
+
+            // 入金レコードを作成
+            $paymentSql = "
+                INSERT INTO order_payments (
+                    user_id, user_code, user_name, company_name,
+                    payment_date, amount, payment_method, payment_type,
+                    reference_number, notes, created_by
+                ) VALUES (
+                    NULL, '', '', :company_name,
+                    :payment_date, :amount, :payment_method, 'company',
+                    :reference_number, :notes, :created_by
+                )
+            ";
+            $stmt = $conn->prepare($paymentSql);
+            $stmt->execute([
+                ':company_name' => $companyName,
+                ':payment_date' => $paymentDate,
+                ':amount' => $amount,
+                ':payment_method' => $paymentMethod,
+                ':reference_number' => $referenceNumber,
+                ':notes' => $notes,
+                ':created_by' => $createdBy
+            ]);
+
+            $paymentId = $conn->lastInsertId();
+
+            // 各注文に按分（未払い分を全額割り当て）
+            foreach ($orders as $order) {
+                $detailSql = "
+                    INSERT INTO order_payment_details (payment_id, order_id, allocated_amount)
+                    VALUES (:payment_id, :order_id, :allocated_amount)
+                ";
+                $stmt = $conn->prepare($detailSql);
+                $stmt->execute([
+                    ':payment_id' => $paymentId,
+                    ':order_id' => $order['id'],
+                    ':allocated_amount' => $order['outstanding']
+                ]);
+            }
+
+            $conn->commit();
+
+            return [
+                'success' => true,
+                'payment_id' => $paymentId,
+                'orders_count' => count($orders),
+                'message' => sprintf('企業単位の入金を記録しました（%d件の注文に按分）', count($orders))
+            ];
+
+        } catch (Exception $e) {
+            if (isset($conn)) {
+                $conn->rollBack();
+            }
+            error_log("SimpleCollectionManager::recordCompanyPayment Error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * 入金履歴を取得
+     * @param array $filters フィルタ
+     * @return array 入金履歴
+     */
+    public function getPaymentHistory($filters = []) {
+        try {
+            $sql = "
+                SELECT
+                    op.*,
+                    COUNT(opd.id) as order_count
+                FROM order_payments op
+                LEFT JOIN order_payment_details opd ON op.id = opd.payment_id
+                WHERE 1=1
+            ";
+
+            $params = [];
+
+            if (!empty($filters['user_id'])) {
+                $sql .= " AND op.user_id = :user_id";
+                $params[':user_id'] = $filters['user_id'];
+            }
+
+            if (!empty($filters['company_name'])) {
+                $sql .= " AND op.company_name LIKE :company_name";
+                $params[':company_name'] = '%' . $filters['company_name'] . '%';
+            }
+
+            if (!empty($filters['payment_type'])) {
+                $sql .= " AND op.payment_type = :payment_type";
+                $params[':payment_type'] = $filters['payment_type'];
+            }
+
+            if (!empty($filters['date_from'])) {
+                $sql .= " AND op.payment_date >= :date_from";
+                $params[':date_from'] = $filters['date_from'];
+            }
+
+            if (!empty($filters['date_to'])) {
+                $sql .= " AND op.payment_date <= :date_to";
+                $params[':date_to'] = $filters['date_to'];
+            }
+
+            $sql .= " GROUP BY op.id ORDER BY op.payment_date DESC, op.id DESC";
+
+            $limit = $filters['limit'] ?? 50;
+            $sql .= " LIMIT :limit";
+
+            $stmt = $this->db->getConnection()->prepare($sql);
+
+            foreach ($params as $key => $value) {
+                $stmt->bindValue($key, $value, PDO::PARAM_STR);
+            }
+            $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+
+            $stmt->execute();
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        } catch (Exception $e) {
+            error_log("SimpleCollectionManager::getPaymentHistory Error: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * 個人別の売掛残高を取得
+     * @param array $filters フィルタ
+     * @return array 売掛残高一覧
+     */
+    public function getUserReceivables($filters = []) {
+        try {
+            $sql = "
+                SELECT
+                    u.id as user_id,
+                    u.user_code,
+                    u.user_name,
+                    u.company_name,
+                    COUNT(DISTINCT o.id) as total_orders,
+                    COALESCE(SUM(o.total_amount), 0) as total_ordered,
+                    COALESCE(SUM(opd.allocated_amount), 0) as total_paid,
+                    (COALESCE(SUM(o.total_amount), 0) - COALESCE(SUM(opd.allocated_amount), 0)) as outstanding_amount
+                FROM users u
+                LEFT JOIN orders o ON u.id = o.user_id
+                LEFT JOIN order_payment_details opd ON o.id = opd.order_id
+                WHERE 1=1
+            ";
+
+            $params = [];
+
+            if (!empty($filters['company_name'])) {
+                $sql .= " AND u.company_name LIKE :company_name";
+                $params[':company_name'] = '%' . $filters['company_name'] . '%';
+            }
+
+            $sql .= " GROUP BY u.id HAVING outstanding_amount > 0 ORDER BY outstanding_amount DESC";
+
+            $limit = $filters['limit'] ?? 50;
+            $sql .= " LIMIT :limit";
+
+            $stmt = $this->db->getConnection()->prepare($sql);
+
+            foreach ($params as $key => $value) {
+                $stmt->bindValue($key, $value, PDO::PARAM_STR);
+            }
+            $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+
+            $stmt->execute();
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        } catch (Exception $e) {
+            error_log("SimpleCollectionManager::getUserReceivables Error: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * 企業別の売掛残高を取得
+     * @param array $filters フィルタ
+     * @return array 売掛残高一覧
+     */
+    public function getCompanyReceivables($filters = []) {
+        try {
+            $sql = "
+                SELECT
+                    o.company_name,
+                    COUNT(DISTINCT o.id) as total_orders,
+                    COUNT(DISTINCT o.user_id) as user_count,
+                    COALESCE(SUM(o.total_amount), 0) as total_ordered,
+                    COALESCE(SUM(opd.allocated_amount), 0) as total_paid,
+                    (COALESCE(SUM(o.total_amount), 0) - COALESCE(SUM(opd.allocated_amount), 0)) as outstanding_amount
+                FROM orders o
+                LEFT JOIN order_payment_details opd ON o.id = opd.order_id
+                WHERE o.company_name IS NOT NULL AND o.company_name != ''
+                GROUP BY o.company_name
+                HAVING outstanding_amount > 0
+                ORDER BY outstanding_amount DESC
+            ";
+
+            $limit = $filters['limit'] ?? 50;
+            $sql .= " LIMIT :limit";
+
+            $stmt = $this->db->getConnection()->prepare($sql);
+            $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+            $stmt->execute();
+
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        } catch (Exception $e) {
+            error_log("SimpleCollectionManager::getCompanyReceivables Error: " . $e->getMessage());
             return [];
         }
     }
