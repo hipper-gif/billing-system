@@ -332,7 +332,8 @@ require_once __DIR__ . '/../includes/header.php';
                 <td class="amount-cell">¥<?php echo number_format($item['total_paid']); ?></td>
                 <td class="amount-cell"><strong>¥<?php echo number_format($item['outstanding_amount']); ?></strong></td>
                 <td>
-                    <button class="btn btn-material btn-sm btn-success" onclick="openPaymentModal('<?php echo $viewType; ?>', <?php echo json_encode($item); ?>)">
+                    <button class="btn btn-material btn-sm btn-success"
+                            onclick='openPaymentModal("<?php echo $viewType; ?>", <?php echo htmlspecialchars(json_encode($item), ENT_QUOTES, 'UTF-8'); ?>)'>
                         <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">add_card</span>
                         入金
                     </button>
