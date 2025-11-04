@@ -229,18 +229,6 @@ $showBackButton = $showBackButton ?? false;
                     <span>集金管理</span>
                 </a>
 
-                <a href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/pages/receivables.php"
-                   class="nav-item-btn <?php echo $activePage === 'receivables' ? 'active' : ''; ?>">
-                    <span class="material-icons">account_balance</span>
-                    <span>売掛金管理</span>
-                </a>
-
-                <a href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/pages/payment_register.php"
-                   class="nav-item-btn <?php echo $activePage === 'payment_register' ? 'active' : ''; ?>">
-                    <span class="material-icons">add_card</span>
-                    <span>入金登録</span>
-                </a>
-
                 <a href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/pages/companies.php"
                    class="nav-item-btn <?php echo $activePage === 'companies' ? 'active' : ''; ?>">
                     <span class="material-icons">business</span>
