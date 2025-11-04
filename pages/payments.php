@@ -7,6 +7,7 @@
 session_start();
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../classes/SimpleCollectionManager.php';
+require_once __DIR__ . '/../classes/ReceiptManager.php';
 
 // ページ設定
 $pageTitle = '集金管理 - Smiley配食事業システム';
@@ -18,6 +19,7 @@ $messageType = '';
 
 // 入金処理
 $collectionManager = new SimpleCollectionManager();
+$receiptManager = new ReceiptManager();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['record_payment'])) {
     $paymentType = $_POST['payment_type']; // 'individual' or 'company'
@@ -57,6 +59,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['record_payment'])) {
     }
 }
 
+// 領収書発行処理
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_receipt'])) {
+    $result = $receiptManager->issueReceipt([
+        'payment_id' => $_POST['payment_id'],
+        'issue_date' => $_POST['issue_date'] ?? date('Y-m-d'),
+        'description' => $_POST['description'] ?? 'お弁当代として',
+        'issuer_name' => $_POST['issuer_name'] ?? 'システム管理者',
+        'created_by' => 'admin' // TODO: ログインユーザー
+    ]);
+
+    if ($result['success']) {
+        $message = $result['message'] . '（領収書番号: ' . $result['receipt_number'] . '）';
+        $messageType = 'success';
+    } else {
+        $message = 'エラー: ' . $result['message'];
+        $messageType = 'danger';
+    }
+}
+
 try {
     // 統計データ取得
     $statistics = $collectionManager->getMonthlyCollectionStats();
@@ -74,6 +95,13 @@ try {
 
     // 入金履歴を取得
     $paymentHistory = $collectionManager->getPaymentHistory(['limit' => 10]);
+
+    // 各入金の領収書発行状態をチェック
+    foreach ($paymentHistory as &$payment) {
+        $receipt = $receiptManager->getReceiptByPaymentId($payment['payment_id']);
+        $payment['receipt'] = $receipt;
+    }
+    unset($payment);
 
 } catch (Exception $e) {
     error_log("集金管理画面エラー: " . $e->getMessage());
@@ -364,6 +392,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <th class="amount-cell">入金額</th>
                 <th>支払方法</th>
                 <th>注文数</th>
+                <th>領収書</th>
             </tr>
         </thead>
         <tbody>
@@ -398,6 +427,20 @@ require_once __DIR__ . '/../includes/header.php';
                     ?>
                 </td>
                 <td><?php echo $payment['order_count']; ?>件</td>
+                <td>
+                    <?php if ($payment['receipt']): ?>
+                        <a href="receipt.php?id=<?php echo $payment['receipt']['id']; ?>" class="btn btn-material btn-sm btn-info" target="_blank">
+                            <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt</span>
+                            表示
+                        </a>
+                    <?php else: ?>
+                        <button class="btn btn-material btn-sm btn-success"
+                                onclick='openReceiptModal(<?php echo htmlspecialchars(json_encode($payment), ENT_QUOTES, 'UTF-8'); ?>)'>
+                            <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt_long</span>
+                            発行
+                        </button>
+                    <?php endif; ?>
+                </td>
             </tr>
             <?php endforeach; ?>
         </tbody>
@@ -461,6 +504,43 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
+<!-- 領収書発行モーダル -->
+<div id="receiptModal" class="payment-modal">
+    <div class="payment-modal-content">
+        <h3 class="mb-4">領収書を発行</h3>
+        <form method="POST" id="receiptForm">
+            <input type="hidden" name="payment_id" id="receipt_payment_id" value="">
+
+            <div id="receiptInfo" class="alert alert-info mb-4"></div>
+
+            <div class="form-group">
+                <label for="issue_date">発行日 *</label>
+                <input type="date" name="issue_date" id="issue_date" required value="<?php echo date('Y-m-d'); ?>">
+            </div>
+
+            <div class="form-group">
+                <label for="description">但し書き *</label>
+                <input type="text" name="description" id="description" required value="お弁当代として">
+            </div>
+
+            <div class="form-group">
+                <label for="issuer_name">発行者名 *</label>
+                <input type="text" name="issuer_name" id="issuer_name" required value="システム管理者">
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" name="issue_receipt" class="btn btn-material btn-success flex-grow-1">
+                    <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt_long</span>
+                    領収書を発行
+                </button>
+                <button type="button" class="btn btn-material btn-secondary" onclick="closeReceiptModal()">
+                    キャンセル
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
 function openPaymentModal(type, data) {
     const modal = document.getElementById('paymentModal');
@@ -505,6 +585,36 @@ function closePaymentModal() {
 document.getElementById('paymentModal').addEventListener('click', function(e) {
     if (e.target === this) {
         closePaymentModal();
+    }
+});
+
+// 領収書発行モーダルを開く
+function openReceiptModal(payment) {
+    const modal = document.getElementById('receiptModal');
+    const receiptInfo = document.getElementById('receiptInfo');
+
+    document.getElementById('receipt_payment_id').value = payment.payment_id;
+
+    let name = payment.payment_type === 'company' ? payment.company_name : payment.user_name;
+    receiptInfo.innerHTML = `
+        <strong>領収書発行</strong><br>
+        入金日: ${payment.payment_date}<br>
+        ${payment.payment_type === 'individual' ? '利用者' : '企業'}: ${name}<br>
+        入金額: ¥${parseInt(payment.amount).toLocaleString()}
+    `;
+
+    modal.classList.add('active');
+}
+
+function closeReceiptModal() {
+    document.getElementById('receiptModal').classList.remove('active');
+    document.getElementById('receiptForm').reset();
+}
+
+// 領収書モーダル外クリックで閉じる
+document.getElementById('receiptModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeReceiptModal();
     }
 });
 </script>
