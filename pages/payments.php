@@ -98,7 +98,7 @@ try {
 
     // 各入金の領収書発行状態をチェック
     foreach ($paymentHistory as &$payment) {
-        $receipt = $receiptManager->getReceiptByPaymentId($payment['payment_id']);
+        $receipt = $receiptManager->getReceiptByPaymentId($payment['id']);
         $payment['receipt'] = $receipt;
     }
     unset($payment);
@@ -593,7 +593,7 @@ function openReceiptModal(payment) {
     const modal = document.getElementById('receiptModal');
     const receiptInfo = document.getElementById('receiptInfo');
 
-    document.getElementById('receipt_payment_id').value = payment.payment_id;
+    document.getElementById('receipt_payment_id').value = payment.id;
 
     let name = payment.payment_type === 'company' ? payment.company_name : payment.user_name;
     receiptInfo.innerHTML = `
