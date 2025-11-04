@@ -94,12 +94,14 @@ if (DEBUG_MODE) {
     ini_set('error_log', LOG_DIR . 'error.log');
 }
 
-// セッション設定
-ini_set('session.gc_maxlifetime', SESSION_TIMEOUT);
-ini_set('session.cookie_lifetime', SESSION_TIMEOUT);
-ini_set('session.cookie_httponly', 1);
-ini_set('session.cookie_secure', ENVIRONMENT !== 'local');
-ini_set('session.cookie_samesite', 'Strict');
+// セッション設定（セッション開始前のみ）
+if (session_status() === PHP_SESSION_NONE) {
+    ini_set('session.gc_maxlifetime', SESSION_TIMEOUT);
+    ini_set('session.cookie_lifetime', SESSION_TIMEOUT);
+    ini_set('session.cookie_httponly', 1);
+    ini_set('session.cookie_secure', ENVIRONMENT !== 'local');
+    ini_set('session.cookie_samesite', 'Strict');
+}
 
 /**
  * エックスサーバー最適化データベース接続クラス（メソッド追加版）
