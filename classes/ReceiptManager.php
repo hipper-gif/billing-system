@@ -129,7 +129,10 @@ class ReceiptManager {
             // 領収書番号を生成
             $receiptNumber = $this->generateReceiptNumber();
 
-            // 領収書を登録
+            // 備考欄に発行者と支払方法を記録
+            $notes = "発行者: {$issuerName}\n支払方法: {$paymentMethodDisplay}";
+
+            // 領収書を登録（既存のテーブル構造に合わせる）
             $insertSql = "
                 INSERT INTO receipts (
                     receipt_number,
@@ -137,20 +140,18 @@ class ReceiptManager {
                     issue_date,
                     recipient_name,
                     amount,
-                    description,
-                    payment_method_display,
-                    issuer_name,
-                    created_by
+                    purpose,
+                    notes,
+                    status
                 ) VALUES (
                     :receipt_number,
                     :payment_id,
                     :issue_date,
                     :recipient_name,
                     :amount,
-                    :description,
-                    :payment_method_display,
-                    :issuer_name,
-                    :created_by
+                    :purpose,
+                    :notes,
+                    'issued'
                 )
             ";
 
@@ -161,10 +162,8 @@ class ReceiptManager {
                 ':issue_date' => $issueDate,
                 ':recipient_name' => $recipientName,
                 ':amount' => $payment['amount'],
-                ':description' => $description,
-                ':payment_method_display' => $paymentMethodDisplay,
-                ':issuer_name' => $issuerName,
-                ':created_by' => $createdBy
+                ':purpose' => $description,
+                ':notes' => $notes
             ]);
 
             return [
@@ -194,6 +193,7 @@ class ReceiptManager {
                 SELECT
                     r.*,
                     op.payment_date,
+                    op.payment_method,
                     op.user_code,
                     op.user_name,
                     op.company_name,
@@ -206,7 +206,21 @@ class ReceiptManager {
             $stmt = $this->db->getConnection()->prepare($sql);
             $stmt->execute([':receipt_id' => $receiptId]);
 
-            return $stmt->fetch(PDO::FETCH_ASSOC);
+            $receipt = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // 既存テーブル構造に合わせてエイリアスを追加
+            if ($receipt) {
+                $receipt['description'] = $receipt['purpose'] ?? '';
+                $receipt['payment_method_display'] = $this->getPaymentMethodDisplay($receipt['payment_method'] ?? '');
+                // notesから発行者名を抽出（"発行者: XXX"の形式）
+                if (!empty($receipt['notes']) && preg_match('/発行者:\s*(.+?)(?:\n|$)/', $receipt['notes'], $matches)) {
+                    $receipt['issuer_name'] = $matches[1];
+                } else {
+                    $receipt['issuer_name'] = 'システム管理者';
+                }
+            }
+
+            return $receipt;
 
         } catch (Exception $e) {
             error_log("Get receipt error: " . $e->getMessage());
@@ -225,6 +239,7 @@ class ReceiptManager {
                 SELECT
                     r.*,
                     op.payment_date,
+                    op.payment_method,
                     op.user_code,
                     op.user_name,
                     op.company_name,
@@ -237,7 +252,21 @@ class ReceiptManager {
             $stmt = $this->db->getConnection()->prepare($sql);
             $stmt->execute([':receipt_number' => $receiptNumber]);
 
-            return $stmt->fetch(PDO::FETCH_ASSOC);
+            $receipt = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // 既存テーブル構造に合わせてエイリアスを追加
+            if ($receipt) {
+                $receipt['description'] = $receipt['purpose'] ?? '';
+                $receipt['payment_method_display'] = $this->getPaymentMethodDisplay($receipt['payment_method'] ?? '');
+                // notesから発行者名を抽出
+                if (!empty($receipt['notes']) && preg_match('/発行者:\s*(.+?)(?:\n|$)/', $receipt['notes'], $matches)) {
+                    $receipt['issuer_name'] = $matches[1];
+                } else {
+                    $receipt['issuer_name'] = 'システム管理者';
+                }
+            }
+
+            return $receipt;
 
         } catch (Exception $e) {
             error_log("Get receipt by number error: " . $e->getMessage());
@@ -256,6 +285,7 @@ class ReceiptManager {
                 SELECT
                     r.*,
                     op.payment_date,
+                    op.payment_method,
                     op.user_code,
                     op.user_name,
                     op.company_name,
@@ -268,7 +298,21 @@ class ReceiptManager {
             $stmt = $this->db->getConnection()->prepare($sql);
             $stmt->execute([':payment_id' => $paymentId]);
 
-            return $stmt->fetch(PDO::FETCH_ASSOC);
+            $receipt = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // 既存テーブル構造に合わせてエイリアスを追加
+            if ($receipt) {
+                $receipt['description'] = $receipt['purpose'] ?? '';
+                $receipt['payment_method_display'] = $this->getPaymentMethodDisplay($receipt['payment_method'] ?? '');
+                // notesから発行者名を抽出
+                if (!empty($receipt['notes']) && preg_match('/発行者:\s*(.+?)(?:\n|$)/', $receipt['notes'], $matches)) {
+                    $receipt['issuer_name'] = $matches[1];
+                } else {
+                    $receipt['issuer_name'] = 'システム管理者';
+                }
+            }
+
+            return $receipt;
 
         } catch (Exception $e) {
             error_log("Get receipt by payment ID error: " . $e->getMessage());
