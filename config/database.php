@@ -275,7 +275,7 @@ function createRequiredDirectories() {
             if (mkdir($dir, 0755, true)) {
                 // セキュリティ用.htaccess作成
                 if (in_array($dir, [UPLOAD_DIR, TEMP_DIR, LOG_DIR])) {
-                    file_put_contents($dir . '.htaccess', "Order Deny,Allow\nDeny from all\n");
+                    file_put_contents($dir . '.htaccess', "Require all denied\n");
                 }
                 
                 if (DEBUG_MODE) {
