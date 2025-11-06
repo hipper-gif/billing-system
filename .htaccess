@@ -1,3 +1,2 @@
-# エックスサーバー対応 最小限 .htaccess
-RewriteEngine On
+# エックスサーバー対応 .htaccess (Apache 2.4)
 Options -Indexes
