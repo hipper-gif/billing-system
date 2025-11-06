@@ -7,7 +7,7 @@
 session_start();
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../classes/SimpleCollectionManager.php';
-require_once __DIR__ . '/../classes/ReceiptManager.php';
+// require_once __DIR__ . '/../classes/ReceiptManager.php';
 
 // ページ設定
 $pageTitle = '集金管理 - Smiley配食事業システム';
@@ -19,7 +19,7 @@ $messageType = '';
 
 // 入金処理
 $collectionManager = new SimpleCollectionManager();
-$receiptManager = new ReceiptManager();
+// $receiptManager = new ReceiptManager();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['record_payment'])) {
     $paymentType = $_POST['payment_type']; // 'individual' or 'company'
@@ -60,6 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['record_payment'])) {
 }
 
 // 領収書発行処理
+/*
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_receipt'])) {
     $result = $receiptManager->issueReceipt([
         'payment_id' => $_POST['payment_id'],
@@ -77,6 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_receipt'])) {
         $messageType = 'danger';
     }
 }
+*/
 
 try {
     // 統計データ取得
@@ -97,11 +99,13 @@ try {
     $paymentHistory = $collectionManager->getPaymentHistory(['limit' => 10]);
 
     // 各入金の領収書発行状態をチェック
+    /*
     foreach ($paymentHistory as &$payment) {
         $receipt = $receiptManager->getReceiptByPaymentId($payment['id']);
         $payment['receipt'] = $receipt;
     }
     unset($payment);
+    */
 
 } catch (Exception $e) {
     error_log("集金管理画面エラー: " . $e->getMessage());
@@ -392,7 +396,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <th class="amount-cell">入金額</th>
                 <th>支払方法</th>
                 <th>注文数</th>
-                <th>領収書</th>
+                <!-- <th>領収書</th> -->
             </tr>
         </thead>
         <tbody>
@@ -427,6 +431,7 @@ require_once __DIR__ . '/../includes/header.php';
                     ?>
                 </td>
                 <td><?php echo $payment['order_count']; ?>件</td>
+                <!-- 領収書機能は一時的に無効化
                 <td>
                     <?php if ($payment['receipt']): ?>
                         <a href="receipt.php?id=<?php echo $payment['receipt']['id']; ?>" class="btn btn-material btn-sm btn-info" target="_blank">
@@ -441,6 +446,7 @@ require_once __DIR__ . '/../includes/header.php';
                         </button>
                     <?php endif; ?>
                 </td>
+                -->
             </tr>
             <?php endforeach; ?>
         </tbody>
@@ -504,7 +510,7 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
-<!-- 領収書発行モーダル -->
+<!-- 領収書発行モーダル（一時的に無効化）
 <div id="receiptModal" class="payment-modal">
     <div class="payment-modal-content">
         <h3 class="mb-4">領収書を発行</h3>
@@ -540,6 +546,7 @@ require_once __DIR__ . '/../includes/header.php';
         </form>
     </div>
 </div>
+-->
 
 <script>
 function openPaymentModal(type, data) {
@@ -588,7 +595,8 @@ document.getElementById('paymentModal').addEventListener('click', function(e) {
     }
 });
 
-// 領収書発行モーダルを開く
+/*
+// 領収書発行モーダルを開く（一時的に無効化）
 function openReceiptModal(payment) {
     const modal = document.getElementById('receiptModal');
     const receiptInfo = document.getElementById('receiptInfo');
@@ -617,6 +625,7 @@ document.getElementById('receiptModal').addEventListener('click', function(e) {
         closeReceiptModal();
     }
 });
+*/
 </script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
