@@ -16,7 +16,7 @@ if (strpos($host, 'twinklemark.xsrv.jp') !== false) {
     define('DB_PASS', 'Smiley2525');
     define('ENVIRONMENT', 'test');
     define('BASE_URL', 'https://twinklemark.xsrv.jp/Smiley/meal-delivery/billing-system/');
-    define('DEBUG_MODE', true);
+    define('DEBUG_MODE', false);
     
 } elseif (strpos($host, 'tw1nkle.com') !== false) {
     // 本番環境（エックスサーバー）
@@ -164,7 +164,11 @@ class Database {
             return $stmt;
         } catch (PDOException $e) {
             error_log("Query error: " . $e->getMessage() . " | SQL: " . $sql);
-            throw new Exception("クエリエラー: " . $e->getMessage() . " | SQL: " . $sql);
+            if (DEBUG_MODE) {
+                throw new Exception("クエリエラー: " . $e->getMessage() . " | SQL: " . $sql);
+            } else {
+                throw new Exception("データベース処理でエラーが発生しました。");
+            }
         }
     }
     
