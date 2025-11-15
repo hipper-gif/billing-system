@@ -98,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_receipt'])) {
         'payment_id' => $_POST['payment_id'],
         'issue_date' => $_POST['issue_date'] ?? date('Y-m-d'),
         'description' => $_POST['description'] ?? 'お弁当代として',
-        'issuer_name' => $_POST['issuer_name'] ?? 'システム管理者',
+        'issuer_name' => $_POST['issuer_name'] ?? '株式会社Smiley',
         'created_by' => 'admin' // TODO: ログインユーザー
     ]);
 
@@ -108,6 +108,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_receipt'])) {
     } else {
         $message = 'エラー: ' . $result['message'];
         $messageType = 'danger';
+    }
+}
+
+// 一括領収書発行処理
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_issue_receipts'])) {
+    $paymentIds = json_decode($_POST['payment_ids'] ?? '[]', true);
+
+    if (empty($paymentIds)) {
+        $message = 'エラー: 入金記録が選択されていません';
+        $messageType = 'danger';
+    } else {
+        $result = $receiptManager->bulkIssueReceipts($paymentIds, [
+            'issue_date' => $_POST['bulk_issue_date'] ?? date('Y-m-d'),
+            'description' => $_POST['bulk_description'] ?? 'お弁当代として',
+            'issuer_name' => $_POST['bulk_issuer_name'] ?? '株式会社Smiley',
+            'created_by' => 'admin' // TODO: ログインユーザー
+        ]);
+
+        if ($result['success'] || $result['issued'] > 0) {
+            $message = "領収書を{$result['issued']}件発行しました。";
+            if ($result['skipped'] > 0) {
+                $message .= "（{$result['skipped']}件はスキップ）";
+            }
+            if ($result['failed'] > 0) {
+                $message .= "（{$result['failed']}件は失敗）";
+            }
+            $messageType = 'success';
+        } else {
+            $message = 'エラー: 領収書の発行に失敗しました';
+            $messageType = 'danger';
+        }
     }
 }
 
@@ -472,15 +503,24 @@ require_once __DIR__ . '/../includes/header.php';
 
 <!-- 入金履歴 -->
 <div class="payment-history" id="history">
-    <h3 class="mb-4">
-        <span class="material-icons" style="vertical-align: middle; color: #4CAF50;">history</span>
-        最近の入金履歴
-    </h3>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="mb-0">
+            <span class="material-icons" style="vertical-align: middle; color: #4CAF50;">history</span>
+            最近の入金履歴
+        </h3>
+        <button type="button" class="btn btn-material btn-success" onclick="openBulkIssueModal()" id="bulkIssueBtn" style="display: none;">
+            <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt_long</span>
+            選択した入金の領収書を一括発行
+        </button>
+    </div>
 
     <?php if (!empty($paymentHistory)): ?>
     <table>
         <thead>
             <tr>
+                <th style="width: 50px;">
+                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+                </th>
                 <th>入金日</th>
                 <th>タイプ</th>
                 <th>利用者/企業</th>
@@ -493,6 +533,11 @@ require_once __DIR__ . '/../includes/header.php';
         <tbody>
             <?php foreach ($paymentHistory as $payment): ?>
             <tr>
+                <td>
+                    <?php if (empty($payment['receipt'])): ?>
+                        <input type="checkbox" class="payment-checkbox" value="<?php echo $payment['id']; ?>" onchange="updateBulkIssueButton()">
+                    <?php endif; ?>
+                </td>
                 <td><?php echo htmlspecialchars($payment['payment_date']); ?></td>
                 <td>
                     <span class="badge bg-<?php echo $payment['payment_type'] === 'individual' ? 'primary' : 'info'; ?>">
@@ -696,7 +741,7 @@ require_once __DIR__ . '/../includes/header.php';
 
             <div class="form-group">
                 <label for="issuer_name">発行者名 *</label>
-                <input type="text" name="issuer_name" id="issuer_name" required value="システム管理者">
+                <input type="text" name="issuer_name" id="issuer_name" required value="株式会社Smiley">
             </div>
 
             <div class="d-flex gap-2">
@@ -705,6 +750,43 @@ require_once __DIR__ . '/../includes/header.php';
                     領収書を発行
                 </button>
                 <button type="button" class="btn btn-material btn-secondary" onclick="closeReceiptModal()">
+                    キャンセル
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 一括領収書発行モーダル -->
+<div id="bulkReceiptModal" class="payment-modal">
+    <div class="payment-modal-content">
+        <h3 class="mb-4">領収書を一括発行</h3>
+        <form method="POST" id="bulkReceiptForm">
+            <input type="hidden" name="payment_ids" id="bulk_payment_ids" value="">
+
+            <div id="bulkReceiptInfo" class="alert alert-info mb-4"></div>
+
+            <div class="form-group">
+                <label for="bulk_issue_date">発行日 *</label>
+                <input type="date" name="bulk_issue_date" id="bulk_issue_date" required value="<?php echo date('Y-m-d'); ?>">
+            </div>
+
+            <div class="form-group">
+                <label for="bulk_description">但し書き *</label>
+                <input type="text" name="bulk_description" id="bulk_description" required value="お弁当代として">
+            </div>
+
+            <div class="form-group">
+                <label for="bulk_issuer_name">発行者名 *</label>
+                <input type="text" name="bulk_issuer_name" id="bulk_issuer_name" required value="株式会社Smiley">
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" name="bulk_issue_receipts" class="btn btn-material btn-success flex-grow-1">
+                    <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt_long</span>
+                    一括発行
+                </button>
+                <button type="button" class="btn btn-material btn-secondary" onclick="closeBulkReceiptModal()">
                     キャンセル
                 </button>
             </div>
@@ -808,6 +890,62 @@ function confirmDeletePayment(paymentId, name) {
         document.getElementById('deletePaymentForm').submit();
     }
 }
+
+// チェックボックスの全選択/解除
+function toggleSelectAll(checkbox) {
+    const checkboxes = document.querySelectorAll('.payment-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = checkbox.checked;
+    });
+    updateBulkIssueButton();
+}
+
+// 一括発行ボタンの表示/非表示
+function updateBulkIssueButton() {
+    const checkboxes = document.querySelectorAll('.payment-checkbox:checked');
+    const bulkBtn = document.getElementById('bulkIssueBtn');
+
+    if (checkboxes.length > 0) {
+        bulkBtn.style.display = 'inline-flex';
+    } else {
+        bulkBtn.style.display = 'none';
+    }
+}
+
+// 一括領収書発行モーダルを開く
+function openBulkIssueModal() {
+    const checkboxes = document.querySelectorAll('.payment-checkbox:checked');
+    const paymentIds = Array.from(checkboxes).map(cb => cb.value);
+
+    if (paymentIds.length === 0) {
+        alert('入金記録を選択してください');
+        return;
+    }
+
+    const modal = document.getElementById('bulkReceiptModal');
+    const receiptInfo = document.getElementById('bulkReceiptInfo');
+
+    document.getElementById('bulk_payment_ids').value = JSON.stringify(paymentIds);
+
+    receiptInfo.innerHTML = `
+        <strong>一括領収書発行</strong><br>
+        選択件数: ${paymentIds.length}件
+    `;
+
+    modal.classList.add('active');
+}
+
+function closeBulkReceiptModal() {
+    document.getElementById('bulkReceiptModal').classList.remove('active');
+    document.getElementById('bulkReceiptForm').reset();
+}
+
+// 一括発行モーダル外クリックで閉じる
+document.getElementById('bulkReceiptModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeBulkReceiptModal();
+    }
+});
 
 // 領収書発行モーダルを開く
 function openReceiptModal(paymentId, name, amount) {

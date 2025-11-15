@@ -73,7 +73,7 @@ class ReceiptManager {
             $paymentId = $params['payment_id'] ?? null;
             $issueDate = $params['issue_date'] ?? date('Y-m-d');
             $description = $params['description'] ?? 'お弁当代として';
-            $issuerName = $params['issuer_name'] ?? 'システム管理者';
+            $issuerName = $params['issuer_name'] ?? '株式会社Smiley';
             $createdBy = $params['created_by'] ?? 'system';
 
             if (!$paymentId) {
@@ -413,5 +413,59 @@ class ReceiptManager {
                 'receipts' => []
             ];
         }
+    }
+
+    /**
+     * 一括領収書発行
+     * @param array $paymentIds 入金IDの配列
+     * @param array $params 領収書発行パラメータ
+     * @return array 発行結果
+     */
+    public function bulkIssueReceipts($paymentIds, $params = []) {
+        $results = [
+            'success' => true,
+            'total' => count($paymentIds),
+            'issued' => 0,
+            'skipped' => 0,
+            'failed' => 0,
+            'details' => []
+        ];
+
+        foreach ($paymentIds as $paymentId) {
+            $issueParams = array_merge($params, ['payment_id' => $paymentId]);
+            $result = $this->issueReceipt($issueParams);
+
+            if ($result['success']) {
+                $results['issued']++;
+                $results['details'][] = [
+                    'payment_id' => $paymentId,
+                    'status' => 'issued',
+                    'receipt_number' => $result['receipt_number']
+                ];
+            } else {
+                // 既に発行済みの場合はスキップ
+                if (strpos($result['message'], '既に領収書が発行されています') !== false) {
+                    $results['skipped']++;
+                    $results['details'][] = [
+                        'payment_id' => $paymentId,
+                        'status' => 'skipped',
+                        'message' => $result['message']
+                    ];
+                } else {
+                    $results['failed']++;
+                    $results['details'][] = [
+                        'payment_id' => $paymentId,
+                        'status' => 'failed',
+                        'message' => $result['message']
+                    ];
+                }
+            }
+        }
+
+        if ($results['failed'] > 0) {
+            $results['success'] = false;
+        }
+
+        return $results;
     }
 }

@@ -23,32 +23,9 @@ if (!$receipt) {
     die('領収書が見つかりません');
 }
 
-// 金額を漢数字に変換する関数
-function numberToKanji($number) {
-    $number = (int)$number;
-    $kanji = ['零', '壱', '弐', '参', '四', '五', '六', '七', '八', '九'];
-    $units = ['', '拾', '百', '千', '万', '拾', '百', '千', '億'];
-
-    if ($number === 0) return '零円';
-
-    $result = '';
-    $str = strrev((string)$number);
-
-    for ($i = 0; $i < strlen($str); $i++) {
-        $digit = (int)$str[$i];
-        if ($digit !== 0) {
-            if ($digit === 1 && ($i === 1 || $i === 2 || $i === 3 || $i === 5 || $i === 6 || $i === 7)) {
-                $result = $units[$i] . $result;
-            } else {
-                $result = $kanji[$digit] . $units[$i] . $result;
-            }
-        }
-    }
-
-    return $result . '円也';
-}
-
-$amountKanji = numberToKanji($receipt['amount']);
+// ロゴファイルの存在確認
+$logoPath = __DIR__ . '/../assets/images/logo.png';
+$hasLogo = file_exists($logoPath);
 ?>
 <!DOCTYPE html>
 <html lang="ja">
@@ -81,6 +58,13 @@ $amountKanji = numberToKanji($receipt['amount']);
         .receipt-header {
             text-align: center;
             margin-bottom: 40px;
+            position: relative;
+        }
+
+        .company-logo {
+            max-width: 150px;
+            max-height: 80px;
+            margin-bottom: 20px;
         }
 
         .receipt-title {
@@ -112,25 +96,19 @@ $amountKanji = numberToKanji($receipt['amount']);
 
         .amount-section {
             margin: 40px 0;
-            padding: 20px;
+            padding: 30px;
             border: 2px solid #000;
             text-align: center;
         }
 
         .amount-label {
             font-size: 16px;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
 
         .amount-value {
-            font-size: 28px;
+            font-size: 32px;
             font-weight: bold;
-            margin-bottom: 15px;
-        }
-
-        .amount-kanji {
-            font-size: 18px;
-            color: #333;
         }
 
         .details-section {
@@ -168,18 +146,18 @@ $amountKanji = numberToKanji($receipt['amount']);
             display: inline-block;
             text-align: left;
             border-top: 2px solid #000;
-            padding-top: 10px;
+            padding-top: 15px;
+        }
+
+        .issue-date {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 15px;
         }
 
         .issuer-name {
             font-size: 18px;
             font-weight: bold;
-            margin-bottom: 5px;
-        }
-
-        .issue-date {
-            font-size: 14px;
-            color: #666;
         }
 
         .print-buttons {
@@ -242,6 +220,9 @@ $amountKanji = numberToKanji($receipt['amount']);
 
     <div class="receipt-container">
         <div class="receipt-header">
+            <?php if ($hasLogo): ?>
+                <img src="../assets/images/logo.png" alt="会社ロゴ" class="company-logo">
+            <?php endif; ?>
             <div class="receipt-title">領　収　書</div>
             <div class="receipt-number">No. <?php echo htmlspecialchars($receipt['receipt_number']); ?></div>
         </div>
@@ -256,9 +237,6 @@ $amountKanji = numberToKanji($receipt['amount']);
             <div class="amount-label">金　額</div>
             <div class="amount-value">
                 ¥ <?php echo number_format($receipt['amount']); ?> －
-            </div>
-            <div class="amount-kanji">
-                （<?php echo $amountKanji; ?>）
             </div>
         </div>
 
