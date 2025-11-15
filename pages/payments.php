@@ -7,7 +7,7 @@
 session_start();
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../classes/SimpleCollectionManager.php';
-// require_once __DIR__ . '/../classes/ReceiptManager.php';
+require_once __DIR__ . '/../classes/ReceiptManager.php';
 
 // ページ設定
 $pageTitle = '集金管理 - Smiley配食事業システム';
@@ -19,7 +19,7 @@ $messageType = '';
 
 // 入金処理
 $collectionManager = new SimpleCollectionManager();
-// $receiptManager = new ReceiptManager();
+$receiptManager = new ReceiptManager();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['record_payment'])) {
     $paymentType = $_POST['payment_type']; // 'individual' or 'company'
@@ -93,7 +93,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_payment'])) {
 }
 
 // 領収書発行処理
-/*
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_receipt'])) {
     $result = $receiptManager->issueReceipt([
         'payment_id' => $_POST['payment_id'],
@@ -111,7 +110,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_receipt'])) {
         $messageType = 'danger';
     }
 }
-*/
 
 try {
     // 統計データ取得
@@ -173,13 +171,11 @@ try {
     $paymentHistory = $collectionManager->getPaymentHistory(['limit' => 20]);
 
     // 各入金の領収書発行状態をチェック
-    /*
     foreach ($paymentHistory as &$payment) {
         $receipt = $receiptManager->getReceiptByPaymentId($payment['id']);
         $payment['receipt'] = $receipt;
     }
     unset($payment);
-    */
 
 } catch (Exception $e) {
     error_log("集金管理画面エラー: " . $e->getMessage());
@@ -555,6 +551,19 @@ require_once __DIR__ . '/../includes/header.php';
                             title="削除">
                         <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">delete</span>
                     </button>
+                    <?php if (!empty($payment['receipt'])): ?>
+                    <button class="btn btn-material btn-sm btn-success"
+                            onclick='window.open("receipt.php?id=<?php echo $payment["receipt"]["id"]; ?>", "_blank")'
+                            title="領収書を表示">
+                        <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt</span>
+                    </button>
+                    <?php else: ?>
+                    <button class="btn btn-material btn-sm btn-info"
+                            onclick='openReceiptModal(<?php echo $payment["id"]; ?>, "<?php echo htmlspecialchars($payment["user_name"] ?? $payment["company_name"]); ?>", <?php echo $payment["amount"]; ?>)'
+                            title="領収書を発行">
+                        <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt_long</span>
+                    </button>
+                    <?php endif; ?>
                 </td>
             </tr>
             <?php endforeach; ?>
@@ -684,7 +693,7 @@ require_once __DIR__ . '/../includes/header.php';
     <input type="hidden" name="delete_payment" value="1">
 </form>
 
-<!-- 領収書発行モーダル（一時的に無効化）
+<!-- 領収書発行モーダル -->
 <div id="receiptModal" class="payment-modal">
     <div class="payment-modal-content">
         <h3 class="mb-4">領収書を発行</h3>
@@ -720,7 +729,6 @@ require_once __DIR__ . '/../includes/header.php';
         </form>
     </div>
 </div>
--->
 
 <script>
 function openPaymentModal(type, data) {
@@ -819,20 +827,17 @@ function confirmDeletePayment(paymentId, name) {
     }
 }
 
-/*
-// 領収書発行モーダルを開く（一時的に無効化）
-function openReceiptModal(payment) {
+// 領収書発行モーダルを開く
+function openReceiptModal(paymentId, name, amount) {
     const modal = document.getElementById('receiptModal');
     const receiptInfo = document.getElementById('receiptInfo');
 
-    document.getElementById('receipt_payment_id').value = payment.id;
+    document.getElementById('receipt_payment_id').value = paymentId;
 
-    let name = payment.payment_type === 'company' ? payment.company_name : payment.user_name;
     receiptInfo.innerHTML = `
         <strong>領収書発行</strong><br>
-        入金日: ${payment.payment_date}<br>
-        ${payment.payment_type === 'individual' ? '利用者' : '企業'}: ${name}<br>
-        入金額: ¥${parseInt(payment.amount).toLocaleString()}
+        対象: ${name}<br>
+        入金額: ¥${parseInt(amount).toLocaleString()}
     `;
 
     modal.classList.add('active');
@@ -849,7 +854,6 @@ document.getElementById('receiptModal').addEventListener('click', function(e) {
         closeReceiptModal();
     }
 });
-*/
 </script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
