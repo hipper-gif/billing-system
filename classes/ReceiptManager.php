@@ -133,9 +133,11 @@ class ReceiptManager {
             $notes = "発行者: {$issuerName}\n支払方法: {$paymentMethodDisplay}";
 
             // 領収書を登録（既存のテーブル構造に合わせる）
+            // invoice_idはNULL（請求書を使わず、入金記録から直接発行）
             $insertSql = "
                 INSERT INTO receipts (
                     receipt_number,
+                    invoice_id,
                     payment_id,
                     issue_date,
                     recipient_name,
@@ -145,6 +147,7 @@ class ReceiptManager {
                     status
                 ) VALUES (
                     :receipt_number,
+                    NULL,
                     :payment_id,
                     :issue_date,
                     :recipient_name,
