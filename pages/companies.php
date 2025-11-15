@@ -113,112 +113,103 @@ function getCompanies($db) {
         return [];
     }
 }
+
+// ページ設定
+$pageTitle = '配達先企業管理 - Smiley配食事業システム';
+$activePage = 'companies';
+$basePath = '..';
+$pageSpecificCSS = "
+    .main-container {
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 20px;
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+        margin: 20px auto;
+        padding: 30px;
+        max-width: 1400px;
+    }
+    .smiley-green { color: #2E8B57; }
+    .bg-smiley-green { background-color: #2E8B57; }
+
+    .stat-card {
+        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+        border-radius: 15px;
+        padding: 25px;
+        margin-bottom: 20px;
+        border-left: 5px solid #2E8B57;
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+        transition: transform 0.3s ease;
+    }
+    .stat-card:hover {
+        transform: translateY(-5px);
+    }
+    .stat-number {
+        font-size: 2.2rem;
+        font-weight: bold;
+        color: #2E8B57;
+    }
+
+    .company-card {
+        background: white;
+        border-radius: 15px;
+        padding: 20px;
+        margin-bottom: 15px;
+        border-left: 4px solid #2E8B57;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+    }
+    .company-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+    }
+
+    .badge-status {
+        font-size: 0.8rem;
+        padding: 5px 10px;
+    }
+
+    .search-filters {
+        background: white;
+        border-radius: 15px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .btn-smiley {
+        background-color: #2E8B57;
+        border-color: #2E8B57;
+        color: white;
+    }
+    .btn-smiley:hover {
+        background-color: #228B22;
+        border-color: #228B22;
+        color: white;
+    }
+
+    .company-stats {
+        font-size: 0.9rem;
+    }
+    .company-stats .stat-item {
+        display: inline-block;
+        margin-right: 15px;
+        color: #6c757d;
+    }
+
+    .loading {
+        text-align: center;
+        padding: 40px;
+    }
+
+    .no-data {
+        text-align: center;
+        padding: 40px;
+        color: #6c757d;
+    }
+";
+
+require_once __DIR__ . '/../includes/header.php';
 ?>
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏢 配達先企業管理 - Smiley配食システム</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .main-container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-            margin: 20px auto;
-            padding: 30px;
-            max-width: 1400px;
-        }
-        .smiley-green { color: #2E8B57; }
-        .bg-smiley-green { background-color: #2E8B57; }
-        
-        .stat-card {
-            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-            border-radius: 15px;
-            padding: 25px;
-            margin-bottom: 20px;
-            border-left: 5px solid #2E8B57;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
-            transition: transform 0.3s ease;
-        }
-        .stat-card:hover {
-            transform: translateY(-5px);
-        }
-        .stat-number {
-            font-size: 2.2rem;
-            font-weight: bold;
-            color: #2E8B57;
-        }
-        
-        .company-card {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 15px;
-            border-left: 4px solid #2E8B57;
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-            transition: all 0.3s ease;
-        }
-        .company-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-        }
-        
-        .badge-status {
-            font-size: 0.8rem;
-            padding: 5px 10px;
-        }
-        
-        .search-filters {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-        }
-        
-        .btn-smiley {
-            background-color: #2E8B57;
-            border-color: #2E8B57;
-            color: white;
-        }
-        .btn-smiley:hover {
-            background-color: #228B22;
-            border-color: #228B22;
-            color: white;
-        }
-        
-        .company-stats {
-            font-size: 0.9rem;
-        }
-        .company-stats .stat-item {
-            display: inline-block;
-            margin-right: 15px;
-            color: #6c757d;
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 40px;
-        }
-        
-        .no-data {
-            text-align: center;
-            padding: 40px;
-            color: #6c757d;
-        }
-    </style>
-</head>
-<body>
-    <div class="main-container">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <!-- ヘッダー -->
         <div class="row align-items-center mb-4">
             <div class="col">
@@ -437,16 +428,9 @@ function getCompanies($db) {
             </div>
         </div>
 
-        <!-- フッター -->
-        <div class="text-center mt-5 pt-4 border-top">
-            <p class="text-muted mb-0">
-                <strong>Smiley配食事業 請求書管理システム v1.0.0</strong><br>
-                © 2025 Smiley配食事業. All rights reserved.
-            </p>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<?php
+// Page-specific JavaScript
+$customJS = <<<'JAVASCRIPT'
     <script>
         // 検索・フィルター機能
         function applyFilters() {
@@ -510,5 +494,7 @@ function getCompanies($db) {
             <?php endif; ?>
         });
     </script>
-</body>
-</html>
+JAVASCRIPT;
+
+require_once __DIR__ . '/../includes/footer.php';
+?>

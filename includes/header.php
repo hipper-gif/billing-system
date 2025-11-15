@@ -33,6 +33,13 @@ $showBackButton = $showBackButton ?? false;
     <!-- Material Theme CSS -->
     <link href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/assets/css/material-theme.css" rel="stylesheet">
 
+    <?php if (isset($pageSpecificCSS)): ?>
+    <!-- Page-specific CSS -->
+    <style>
+        <?php echo $pageSpecificCSS; ?>
+    </style>
+    <?php endif; ?>
+
     <style>
         body {
             font-family: 'Roboto', sans-serif;
