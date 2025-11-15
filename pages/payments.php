@@ -508,10 +508,16 @@ require_once __DIR__ . '/../includes/header.php';
             <span class="material-icons" style="vertical-align: middle; color: #4CAF50;">history</span>
             最近の入金履歴
         </h3>
-        <button type="button" class="btn btn-material btn-success" onclick="openBulkIssueModal()" id="bulkIssueBtn" style="display: none;">
-            <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt_long</span>
-            選択した入金の領収書を一括発行
-        </button>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-material btn-success" onclick="openBulkIssueModal()" id="bulkIssueBtn" style="display: none;">
+                <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt_long</span>
+                選択した入金の領収書を一括発行
+            </button>
+            <button type="button" class="btn btn-material btn-info" onclick="bulkPrintReceipts()" id="bulkPrintBtn" style="display: none;">
+                <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">print</span>
+                選択した領収書を一括印刷
+            </button>
+        </div>
     </div>
 
     <?php if (!empty($paymentHistory)): ?>
@@ -534,9 +540,11 @@ require_once __DIR__ . '/../includes/header.php';
             <?php foreach ($paymentHistory as $payment): ?>
             <tr>
                 <td>
-                    <?php if (empty($payment['receipt'])): ?>
-                        <input type="checkbox" class="payment-checkbox" value="<?php echo $payment['id']; ?>" onchange="updateBulkIssueButton()">
-                    <?php endif; ?>
+                    <input type="checkbox"
+                           class="payment-checkbox"
+                           value="<?php echo $payment['id']; ?>"
+                           data-has-receipt="<?php echo !empty($payment['receipt']) ? '1' : '0'; ?>"
+                           onchange="updateBulkButtons()">
                 </td>
                 <td><?php echo htmlspecialchars($payment['payment_date']); ?></td>
                 <td>
@@ -897,28 +905,79 @@ function toggleSelectAll(checkbox) {
     checkboxes.forEach(cb => {
         cb.checked = checkbox.checked;
     });
-    updateBulkIssueButton();
+    updateBulkButtons();
 }
 
-// 一括発行ボタンの表示/非表示
-function updateBulkIssueButton() {
+// 一括発行/印刷ボタンの表示/非表示
+function updateBulkButtons() {
     const checkboxes = document.querySelectorAll('.payment-checkbox:checked');
-    const bulkBtn = document.getElementById('bulkIssueBtn');
+    const bulkIssueBtn = document.getElementById('bulkIssueBtn');
+    const bulkPrintBtn = document.getElementById('bulkPrintBtn');
 
-    if (checkboxes.length > 0) {
-        bulkBtn.style.display = 'inline-flex';
+    // 選択されたチェックボックスの状態を確認
+    let hasUnissued = false;  // 未発行の入金
+    let hasIssued = false;    // 発行済みの入金
+
+    checkboxes.forEach(cb => {
+        const hasReceipt = cb.dataset.hasReceipt === '1';
+        if (hasReceipt) {
+            hasIssued = true;
+        } else {
+            hasUnissued = true;
+        }
+    });
+
+    // 未発行の入金が選択されている場合は一括発行ボタンを表示
+    if (hasUnissued) {
+        bulkIssueBtn.style.display = 'inline-flex';
     } else {
-        bulkBtn.style.display = 'none';
+        bulkIssueBtn.style.display = 'none';
     }
+
+    // 発行済みの入金が選択されている場合は一括印刷ボタンを表示
+    if (hasIssued) {
+        bulkPrintBtn.style.display = 'inline-flex';
+    } else {
+        bulkPrintBtn.style.display = 'none';
+    }
+}
+
+// 一括印刷機能
+function bulkPrintReceipts() {
+    const checkboxes = document.querySelectorAll('.payment-checkbox:checked');
+    const paymentIds = [];
+
+    // 発行済みの入金IDのみを抽出
+    checkboxes.forEach(cb => {
+        if (cb.dataset.hasReceipt === '1') {
+            paymentIds.push(cb.value);
+        }
+    });
+
+    if (paymentIds.length === 0) {
+        alert('領収書が発行されている入金を選択してください');
+        return;
+    }
+
+    // 一括印刷ページを新しいタブで開く
+    const url = `bulk_receipt_print.php?payment_ids=${paymentIds.join(',')}`;
+    window.open(url, '_blank');
 }
 
 // 一括領収書発行モーダルを開く
 function openBulkIssueModal() {
     const checkboxes = document.querySelectorAll('.payment-checkbox:checked');
-    const paymentIds = Array.from(checkboxes).map(cb => cb.value);
+    const paymentIds = [];
+
+    // 未発行の入金IDのみを抽出
+    checkboxes.forEach(cb => {
+        if (cb.dataset.hasReceipt === '0') {
+            paymentIds.push(cb.value);
+        }
+    });
 
     if (paymentIds.length === 0) {
-        alert('入金記録を選択してください');
+        alert('領収書が未発行の入金を選択してください');
         return;
     }
 
