@@ -1,6 +1,6 @@
 <?php
 /**
- * 領収書表示・印刷ページ
+ * 領収書一括印刷ページ
  * Smiley配食事業システム
  */
 
@@ -8,18 +8,33 @@ session_start();
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../classes/ReceiptManager.php';
 
-// 領収書IDを取得
-$receiptId = $_GET['id'] ?? null;
+// 入金IDを取得（カンマ区切り）
+$paymentIds = $_GET['payment_ids'] ?? '';
 
-if (!$receiptId) {
-    die('領収書IDが指定されていません');
+if (empty($paymentIds)) {
+    die('入金IDが指定されていません');
+}
+
+// カンマ区切りの文字列を配列に変換
+$paymentIdArray = explode(',', $paymentIds);
+$paymentIdArray = array_filter(array_map('intval', $paymentIdArray));
+
+if (empty($paymentIdArray)) {
+    die('有効な入金IDが指定されていません');
 }
 
 // 領収書データを取得
 $receiptManager = new ReceiptManager();
-$receipt = $receiptManager->getReceipt($receiptId);
+$receipts = [];
 
-if (!$receipt) {
+foreach ($paymentIdArray as $paymentId) {
+    $receipt = $receiptManager->getReceiptByPaymentId($paymentId);
+    if ($receipt) {
+        $receipts[] = $receipt;
+    }
+}
+
+if (empty($receipts)) {
     die('領収書が見つかりません');
 }
 
@@ -32,7 +47,7 @@ $hasLogo = file_exists($logoPath);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>領収書 - <?php echo htmlspecialchars($receipt['receipt_number']); ?></title>
+    <title>領収書一括印刷 (<?php echo count($receipts); ?>件)</title>
     <style>
         * {
             margin: 0;
@@ -42,17 +57,61 @@ $hasLogo = file_exists($logoPath);
 
         body {
             font-family: 'MS Mincho', 'Yu Mincho', serif;
-            padding: 20px;
             background-color: #f5f5f5;
+        }
+
+        .print-header {
+            background: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .print-buttons {
+            margin: 20px 0;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            margin: 0 10px;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .btn-print {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .btn-print:hover {
+            background-color: #45a049;
+        }
+
+        .btn-close {
+            background-color: #666;
+            color: white;
+        }
+
+        .btn-close:hover {
+            background-color: #555;
         }
 
         .receipt-container {
             width: 210mm;
             min-height: 297mm;
-            margin: 0 auto;
+            margin: 20px auto;
             padding: 30mm 20mm;
             background: white;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            page-break-after: always;
+        }
+
+        .receipt-container:last-child {
+            page-break-after: auto;
         }
 
         .receipt-header {
@@ -160,43 +219,17 @@ $hasLogo = file_exists($logoPath);
             font-weight: bold;
         }
 
-        .print-buttons {
-            text-align: center;
-            margin: 20px 0;
-        }
-
-        .btn {
-            padding: 12px 30px;
-            margin: 0 10px;
-            font-size: 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-
-        .btn-print {
-            background-color: #4CAF50;
-            color: white;
-        }
-
-        .btn-print:hover {
-            background-color: #45a049;
-        }
-
-        .btn-close {
-            background-color: #666;
-            color: white;
-        }
-
-        .btn-close:hover {
-            background-color: #555;
-        }
-
         @media print {
             body {
                 background-color: white;
-                padding: 0;
+            }
+
+            .print-header {
+                display: none;
+            }
+
+            .print-buttons {
+                display: none;
             }
 
             .receipt-container {
@@ -204,20 +237,30 @@ $hasLogo = file_exists($logoPath);
                 box-shadow: none;
                 margin: 0;
                 padding: 15mm 10mm;
+                page-break-after: always;
             }
 
-            .print-buttons {
-                display: none;
+            .receipt-container:last-child {
+                page-break-after: auto;
             }
+        }
+
+        @page {
+            size: A4;
+            margin: 0;
         }
     </style>
 </head>
 <body>
-    <div class="print-buttons">
-        <button onclick="window.print()" class="btn btn-print">印刷</button>
-        <button onclick="window.close()" class="btn btn-close">閉じる</button>
+    <div class="print-header">
+        <h2>領収書一括印刷 (<?php echo count($receipts); ?>件)</h2>
+        <div class="print-buttons">
+            <button onclick="window.print()" class="btn btn-print">一括印刷</button>
+            <button onclick="window.close()" class="btn btn-close">閉じる</button>
+        </div>
     </div>
 
+    <?php foreach ($receipts as $index => $receipt): ?>
     <div class="receipt-container">
         <div class="receipt-header">
             <?php if ($hasLogo): ?>
@@ -273,10 +316,15 @@ $hasLogo = file_exists($logoPath);
             </div>
         </div>
     </div>
+    <?php endforeach; ?>
 
-    <div class="print-buttons">
-        <button onclick="window.print()" class="btn btn-print">印刷</button>
-        <button onclick="window.close()" class="btn btn-close">閉じる</button>
-    </div>
+    <script>
+        // ページ読み込み完了後に自動的に印刷ダイアログを表示（オプション）
+        // window.addEventListener('load', function() {
+        //     setTimeout(function() {
+        //         window.print();
+        //     }, 500);
+        // });
+    </script>
 </body>
 </html>
