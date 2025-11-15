@@ -297,24 +297,6 @@ require_once __DIR__ . '/../includes/header.php';
 </div>
 <?php endif; ?>
 
-<!-- デバッグ情報 -->
-<?php if (defined('DEBUG_MODE') && DEBUG_MODE): ?>
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="alert alert-info">
-            <h6><strong>デバッグ情報</strong></h6>
-            <small>
-                - 総注文数: <?php echo $statistics['total_orders'] ?? 0; ?><br>
-                - 総金額: <?php echo number_format($statistics['total_amount'] ?? 0); ?>円<br>
-                - 入金済み: <?php echo number_format($statistics['collected_amount'] ?? 0); ?>円<br>
-                - 未回収: <?php echo number_format($statistics['outstanding_amount'] ?? 0); ?>円<br>
-                - 売掛残高件数: <?php echo count($receivables); ?>件<br>
-            </small>
-        </div>
-    </div>
-</div>
-<?php endif; ?>
-
 <!-- データがない場合の案内 -->
 <?php if (($statistics['total_orders'] ?? 0) === 0): ?>
 <div class="row mb-4">

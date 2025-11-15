@@ -72,7 +72,7 @@ class SimpleCollectionManager {
                     'start' => $startDate,
                     'end' => $endDate
                 ],
-                'error' => $e->getMessage()
+                'error' => defined('DEBUG_MODE') && DEBUG_MODE ? $e->getMessage() : 'エラーが発生しました。'
             ];
         }
     }
@@ -378,7 +378,7 @@ class SimpleCollectionManager {
             error_log("SimpleCollectionManager::recordPayment Error: " . $e->getMessage());
             return [
                 'success' => false,
-                'error' => $e->getMessage()
+                'error' => defined('DEBUG_MODE') && DEBUG_MODE ? $e->getMessage() : 'エラーが発生しました。'
             ];
         }
     }
@@ -496,7 +496,7 @@ class SimpleCollectionManager {
             error_log("SimpleCollectionManager::recordCompanyPayment Error: " . $e->getMessage());
             return [
                 'success' => false,
-                'error' => $e->getMessage()
+                'error' => defined('DEBUG_MODE') && DEBUG_MODE ? $e->getMessage() : 'エラーが発生しました。'
             ];
         }
     }
@@ -794,7 +794,7 @@ class SimpleCollectionManager {
             error_log("SimpleCollectionManager::updatePayment Error: " . $e->getMessage());
             return [
                 'success' => false,
-                'error' => '入金情報の更新に失敗しました: ' . $e->getMessage()
+                'error' => defined('DEBUG_MODE') && DEBUG_MODE ? '入金情報の更新に失敗しました: ' . $e->getMessage() : '入金情報の更新に失敗しました。'
             ];
         }
     }
@@ -838,7 +838,7 @@ class SimpleCollectionManager {
             error_log("SimpleCollectionManager::deletePayment Error: " . $e->getMessage());
             return [
                 'success' => false,
-                'error' => '入金の削除に失敗しました: ' . $e->getMessage()
+                'error' => defined('DEBUG_MODE') && DEBUG_MODE ? '入金の削除に失敗しました: ' . $e->getMessage() : '入金の削除に失敗しました。'
             ];
         }
     }

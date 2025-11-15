@@ -180,7 +180,7 @@ class ReceiptManager {
             error_log("Receipt issue error: " . $e->getMessage());
             return [
                 'success' => false,
-                'message' => '領収書の発行に失敗しました: ' . $e->getMessage()
+                'message' => defined('DEBUG_MODE') && DEBUG_MODE ? '領収書の発行に失敗しました: ' . $e->getMessage() : '領収書の発行に失敗しました。'
             ];
         }
     }
@@ -409,7 +409,7 @@ class ReceiptManager {
             error_log("Get receipt list error: " . $e->getMessage());
             return [
                 'success' => false,
-                'message' => '領収書一覧の取得に失敗しました: ' . $e->getMessage(),
+                'message' => defined('DEBUG_MODE') && DEBUG_MODE ? '領収書一覧の取得に失敗しました: ' . $e->getMessage() : '領収書一覧の取得に失敗しました。',
                 'receipts' => []
             ];
         }
