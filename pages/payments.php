@@ -59,6 +59,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['record_payment'])) {
     }
 }
 
+// 入金編集処理
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
+    $result = $collectionManager->updatePayment([
+        'payment_id' => $_POST['payment_id'],
+        'payment_date' => $_POST['payment_date'],
+        'amount' => $_POST['amount'],
+        'payment_method' => $_POST['payment_method'],
+        'reference_number' => $_POST['reference_number'] ?? '',
+        'notes' => $_POST['notes'] ?? ''
+    ]);
+
+    if ($result['success']) {
+        $message = $result['message'];
+        $messageType = 'success';
+    } else {
+        $message = 'エラー: ' . $result['error'];
+        $messageType = 'danger';
+    }
+}
+
+// 入金削除処理
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_payment'])) {
+    $result = $collectionManager->deletePayment($_POST['payment_id']);
+
+    if ($result['success']) {
+        $message = $result['message'];
+        $messageType = 'success';
+    } else {
+        $message = 'エラー: ' . $result['error'];
+        $messageType = 'danger';
+    }
+}
+
 // 領収書発行処理
 /*
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_receipt'])) {
@@ -88,15 +121,56 @@ try {
     // 表示タイプ（個人別/企業別）
     $viewType = $_GET['view'] ?? 'individual';
 
+    // 検索パラメータ
+    $searchQuery = $_GET['search'] ?? '';
+    $sortBy = $_GET['sort'] ?? 'outstanding_desc';
+
     // 売掛残高を取得
     if ($viewType === 'company') {
-        $receivables = $collectionManager->getCompanyReceivables(['limit' => 50]);
+        $receivables = $collectionManager->getCompanyReceivables(['limit' => 100]);
     } else {
-        $receivables = $collectionManager->getUserReceivables(['limit' => 50]);
+        $receivables = $collectionManager->getUserReceivables(['limit' => 100]);
+    }
+
+    // 検索フィルタ
+    if (!empty($searchQuery)) {
+        $receivables = array_filter($receivables, function($item) use ($searchQuery, $viewType) {
+            if ($viewType === 'company') {
+                return stripos($item['company_name'], $searchQuery) !== false;
+            } else {
+                return stripos($item['user_name'], $searchQuery) !== false ||
+                       stripos($item['user_code'], $searchQuery) !== false ||
+                       stripos($item['company_name'], $searchQuery) !== false;
+            }
+        });
+    }
+
+    // ソート
+    if (!empty($receivables)) {
+        usort($receivables, function($a, $b) use ($sortBy) {
+            switch ($sortBy) {
+                case 'outstanding_asc':
+                    return $a['outstanding_amount'] <=> $b['outstanding_amount'];
+                case 'outstanding_desc':
+                    return $b['outstanding_amount'] <=> $a['outstanding_amount'];
+                case 'name_asc':
+                    $nameA = $a['user_name'] ?? $a['company_name'];
+                    $nameB = $b['user_name'] ?? $b['company_name'];
+                    return strcmp($nameA, $nameB);
+                case 'name_desc':
+                    $nameA = $a['user_name'] ?? $a['company_name'];
+                    $nameB = $b['user_name'] ?? $b['company_name'];
+                    return strcmp($nameB, $nameA);
+                case 'orders_desc':
+                    return $b['total_orders'] <=> $a['total_orders'];
+                default:
+                    return $b['outstanding_amount'] <=> $a['outstanding_amount'];
+            }
+        });
     }
 
     // 入金履歴を取得
-    $paymentHistory = $collectionManager->getPaymentHistory(['limit' => 10]);
+    $paymentHistory = $collectionManager->getPaymentHistory(['limit' => 20]);
 
     // 各入金の領収書発行状態をチェック
     /*
@@ -324,6 +398,45 @@ require_once __DIR__ . '/../includes/header.php';
     </a>
 </div>
 
+<!-- 検索・ソート -->
+<div class="search-sort-controls" style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+    <form method="GET" style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+        <input type="hidden" name="view" value="<?php echo htmlspecialchars($viewType); ?>">
+
+        <div style="flex: 1; min-width: 200px;">
+            <input type="text"
+                   name="search"
+                   placeholder="<?php echo $viewType === 'company' ? '企業名で検索' : '利用者名・利用者コード・企業名で検索'; ?>"
+                   value="<?php echo htmlspecialchars($searchQuery); ?>"
+                   style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+
+        <div style="min-width: 180px;">
+            <select name="sort"
+                    style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;"
+                    onchange="this.form.submit()">
+                <option value="outstanding_desc" <?php echo $sortBy === 'outstanding_desc' ? 'selected' : ''; ?>>未回収額（高い順）</option>
+                <option value="outstanding_asc" <?php echo $sortBy === 'outstanding_asc' ? 'selected' : ''; ?>>未回収額（低い順）</option>
+                <option value="name_asc" <?php echo $sortBy === 'name_asc' ? 'selected' : ''; ?>>名前（昇順）</option>
+                <option value="name_desc" <?php echo $sortBy === 'name_desc' ? 'selected' : ''; ?>>名前（降順）</option>
+                <option value="orders_desc" <?php echo $sortBy === 'orders_desc' ? 'selected' : ''; ?>>注文件数（多い順）</option>
+            </select>
+        </div>
+
+        <button type="submit" class="btn btn-material btn-primary">
+            <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">search</span>
+            検索
+        </button>
+
+        <?php if (!empty($searchQuery) || $sortBy !== 'outstanding_desc'): ?>
+        <a href="?view=<?php echo $viewType; ?>" class="btn btn-material btn-secondary">
+            <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">clear</span>
+            クリア
+        </a>
+        <?php endif; ?>
+    </form>
+</div>
+
 <!-- 売掛残高一覧 -->
 <div class="receivables-table">
     <h3 class="mb-4">
@@ -396,7 +509,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <th class="amount-cell">入金額</th>
                 <th>支払方法</th>
                 <th>注文数</th>
-                <!-- <th>領収書</th> -->
+                <th>操作</th>
             </tr>
         </thead>
         <tbody>
@@ -431,22 +544,18 @@ require_once __DIR__ . '/../includes/header.php';
                     ?>
                 </td>
                 <td><?php echo $payment['order_count']; ?>件</td>
-                <!-- 領収書機能は一時的に無効化
                 <td>
-                    <?php if ($payment['receipt']): ?>
-                        <a href="receipt.php?id=<?php echo $payment['receipt']['id']; ?>" class="btn btn-material btn-sm btn-info" target="_blank">
-                            <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt</span>
-                            表示
-                        </a>
-                    <?php else: ?>
-                        <button class="btn btn-material btn-sm btn-success"
-                                onclick='openReceiptModal(<?php echo htmlspecialchars(json_encode($payment), ENT_QUOTES, 'UTF-8'); ?>)'>
-                            <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt_long</span>
-                            発行
-                        </button>
-                    <?php endif; ?>
+                    <button class="btn btn-material btn-sm btn-primary"
+                            onclick='openEditPaymentModal(<?php echo htmlspecialchars(json_encode($payment), ENT_QUOTES, 'UTF-8'); ?>)'
+                            title="編集">
+                        <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">edit</span>
+                    </button>
+                    <button class="btn btn-material btn-sm btn-danger"
+                            onclick='confirmDeletePayment(<?php echo $payment["id"]; ?>, "<?php echo htmlspecialchars($payment["user_name"] ?? $payment["company_name"]); ?>")'
+                            title="削除">
+                        <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">delete</span>
+                    </button>
                 </td>
-                -->
             </tr>
             <?php endforeach; ?>
         </tbody>
@@ -474,7 +583,14 @@ require_once __DIR__ . '/../includes/header.php';
 
             <div class="form-group">
                 <label for="amount">入金額 *</label>
-                <input type="number" name="amount" id="amount" required min="1" step="0.01">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="number" name="amount" id="amount" required min="1" step="0.01" style="flex: 1;">
+                    <button type="button" class="btn btn-material btn-info" onclick="setFullAmount()" id="fullAmountBtn">
+                        <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">account_balance_wallet</span>
+                        満額入金
+                    </button>
+                </div>
+                <input type="hidden" id="full_amount_value" value="0">
             </div>
 
             <div class="form-group">
@@ -509,6 +625,64 @@ require_once __DIR__ . '/../includes/header.php';
         </form>
     </div>
 </div>
+
+<!-- 入金編集モーダル -->
+<div id="editPaymentModal" class="payment-modal">
+    <div class="payment-modal-content">
+        <h3 class="mb-4">入金情報を編集</h3>
+        <form method="POST" id="editPaymentForm">
+            <input type="hidden" name="payment_id" id="edit_payment_id" value="">
+
+            <div id="editPaymentInfo" class="alert alert-info mb-4"></div>
+
+            <div class="form-group">
+                <label for="edit_payment_date">入金日 *</label>
+                <input type="date" name="payment_date" id="edit_payment_date" required>
+            </div>
+
+            <div class="form-group">
+                <label for="edit_amount">入金額 *</label>
+                <input type="number" name="amount" id="edit_amount" required min="1" step="0.01">
+            </div>
+
+            <div class="form-group">
+                <label for="edit_payment_method">支払方法 *</label>
+                <select name="payment_method" id="edit_payment_method" required>
+                    <option value="cash">現金</option>
+                    <option value="bank_transfer">銀行振込</option>
+                    <option value="account_debit">口座引き落とし</option>
+                    <option value="other">その他</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="edit_reference_number">参照番号（振込番号等）</label>
+                <input type="text" name="reference_number" id="edit_reference_number">
+            </div>
+
+            <div class="form-group">
+                <label for="edit_notes">備考</label>
+                <textarea name="notes" id="edit_notes" rows="3"></textarea>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" name="update_payment" class="btn btn-material btn-primary flex-grow-1">
+                    <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">save</span>
+                    更新
+                </button>
+                <button type="button" class="btn btn-material btn-secondary" onclick="closeEditPaymentModal()">
+                    キャンセル
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 入金削除フォーム（非表示） -->
+<form method="POST" id="deletePaymentForm" style="display: none;">
+    <input type="hidden" name="payment_id" id="delete_payment_id" value="">
+    <input type="hidden" name="delete_payment" value="1">
+</form>
 
 <!-- 領収書発行モーダル（一時的に無効化）
 <div id="receiptModal" class="payment-modal">
@@ -559,6 +733,7 @@ function openPaymentModal(type, data) {
     if (type === 'individual') {
         document.getElementById('user_id').value = data.user_id;
         document.getElementById('company_name').value = '';
+        document.getElementById('full_amount_value').value = data.outstanding_amount;
         paymentInfo.innerHTML = `
             <strong>個人別入金</strong><br>
             利用者: ${data.user_name}<br>
@@ -569,6 +744,7 @@ function openPaymentModal(type, data) {
     } else {
         document.getElementById('user_id').value = '';
         document.getElementById('company_name').value = data.company_name;
+        document.getElementById('full_amount_value').value = data.outstanding_amount;
         paymentInfo.innerHTML = `
             <strong>企業別入金</strong><br>
             企業: ${data.company_name}<br>
@@ -583,6 +759,12 @@ function openPaymentModal(type, data) {
     modal.classList.add('active');
 }
 
+// 満額入金ボタン
+function setFullAmount() {
+    const fullAmount = document.getElementById('full_amount_value').value;
+    document.getElementById('amount').value = fullAmount;
+}
+
 function closePaymentModal() {
     document.getElementById('paymentModal').classList.remove('active');
     document.getElementById('paymentForm').reset();
@@ -594,6 +776,48 @@ document.getElementById('paymentModal').addEventListener('click', function(e) {
         closePaymentModal();
     }
 });
+
+// 編集モーダルを開く
+function openEditPaymentModal(payment) {
+    const modal = document.getElementById('editPaymentModal');
+    const editInfo = document.getElementById('editPaymentInfo');
+
+    document.getElementById('edit_payment_id').value = payment.id;
+    document.getElementById('edit_payment_date').value = payment.payment_date;
+    document.getElementById('edit_amount').value = payment.amount;
+    document.getElementById('edit_payment_method').value = payment.payment_method;
+    document.getElementById('edit_reference_number').value = payment.reference_number || '';
+    document.getElementById('edit_notes').value = payment.notes || '';
+
+    let name = payment.payment_type === 'individual' ? payment.user_name : payment.company_name;
+    editInfo.innerHTML = `
+        <strong>入金情報の編集</strong><br>
+        ${payment.payment_type === 'individual' ? '利用者' : '企業'}: ${name}<br>
+        注文数: ${payment.order_count}件
+    `;
+
+    modal.classList.add('active');
+}
+
+function closeEditPaymentModal() {
+    document.getElementById('editPaymentModal').classList.remove('active');
+    document.getElementById('editPaymentForm').reset();
+}
+
+// 編集モーダル外クリックで閉じる
+document.getElementById('editPaymentModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeEditPaymentModal();
+    }
+});
+
+// 入金削除確認
+function confirmDeletePayment(paymentId, name) {
+    if (confirm(`${name} の入金記録を削除してもよろしいですか？\n\nこの操作は取り消せません。削除すると、関連する按分情報もすべて削除されます。`)) {
+        document.getElementById('delete_payment_id').value = paymentId;
+        document.getElementById('deletePaymentForm').submit();
+    }
+}
 
 /*
 // 領収書発行モーダルを開く（一時的に無効化）

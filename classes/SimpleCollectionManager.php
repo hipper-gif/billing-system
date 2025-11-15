@@ -653,4 +653,221 @@ class SimpleCollectionManager {
             return [];
         }
     }
+
+    /**
+     * 入金情報を更新
+     * @param array $params 更新パラメータ
+     * @return array 結果
+     */
+    public function updatePayment($params) {
+        try {
+            $paymentId = $params['payment_id'] ?? null;
+            $paymentDate = $params['payment_date'] ?? null;
+            $amount = $params['amount'] ?? null;
+            $paymentMethod = $params['payment_method'] ?? null;
+            $referenceNumber = $params['reference_number'] ?? '';
+            $notes = $params['notes'] ?? '';
+
+            if (!$paymentId || !$paymentDate || !$amount) {
+                return ['success' => false, 'error' => '必須項目が不足しています'];
+            }
+
+            $conn = $this->db->getConnection();
+            $conn->beginTransaction();
+
+            // 既存の入金情報を取得
+            $sql = "SELECT * FROM order_payments WHERE id = :payment_id";
+            $stmt = $conn->prepare($sql);
+            $stmt->execute([':payment_id' => $paymentId]);
+            $existingPayment = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$existingPayment) {
+                $conn->rollBack();
+                return ['success' => false, 'error' => '入金記録が見つかりません'];
+            }
+
+            // 入金情報を更新
+            $updateSql = "
+                UPDATE order_payments
+                SET payment_date = :payment_date,
+                    amount = :amount,
+                    payment_method = :payment_method,
+                    reference_number = :reference_number,
+                    notes = :notes,
+                    updated_at = NOW()
+                WHERE id = :payment_id
+            ";
+
+            $updateStmt = $conn->prepare($updateSql);
+            $updateStmt->execute([
+                ':payment_id' => $paymentId,
+                ':payment_date' => $paymentDate,
+                ':amount' => $amount,
+                ':payment_method' => $paymentMethod,
+                ':reference_number' => $referenceNumber,
+                ':notes' => $notes
+            ]);
+
+            // 金額が変更された場合、按分を再計算
+            if ($amount != $existingPayment['amount']) {
+                // 既存の按分を削除
+                $deleteSql = "DELETE FROM order_payment_details WHERE payment_id = :payment_id";
+                $deleteStmt = $conn->prepare($deleteSql);
+                $deleteStmt->execute([':payment_id' => $paymentId]);
+
+                // 未払いの注文を取得して再按分
+                if ($existingPayment['payment_type'] === 'individual') {
+                    $ordersSql = "
+                        SELECT
+                            o.id,
+                            o.total_amount,
+                            COALESCE(SUM(opd2.allocated_amount), 0) as paid_amount,
+                            (o.total_amount - COALESCE(SUM(opd2.allocated_amount), 0)) as outstanding
+                        FROM orders o
+                        LEFT JOIN order_payment_details opd2 ON o.id = opd2.order_id AND opd2.payment_id != :payment_id
+                        WHERE o.user_id = :user_id
+                        GROUP BY o.id
+                        HAVING outstanding > 0
+                        ORDER BY o.order_date ASC
+                    ";
+                    $ordersStmt = $conn->prepare($ordersSql);
+                    $ordersStmt->execute([
+                        ':payment_id' => $paymentId,
+                        ':user_id' => $existingPayment['user_id']
+                    ]);
+                } else {
+                    $ordersSql = "
+                        SELECT
+                            o.id,
+                            o.total_amount,
+                            COALESCE(SUM(opd2.allocated_amount), 0) as paid_amount,
+                            (o.total_amount - COALESCE(SUM(opd2.allocated_amount), 0)) as outstanding
+                        FROM orders o
+                        LEFT JOIN order_payment_details opd2 ON o.id = opd2.order_id AND opd2.payment_id != :payment_id
+                        WHERE o.company_name = :company_name
+                        GROUP BY o.id
+                        HAVING outstanding > 0
+                        ORDER BY o.order_date ASC
+                    ";
+                    $ordersStmt = $conn->prepare($ordersSql);
+                    $ordersStmt->execute([
+                        ':payment_id' => $paymentId,
+                        ':company_name' => $existingPayment['company_name']
+                    ]);
+                }
+
+                $orders = $ordersStmt->fetchAll(PDO::FETCH_ASSOC);
+                $remainingAmount = $amount;
+
+                // 再按分
+                foreach ($orders as $order) {
+                    if ($remainingAmount <= 0) break;
+
+                    $allocateAmount = min($remainingAmount, $order['outstanding']);
+
+                    $insertSql = "
+                        INSERT INTO order_payment_details (payment_id, order_id, allocated_amount)
+                        VALUES (:payment_id, :order_id, :allocated_amount)
+                    ";
+                    $insertStmt = $conn->prepare($insertSql);
+                    $insertStmt->execute([
+                        ':payment_id' => $paymentId,
+                        ':order_id' => $order['id'],
+                        ':allocated_amount' => $allocateAmount
+                    ]);
+
+                    $remainingAmount -= $allocateAmount;
+                }
+            }
+
+            $conn->commit();
+
+            return [
+                'success' => true,
+                'message' => '入金情報を更新しました'
+            ];
+
+        } catch (Exception $e) {
+            if ($conn && $conn->inTransaction()) {
+                $conn->rollBack();
+            }
+            error_log("SimpleCollectionManager::updatePayment Error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => '入金情報の更新に失敗しました: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * 入金を削除
+     * @param int $paymentId 入金ID
+     * @return array 結果
+     */
+    public function deletePayment($paymentId) {
+        try {
+            $conn = $this->db->getConnection();
+            $conn->beginTransaction();
+
+            // 入金詳細を削除（FOREIGN KEY CASCADE設定により自動削除されるが明示的に削除）
+            $deleteDetailsSql = "DELETE FROM order_payment_details WHERE payment_id = :payment_id";
+            $deleteDetailsStmt = $conn->prepare($deleteDetailsSql);
+            $deleteDetailsStmt->execute([':payment_id' => $paymentId]);
+
+            // 入金を削除
+            $deletePaymentSql = "DELETE FROM order_payments WHERE id = :payment_id";
+            $deletePaymentStmt = $conn->prepare($deletePaymentSql);
+            $deletePaymentStmt->execute([':payment_id' => $paymentId]);
+
+            if ($deletePaymentStmt->rowCount() === 0) {
+                $conn->rollBack();
+                return ['success' => false, 'error' => '入金記録が見つかりません'];
+            }
+
+            $conn->commit();
+
+            return [
+                'success' => true,
+                'message' => '入金を削除しました'
+            ];
+
+        } catch (Exception $e) {
+            if ($conn && $conn->inTransaction()) {
+                $conn->rollBack();
+            }
+            error_log("SimpleCollectionManager::deletePayment Error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => '入金の削除に失敗しました: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * 入金情報を取得（編集用）
+     * @param int $paymentId 入金ID
+     * @return array|null 入金情報
+     */
+    public function getPaymentById($paymentId) {
+        try {
+            $sql = "
+                SELECT
+                    op.*,
+                    COUNT(opd.id) as order_count
+                FROM order_payments op
+                LEFT JOIN order_payment_details opd ON op.id = opd.payment_id
+                WHERE op.id = :payment_id
+                GROUP BY op.id
+            ";
+
+            $stmt = $this->db->getConnection()->prepare($sql);
+            $stmt->execute([':payment_id' => $paymentId]);
+
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+
+        } catch (Exception $e) {
+            error_log("SimpleCollectionManager::getPaymentById Error: " . $e->getMessage());
+            return null;
+        }
+    }
 }
