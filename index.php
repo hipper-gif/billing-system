@@ -50,28 +50,6 @@ try {
 require_once __DIR__ . '/includes/header.php';
 ?>
 
-<!-- デバッグ情報（開発中のみ表示） -->
-<?php if (defined('DEBUG_MODE') && DEBUG_MODE): ?>
-<div class="row mb-3">
-    <div class="col-12">
-        <div class="alert alert-info alert-dismissible fade show" role="alert">
-            <h6><strong>🔧 デバッグ情報</strong></h6>
-            <small>
-                <strong>データ取得状況:</strong><br>
-                - 総注文数: <?php echo $orderCount; ?>件<br>
-                - 入金済み: <?php echo number_format($totalSales); ?>円<br>
-                - 未回収: <?php echo number_format($outstandingAmount); ?>円<br>
-                - 期限切れ: <?php echo $overdueCount; ?>件<br>
-                - 要対応: <?php echo $dueSoonCount; ?>件<br>
-                - 月別推移データ: <?php echo count($trendData); ?>ヶ月分<br>
-                - 環境: <?php echo ENVIRONMENT; ?>
-            </small>
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    </div>
-</div>
-<?php endif; ?>
-
 <!-- ダッシュボードヘッダー -->
 <div class="row mb-4">
     <div class="col-12">
