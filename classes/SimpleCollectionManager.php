@@ -181,28 +181,40 @@ class SimpleCollectionManager {
                 $endDate = date('Y-m-t');
             }
 
-            // 期限切れ（30日以上経過）
+            // 期限切れ（30日以上経過）- 未払い残高がある注文のみカウント
             $overdueSql = "
                 SELECT
                     COUNT(*) as count,
-                    COALESCE(SUM(o.total_amount), 0) as total_amount
+                    COALESCE(SUM(o.total_amount - COALESCE(paid.allocated_total, 0)), 0) as total_amount
                 FROM orders o
+                LEFT JOIN (
+                    SELECT order_id, SUM(allocated_amount) as allocated_total
+                    FROM order_payment_details
+                    GROUP BY order_id
+                ) paid ON o.id = paid.order_id
                 WHERE o.order_date BETWEEN :start_date AND :end_date
                 AND DATEDIFF(CURDATE(), o.order_date) > 30
+                AND (o.total_amount - COALESCE(paid.allocated_total, 0)) > 0
             ";
 
             $stmt = $this->db->getConnection()->prepare($overdueSql);
             $stmt->execute([':start_date' => $startDate, ':end_date' => $endDate]);
             $overdue = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // 期限間近（14-30日）
+            // 期限間近（14-30日）- 未払い残高がある注文のみカウント
             $dueSoonSql = "
                 SELECT
                     COUNT(*) as count,
-                    COALESCE(SUM(o.total_amount), 0) as total_amount
+                    COALESCE(SUM(o.total_amount - COALESCE(paid.allocated_total, 0)), 0) as total_amount
                 FROM orders o
+                LEFT JOIN (
+                    SELECT order_id, SUM(allocated_amount) as allocated_total
+                    FROM order_payment_details
+                    GROUP BY order_id
+                ) paid ON o.id = paid.order_id
                 WHERE o.order_date BETWEEN :start_date AND :end_date
                 AND DATEDIFF(CURDATE(), o.order_date) BETWEEN 14 AND 30
+                AND (o.total_amount - COALESCE(paid.allocated_total, 0)) > 0
             ";
 
             $stmt = $this->db->getConnection()->prepare($dueSoonSql);
