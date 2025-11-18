@@ -215,7 +215,6 @@ $showBackButton = $showBackButton ?? false;
                 <?php endif; ?>
 
                 <a href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/index.php" class="app-bar-brand">
-                    <span class="material-icons">restaurant</span>
                     <div class="app-bar-title">
                         <div class="app-bar-title-main">Smiley配食事業システム</div>
                         <div class="app-bar-title-sub">集金管理システム</div>
@@ -226,34 +225,29 @@ $showBackButton = $showBackButton ?? false;
             <nav class="nav-menu">
                 <a href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/index.php"
                    class="nav-item-btn <?php echo $activePage === 'dashboard' ? 'active' : ''; ?>">
-                    <span class="material-icons">dashboard</span>
-                    <span>ダッシュボード</span>
+                    ダッシュボード
                 </a>
 
                 <a href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/pages/payments.php"
                    class="nav-item-btn <?php echo $activePage === 'payments' ? 'active' : ''; ?>">
-                    <span class="material-icons">payment</span>
-                    <span>集金管理</span>
+                    集金管理
                 </a>
 
                 <a href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/pages/companies.php"
                    class="nav-item-btn <?php echo $activePage === 'companies' ? 'active' : ''; ?>">
-                    <span class="material-icons">business</span>
-                    <span>企業管理</span>
+                    企業管理
                 </a>
 
                 <a href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/pages/csv_import.php"
                    class="nav-item-btn <?php echo $activePage === 'import' ? 'active' : ''; ?>">
-                    <span class="material-icons">upload_file</span>
-                    <span>データ取込</span>
+                    データ取込
                 </a>
 
                 <?php if (defined('DEBUG_MODE') && DEBUG_MODE): ?>
                 <a href="<?php echo htmlspecialchars($basePath ?? '..'); ?>/pages/diagnosis.php"
                    class="nav-item-btn <?php echo $activePage === 'diagnosis' ? 'active' : ''; ?>"
                    style="background: rgba(255, 193, 7, 0.1);">
-                    <span class="material-icons">bug_report</span>
-                    <span>診断</span>
+                    診断
                 </a>
                 <?php endif; ?>
             </nav>
