@@ -256,11 +256,12 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <?php
-$customJS = <<<'JAVASCRIPT'
+$trendDataJson = json_encode($trendData);
+$customJS = <<<JAVASCRIPT
 <script>
 // Chart.js 設定
 const chartData = {
-    trend: <?php echo json_encode($trendData); ?>
+    trend: {$trendDataJson}
 };
 
 // 月別売上推移チャート
