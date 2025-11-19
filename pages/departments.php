@@ -1,12 +1,9 @@
 <?php
 /**
- * 部署管理画面（修正版）
- * Database統一対応版
- * 
- * 修正内容:
- * 1. Database::getInstance() を使用
- * 2. エラーハンドリング強化
- * 3. Smiley配食事業専用UI
+ * 部署管理画面
+ * Smiley配食事業システム
+ *
+ * 共通ヘッダー/フッター使用版
  */
 
 require_once '../config/database.php';
@@ -15,7 +12,7 @@ require_once '../classes/SecurityHelper.php';
 // セキュリティヘッダー設定
 SecurityHelper::setSecurityHeaders();
 
-// Database::getInstance() を使用（修正箇所）
+// Database::getInstance() を使用
 $db = Database::getInstance();
 
 // フィルター取得
@@ -40,7 +37,7 @@ function getDepartmentStats($db, $companyFilter = '') {
 
         $whereClause = '';
         $params = [];
-        
+
         if ($companyFilter) {
             $whereClause = 'WHERE d.company_id = ?';
             $params[] = $companyFilter;
@@ -59,8 +56,8 @@ function getDepartmentStats($db, $companyFilter = '') {
 
         // 部署を持つ企業数
         $stmt = $db->query("
-            SELECT COUNT(DISTINCT d.company_id) as companies 
-            FROM departments d 
+            SELECT COUNT(DISTINCT d.company_id) as companies
+            FROM departments d
             WHERE d.is_active = 1
         ");
         $result = $stmt->fetch();
@@ -68,9 +65,9 @@ function getDepartmentStats($db, $companyFilter = '') {
 
         // 部署に所属する利用者数
         $stmt = $db->query("
-            SELECT COUNT(u.id) as users 
-            FROM users u 
-            JOIN departments d ON u.department_id = d.id 
+            SELECT COUNT(u.id) as users
+            FROM users u
+            JOIN departments d ON u.department_id = d.id
             WHERE u.is_active = 1 AND d.is_active = 1
         ");
         $result = $stmt->fetch();
@@ -78,10 +75,10 @@ function getDepartmentStats($db, $companyFilter = '') {
 
         // 注文のある部署数
         $stmt = $db->query("
-            SELECT COUNT(DISTINCT d.id) as departments 
-            FROM departments d 
-            JOIN users u ON d.id = u.department_id 
-            JOIN orders o ON u.user_code = o.user_code 
+            SELECT COUNT(DISTINCT d.id) as departments
+            FROM departments d
+            JOIN users u ON d.id = u.department_id
+            JOIN orders o ON u.user_code = o.user_code
             WHERE d.is_active = 1 AND o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
         ");
         $result = $stmt->fetch();
@@ -127,7 +124,7 @@ function getDepartments($db, $companyFilter = '', $searchTerm = '') {
         $whereClause = 'WHERE ' . implode(' AND ', $whereConditions);
 
         $stmt = $db->query("
-            SELECT 
+            SELECT
                 d.*,
                 c.company_name,
                 c.company_code,
@@ -145,7 +142,7 @@ function getDepartments($db, $companyFilter = '', $searchTerm = '') {
             GROUP BY d.id
             ORDER BY c.company_name ASC, d.department_name ASC
         ", $params);
-        
+
         return $stmt->fetchAll();
 
     } catch (Exception $e) {
@@ -157,12 +154,12 @@ function getDepartments($db, $companyFilter = '', $searchTerm = '') {
 function getCompanies($db) {
     try {
         $stmt = $db->query("
-            SELECT id, company_name, company_code 
-            FROM companies 
-            WHERE is_active = 1 
+            SELECT id, company_name, company_code
+            FROM companies
+            WHERE is_active = 1
             ORDER BY company_name ASC
         ");
-        
+
         return $stmt->fetchAll();
 
     } catch (Exception $e) {
@@ -170,423 +167,397 @@ function getCompanies($db) {
         return [];
     }
 }
+
+// ページ設定
+$pageTitle = '部署管理 - Smiley配食事業システム';
+$activePage = 'departments';
+$basePath = '..';
+$pageSpecificCSS = "
+    .main-container {
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 20px;
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+        margin: 20px auto;
+        padding: 30px;
+        max-width: 1400px;
+    }
+    .smiley-green { color: #2E8B57; }
+    .bg-smiley-green { background-color: #2E8B57; }
+
+    .stat-card {
+        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+        border-radius: 15px;
+        padding: 25px;
+        margin-bottom: 20px;
+        border-left: 5px solid #2E8B57;
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+        transition: transform 0.3s ease;
+    }
+    .stat-card:hover {
+        transform: translateY(-5px);
+    }
+    .stat-number {
+        font-size: 2.2rem;
+        font-weight: bold;
+        color: #2E8B57;
+    }
+
+    .department-card {
+        background: white;
+        border-radius: 15px;
+        padding: 20px;
+        margin-bottom: 15px;
+        border-left: 4px solid #2E8B57;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+    }
+    .department-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+    }
+
+    .company-badge {
+        background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
+
+    .search-filters {
+        background: white;
+        border-radius: 15px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .btn-smiley {
+        background-color: #2E8B57;
+        border-color: #2E8B57;
+        color: white;
+    }
+    .btn-smiley:hover {
+        background-color: #228B22;
+        border-color: #228B22;
+        color: white;
+    }
+
+    .department-stats {
+        font-size: 0.9rem;
+    }
+    .department-stats .stat-item {
+        display: inline-block;
+        margin-right: 15px;
+        color: #6c757d;
+    }
+
+    .activity-indicator {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 5px;
+    }
+    .activity-high { background-color: #28a745; }
+    .activity-medium { background-color: #ffc107; }
+    .activity-low { background-color: #dc3545; }
+    .activity-none { background-color: #6c757d; }
+
+    .no-data {
+        text-align: center;
+        padding: 40px;
+        color: #6c757d;
+    }
+";
+
+// 共通ヘッダー読み込み
+require_once __DIR__ . '/../includes/header.php';
 ?>
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏢 部署管理 - Smiley配食システム</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .main-container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-            margin: 20px auto;
-            padding: 30px;
-            max-width: 1400px;
-        }
-        .smiley-green { color: #2E8B57; }
-        .bg-smiley-green { background-color: #2E8B57; }
-        
-        .stat-card {
-            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-            border-radius: 15px;
-            padding: 25px;
-            margin-bottom: 20px;
-            border-left: 5px solid #2E8B57;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
-            transition: transform 0.3s ease;
-        }
-        .stat-card:hover {
-            transform: translateY(-5px);
-        }
-        .stat-number {
-            font-size: 2.2rem;
-            font-weight: bold;
-            color: #2E8B57;
-        }
-        
-        .department-card {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 15px;
-            border-left: 4px solid #2E8B57;
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-            transition: all 0.3s ease;
-        }
-        .department-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-        }
-        
-        .company-badge {
-            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
-        
-        .search-filters {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-        }
-        
-        .btn-smiley {
-            background-color: #2E8B57;
-            border-color: #2E8B57;
-            color: white;
-        }
-        .btn-smiley:hover {
-            background-color: #228B22;
-            border-color: #228B22;
-            color: white;
-        }
-        
-        .department-stats {
-            font-size: 0.9rem;
-        }
-        .department-stats .stat-item {
-            display: inline-block;
-            margin-right: 15px;
-            color: #6c757d;
-        }
-        
-        .activity-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 5px;
-        }
-        .activity-high { background-color: #28a745; }
-        .activity-medium { background-color: #ffc107; }
-        .activity-low { background-color: #dc3545; }
-        .activity-none { background-color: #6c757d; }
-        
-        .no-data {
-            text-align: center;
-            padding: 40px;
-            color: #6c757d;
-        }
-    </style>
-</head>
-<body>
-    <div class="main-container">
-        <!-- ヘッダー -->
-        <div class="row align-items-center mb-4">
-            <div class="col">
-                <h1 class="display-5 smiley-green mb-2">🏢 部署管理</h1>
-                <p class="lead text-muted">Smiley配食システム - 企業別部署の統合管理</p>
-            </div>
-            <div class="col-auto">
-                <a href="companies.php" class="btn btn-outline-secondary me-2">
-                    <i class="bi bi-building"></i> 企業管理
-                </a>
-                <a href="../index.php" class="btn btn-outline-secondary me-2">
-                    <i class="bi bi-arrow-left"></i> ダッシュボード
-                </a>
-                <button class="btn btn-smiley" onclick="showAddDepartmentModal()">
-                    <i class="bi bi-plus-circle"></i> 新規部署追加
-                </button>
-            </div>
-        </div>
 
-        <!-- 統計サマリー -->
-        <div class="row mb-4">
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['total_departments']) ? number_format($stats['total_departments']) : $stats['total_departments']; ?></div>
-                    <div class="text-muted">総部署数</div>
-                    <small class="text-success"><i class="bi bi-diagram-3"></i> 登録済み</small>
+<!-- ページヘッダー -->
+<div class="row align-items-center mb-4">
+    <div class="col">
+        <h1 class="display-5 smiley-green mb-2">部署管理</h1>
+        <p class="lead text-muted">Smiley配食システム - 企業別部署の統合管理</p>
+    </div>
+    <div class="col-auto">
+        <button class="btn btn-smiley" onclick="showAddDepartmentModal()">
+            新規部署追加
+        </button>
+    </div>
+</div>
+
+<!-- 統計サマリー -->
+<div class="row mb-4">
+    <div class="col-lg-2 col-md-4 col-sm-6">
+        <div class="stat-card text-center">
+            <div class="stat-number"><?php echo is_numeric($stats['total_departments']) ? number_format($stats['total_departments']) : $stats['total_departments']; ?></div>
+            <div class="text-muted">総部署数</div>
+            <small class="text-success">登録済み</small>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-sm-6">
+        <div class="stat-card text-center">
+            <div class="stat-number"><?php echo is_numeric($stats['active_departments']) ? number_format($stats['active_departments']) : $stats['active_departments']; ?></div>
+            <div class="text-muted">アクティブ部署</div>
+            <small class="text-info">稼働中</small>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-sm-6">
+        <div class="stat-card text-center">
+            <div class="stat-number"><?php echo is_numeric($stats['companies_with_departments']) ? number_format($stats['companies_with_departments']) : $stats['companies_with_departments']; ?></div>
+            <div class="text-muted">対象企業数</div>
+            <small class="text-primary">部署有り</small>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-sm-6">
+        <div class="stat-card text-center">
+            <div class="stat-number"><?php echo is_numeric($stats['users_in_departments']) ? number_format($stats['users_in_departments']) : $stats['users_in_departments']; ?></div>
+            <div class="text-muted">所属利用者数</div>
+            <small class="text-success">アクティブ</small>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-sm-6">
+        <div class="stat-card text-center">
+            <div class="stat-number"><?php echo is_numeric($stats['departments_with_orders']) ? number_format($stats['departments_with_orders']) : $stats['departments_with_orders']; ?></div>
+            <div class="text-muted">注文実績部署</div>
+            <small class="text-warning">過去30日</small>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-sm-6">
+        <div class="stat-card text-center">
+            <div class="stat-number"><?php echo is_numeric($stats['avg_users_per_department']) ? $stats['avg_users_per_department'] : $stats['avg_users_per_department']; ?></div>
+            <div class="text-muted">平均利用者数</div>
+            <small class="text-info">部署あたり</small>
+        </div>
+    </div>
+</div>
+
+<!-- 検索・フィルター -->
+<div class="search-filters">
+    <form method="GET" action="">
+        <div class="row">
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label class="form-label">企業フィルター</label>
+                    <select class="form-select" name="company_id" onchange="this.form.submit()">
+                        <option value="">全ての企業</option>
+                        <?php foreach ($companies as $company): ?>
+                            <option value="<?php echo $company['id']; ?>"
+                                    <?php echo $companyFilter == $company['id'] ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($company['company_name']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
             </div>
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['active_departments']) ? number_format($stats['active_departments']) : $stats['active_departments']; ?></div>
-                    <div class="text-muted">アクティブ部署</div>
-                    <small class="text-info"><i class="bi bi-check-circle"></i> 稼働中</small>
+            <div class="col-md-4">
+                <div class="form-group">
+                    <label class="form-label">部署名検索</label>
+                    <input type="text" class="form-control" name="search"
+                           value="<?php echo htmlspecialchars($searchTerm); ?>"
+                           placeholder="部署名または企業名を入力...">
                 </div>
             </div>
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['companies_with_departments']) ? number_format($stats['companies_with_departments']) : $stats['companies_with_departments']; ?></div>
-                    <div class="text-muted">対象企業数</div>
-                    <small class="text-primary"><i class="bi bi-building"></i> 部署有り</small>
+            <div class="col-md-2">
+                <div class="form-group">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-smiley w-100">
+                        検索
+                    </button>
                 </div>
             </div>
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['users_in_departments']) ? number_format($stats['users_in_departments']) : $stats['users_in_departments']; ?></div>
-                    <div class="text-muted">所属利用者数</div>
-                    <small class="text-success"><i class="bi bi-people"></i> アクティブ</small>
-                </div>
-            </div>
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['departments_with_orders']) ? number_format($stats['departments_with_orders']) : $stats['departments_with_orders']; ?></div>
-                    <div class="text-muted">注文実績部署</div>
-                    <small class="text-warning"><i class="bi bi-cart"></i> 過去30日</small>
-                </div>
-            </div>
-            <div class="col-lg-2 col-md-4 col-sm-6">
-                <div class="stat-card text-center">
-                    <div class="stat-number"><?php echo is_numeric($stats['avg_users_per_department']) ? $stats['avg_users_per_department'] : $stats['avg_users_per_department']; ?></div>
-                    <div class="text-muted">平均利用者数</div>
-                    <small class="text-info"><i class="bi bi-person"></i> 部署あたり</small>
+            <div class="col-md-2">
+                <div class="form-group">
+                    <label class="form-label">&nbsp;</label>
+                    <a href="departments.php" class="btn btn-outline-secondary w-100">
+                        リセット
+                    </a>
                 </div>
             </div>
         </div>
+    </form>
+</div>
 
-        <!-- 検索・フィルター -->
-        <div class="search-filters">
-            <form method="GET" action="">
-                <div class="row">
-                    <div class="col-md-4">
-                        <div class="form-group">
-                            <label class="form-label">企業フィルター</label>
-                            <select class="form-select" name="company_id" onchange="this.form.submit()">
-                                <option value="">全ての企業</option>
-                                <?php foreach ($companies as $company): ?>
-                                    <option value="<?php echo $company['id']; ?>" 
-                                            <?php echo $companyFilter == $company['id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($company['company_name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
+<!-- 部署一覧 -->
+<div id="departmentsContainer">
+    <?php if (empty($departments)): ?>
+        <div class="no-data">
+            <h4 class="text-muted mt-3">
+                <?php if ($companyFilter): ?>
+                    選択された企業に部署が登録されていません
+                <?php else: ?>
+                    部署が登録されていません
+                <?php endif; ?>
+            </h4>
+            <p class="text-muted">CSVインポートまたは手動で部署を追加してください</p>
+            <a href="csv_import.php" class="btn btn-smiley me-2">
+                CSVインポート
+            </a>
+            <a href="companies.php" class="btn btn-outline-primary">
+                企業管理
+            </a>
+        </div>
+    <?php else: ?>
+        <?php foreach ($departments as $department): ?>
+            <div class="department-card" data-department-id="<?php echo $department['id']; ?>">
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <div class="d-flex align-items-center mb-2">
+                            <span class="company-badge me-3">
+                                <?php echo htmlspecialchars($department['company_name']); ?>
+                            </span>
+                            <?php
+                            $activityClass = 'activity-none';
+                            if ($department['order_count'] > 50) $activityClass = 'activity-high';
+                            elseif ($department['order_count'] > 10) $activityClass = 'activity-medium';
+                            elseif ($department['order_count'] > 0) $activityClass = 'activity-low';
+                            ?>
+                            <span class="activity-indicator <?php echo $activityClass; ?>"
+                                  title="注文活動レベル"></span>
                         </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="form-group">
-                            <label class="form-label">部署名検索</label>
-                            <input type="text" class="form-control" name="search" 
-                                   value="<?php echo htmlspecialchars($searchTerm); ?>" 
-                                   placeholder="部署名または企業名を入力...">
+                        <h5 class="mb-2">
+                            <?php echo htmlspecialchars($department['department_name']); ?>
+                        </h5>
+                        <div class="department-stats">
+                            <span class="stat-item">
+                                <?php echo number_format($department['active_user_count']); ?>/<?php echo number_format($department['user_count']); ?>名
+                            </span>
+                            <span class="stat-item">
+                                <?php echo number_format($department['order_count']); ?>件
+                            </span>
+                            <?php if ($department['last_order_date']): ?>
+                                <span class="stat-item">
+                                    最終注文: <?php echo date('Y/m/d', strtotime($department['last_order_date'])); ?>
+                                </span>
+                            <?php endif; ?>
                         </div>
+                        <?php if (isset($department['floor_building']) && $department['floor_building'] || isset($department['room_number']) && $department['room_number']): ?>
+                            <small class="text-muted">
+                                <?php echo htmlspecialchars($department['floor_building'] ?? ''); ?>
+                                <?php if (isset($department['room_number']) && $department['room_number']): ?>
+                                    <?php echo htmlspecialchars($department['room_number']); ?>
+                                <?php endif; ?>
+                            </small>
+                        <?php endif; ?>
                     </div>
-                    <div class="col-md-2">
-                        <div class="form-group">
-                            <label class="form-label">&nbsp;</label>
-                            <button type="submit" class="btn btn-smiley w-100">
-                                <i class="bi bi-search"></i> 検索
+                    <div class="col-md-3 text-center">
+                        <div class="h5 text-success mb-1"><?php echo number_format($department['total_revenue'] ?: 0); ?>円</div>
+                        <small class="text-muted">過去90日売上</small>
+                        <?php if ($department['user_count'] > 0): ?>
+                            <div class="mt-2">
+                                <small class="text-info">
+                                    稼働率: <?php echo round(($department['active_user_count'] / $department['user_count']) * 100); ?>%
+                                </small>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="col-md-3 text-end">
+                        <div class="btn-group-vertical btn-group-sm">
+                            <a href="users.php?department_id=<?php echo $department['id']; ?>"
+                               class="btn btn-outline-success btn-sm">
+                                利用者 (<?php echo $department['user_count']; ?>)
+                            </a>
+                            <a href="company_detail.php?id=<?php echo $department['company_id']; ?>"
+                               class="btn btn-outline-primary btn-sm">
+                                企業詳細
+                            </a>
+                            <button class="btn btn-outline-secondary btn-sm"
+                                    onclick="editDepartment(<?php echo $department['id']; ?>)">
+                                編集
                             </button>
                         </div>
                     </div>
-                    <div class="col-md-2">
-                        <div class="form-group">
-                            <label class="form-label">&nbsp;</label>
-                            <a href="departments.php" class="btn btn-outline-secondary w-100">
-                                <i class="bi bi-arrow-clockwise"></i> リセット
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </form>
-        </div>
-
-        <!-- 部署一覧 -->
-        <div id="departmentsContainer">
-            <?php if (empty($departments)): ?>
-                <div class="no-data">
-                    <i class="bi bi-diagram-3 fs-1 text-muted"></i>
-                    <h4 class="text-muted mt-3">
-                        <?php if ($companyFilter): ?>
-                            選択された企業に部署が登録されていません
-                        <?php else: ?>
-                            部署が登録されていません
-                        <?php endif; ?>
-                    </h4>
-                    <p class="text-muted">CSVインポートまたは手動で部署を追加してください</p>
-                    <a href="csv_import.php" class="btn btn-smiley me-2">
-                        <i class="bi bi-cloud-upload"></i> CSVインポート
-                    </a>
-                    <a href="companies.php" class="btn btn-outline-primary">
-                        <i class="bi bi-building"></i> 企業管理
-                    </a>
-                </div>
-            <?php else: ?>
-                <?php foreach ($departments as $department): ?>
-                    <div class="department-card" data-department-id="<?php echo $department['id']; ?>">
-                        <div class="row align-items-center">
-                            <div class="col-md-6">
-                                <div class="d-flex align-items-center mb-2">
-                                    <span class="company-badge me-3">
-                                        <?php echo htmlspecialchars($department['company_name']); ?>
-                                    </span>
-                                    <?php 
-                                    $activityClass = 'activity-none';
-                                    if ($department['order_count'] > 50) $activityClass = 'activity-high';
-                                    elseif ($department['order_count'] > 10) $activityClass = 'activity-medium';
-                                    elseif ($department['order_count'] > 0) $activityClass = 'activity-low';
-                                    ?>
-                                    <span class="activity-indicator <?php echo $activityClass; ?>" 
-                                          title="注文活動レベル"></span>
-                                </div>
-                                <h5 class="mb-2">
-                                    <i class="bi bi-diagram-3 text-success me-2"></i>
-                                    <?php echo htmlspecialchars($department['department_name']); ?>
-                                </h5>
-                                <div class="department-stats">
-                                    <span class="stat-item">
-                                        <i class="bi bi-people"></i> 
-                                        <?php echo number_format($department['active_user_count']); ?>/<?php echo number_format($department['user_count']); ?>名
-                                    </span>
-                                    <span class="stat-item">
-                                        <i class="bi bi-cart"></i> <?php echo number_format($department['order_count']); ?>件
-                                    </span>
-                                    <?php if ($department['last_order_date']): ?>
-                                        <span class="stat-item">
-                                            <i class="bi bi-calendar"></i> 
-                                            最終注文: <?php echo date('Y/m/d', strtotime($department['last_order_date'])); ?>
-                                        </span>
-                                    <?php endif; ?>
-                                </div>
-                                <?php if ($department['floor_building'] || $department['room_number']): ?>
-                                    <small class="text-muted">
-                                        <i class="bi bi-geo-alt"></i> 
-                                        <?php echo htmlspecialchars($department['floor_building']); ?>
-                                        <?php if ($department['room_number']): ?>
-                                            <?php echo htmlspecialchars($department['room_number']); ?>
-                                        <?php endif; ?>
-                                    </small>
-                                <?php endif; ?>
-                            </div>
-                            <div class="col-md-3 text-center">
-                                <div class="h5 text-success mb-1">¥<?php echo number_format($department['total_revenue'] ?: 0); ?></div>
-                                <small class="text-muted">過去90日売上</small>
-                                <?php if ($department['user_count'] > 0): ?>
-                                    <div class="mt-2">
-                                        <small class="text-info">
-                                            稼働率: <?php echo round(($department['active_user_count'] / $department['user_count']) * 100); ?>%
-                                        </small>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-                            <div class="col-md-3 text-end">
-                                <div class="btn-group-vertical btn-group-sm">
-                                    <a href="users.php?department_id=<?php echo $department['id']; ?>" 
-                                       class="btn btn-outline-success btn-sm">
-                                        <i class="bi bi-people"></i> 利用者 (<?php echo $department['user_count']; ?>)
-                                    </a>
-                                    <a href="company_detail.php?id=<?php echo $department['company_id']; ?>" 
-                                       class="btn btn-outline-primary btn-sm">
-                                        <i class="bi bi-building"></i> 企業詳細
-                                    </a>
-                                    <button class="btn btn-outline-secondary btn-sm" 
-                                            onclick="editDepartment(<?php echo $department['id']; ?>)">
-                                        <i class="bi bi-pencil"></i> 編集
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
-
-        <!-- クイックアクション -->
-        <div class="row mt-4">
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header bg-smiley-green text-white">
-                        <h6 class="mb-0"><i class="bi bi-lightning"></i> クイックアクション</h6>
-                    </div>
-                    <div class="card-body">
-                        <a href="companies.php" class="btn btn-outline-primary me-2 mb-2">
-                            <i class="bi bi-building"></i> 企業管理
-                        </a>
-                        <a href="users.php" class="btn btn-outline-success me-2 mb-2">
-                            <i class="bi bi-people"></i> 利用者管理
-                        </a>
-                        <a href="csv_import.php" class="btn btn-outline-info me-2 mb-2">
-                            <i class="bi bi-cloud-upload"></i> CSVインポート
-                        </a>
-                        <a href="../pages/system_health.php" class="btn btn-outline-warning mb-2">
-                            <i class="bi bi-gear"></i> システム状況
-                        </a>
-                    </div>
                 </div>
             </div>
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header bg-info text-white">
-                        <h6 class="mb-0"><i class="bi bi-info-circle"></i> フィルター情報</h6>
-                    </div>
-                    <div class="card-body">
-                        <?php if ($companyFilter): ?>
-                            <?php 
-                            $selectedCompany = array_filter($companies, function($c) use ($companyFilter) { 
-                                return $c['id'] == $companyFilter; 
-                            });
-                            $selectedCompany = reset($selectedCompany);
-                            ?>
-                            <p class="mb-2"><strong>選択企業:</strong> <?php echo htmlspecialchars($selectedCompany['company_name']); ?></p>
-                        <?php endif; ?>
-                        <?php if ($searchTerm): ?>
-                            <p class="mb-2"><strong>検索キーワード:</strong> "<?php echo htmlspecialchars($searchTerm); ?>"</p>
-                        <?php endif; ?>
-                        <p class="mb-2"><strong>表示件数:</strong> <?php echo count($departments); ?>件</p>
-                        <p class="mb-0"><strong>最終更新:</strong> <?php echo date('Y-m-d H:i:s'); ?></p>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <?php endforeach; ?>
+    <?php endif; ?>
+</div>
 
-        <!-- フッター -->
-        <div class="text-center mt-5 pt-4 border-top">
-            <p class="text-muted mb-0">
-                <strong>Smiley配食事業 請求書管理システム v1.0.0</strong><br>
-                © 2025 Smiley配食事業. All rights reserved.
-            </p>
+<!-- クイックアクション -->
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-smiley-green text-white">
+                <h6 class="mb-0">クイックアクション</h6>
+            </div>
+            <div class="card-body">
+                <a href="companies.php" class="btn btn-outline-primary me-2 mb-2">
+                    企業管理
+                </a>
+                <a href="users.php" class="btn btn-outline-success me-2 mb-2">
+                    利用者管理
+                </a>
+                <a href="csv_import.php" class="btn btn-outline-info me-2 mb-2">
+                    CSVインポート
+                </a>
+                <a href="../pages/system_health.php" class="btn btn-outline-warning mb-2">
+                    システム状況
+                </a>
+            </div>
         </div>
     </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h6 class="mb-0">フィルター情報</h6>
+            </div>
+            <div class="card-body">
+                <?php if ($companyFilter): ?>
+                    <?php
+                    $selectedCompany = array_filter($companies, function($c) use ($companyFilter) {
+                        return $c['id'] == $companyFilter;
+                    });
+                    $selectedCompany = reset($selectedCompany);
+                    ?>
+                    <p class="mb-2"><strong>選択企業:</strong> <?php echo htmlspecialchars($selectedCompany['company_name']); ?></p>
+                <?php endif; ?>
+                <?php if ($searchTerm): ?>
+                    <p class="mb-2"><strong>検索キーワード:</strong> "<?php echo htmlspecialchars($searchTerm); ?>"</p>
+                <?php endif; ?>
+                <p class="mb-2"><strong>表示件数:</strong> <?php echo count($departments); ?>件</p>
+                <p class="mb-0"><strong>最終更新:</strong> <?php echo date('Y-m-d H:i:s'); ?></p>
+            </div>
+        </div>
+    </div>
+</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // 部署追加モーダル（今後実装）
-        function showAddDepartmentModal() {
-            alert('部署追加機能は今後実装予定です。現在はCSVインポートをご利用ください。');
+<script>
+    // 部署追加モーダル（今後実装）
+    function showAddDepartmentModal() {
+        alert('部署追加機能は今後実装予定です。現在はCSVインポートをご利用ください。');
+    }
+
+    // 部署編集（今後実装）
+    function editDepartment(departmentId) {
+        alert(`部署ID ${departmentId} の編集機能は今後実装予定です。`);
+    }
+
+    // 初期化
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('部署管理画面が読み込まれました');
+
+        // フィルター状況をコンソールに表示
+        const companyFilter = '<?php echo $companyFilter; ?>';
+        const searchTerm = '<?php echo $searchTerm; ?>';
+
+        if (companyFilter) {
+            console.log('企業フィルター適用:', companyFilter);
         }
-        
-        // 部署編集（今後実装）
-        function editDepartment(departmentId) {
-            alert(`部署ID ${departmentId} の編集機能は今後実装予定です。`);
+        if (searchTerm) {
+            console.log('検索フィルター適用:', searchTerm);
         }
-        
-        // 初期化
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('部署管理画面が読み込まれました');
-            
-            // フィルター状況をコンソールに表示
-            const companyFilter = '<?php echo $companyFilter; ?>';
-            const searchTerm = '<?php echo $searchTerm; ?>';
-            
-            if (companyFilter) {
-                console.log('企業フィルター適用:', companyFilter);
-            }
-            if (searchTerm) {
-                console.log('検索フィルター適用:', searchTerm);
-            }
-            
-            // エラー表示（デバッグモード時）
-            <?php if (isset($stats['error']) && DEBUG_MODE): ?>
-            console.error('Department stats error:', <?php echo json_encode($stats['error']); ?>);
-            <?php endif; ?>
-        });
-    </script>
-</body>
-</html>
+
+        // エラー表示（デバッグモード時）
+        <?php if (isset($stats['error']) && defined('DEBUG_MODE') && DEBUG_MODE): ?>
+        console.error('Department stats error:', <?php echo json_encode($stats['error']); ?>);
+        <?php endif; ?>
+    });
+</script>
+
+<?php
+// 共通フッター読み込み
+require_once __DIR__ . '/../includes/footer.php';
+?>
