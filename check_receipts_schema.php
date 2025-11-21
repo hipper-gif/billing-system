@@ -27,17 +27,19 @@ try {
     // Get foreign key information
     $stmt = $conn->query("
         SELECT
-            CONSTRAINT_NAME,
-            COLUMN_NAME,
-            REFERENCED_TABLE_NAME,
-            REFERENCED_COLUMN_NAME,
-            DELETE_RULE,
-            UPDATE_RULE
-        FROM information_schema.KEY_COLUMN_USAGE
-        JOIN information_schema.REFERENTIAL_CONSTRAINTS USING (CONSTRAINT_NAME, CONSTRAINT_SCHEMA)
-        WHERE TABLE_SCHEMA = '" . DB_NAME . "'
-        AND TABLE_NAME = 'receipts'
-        AND REFERENCED_TABLE_NAME IS NOT NULL
+            kcu.CONSTRAINT_NAME,
+            kcu.COLUMN_NAME,
+            kcu.REFERENCED_TABLE_NAME,
+            kcu.REFERENCED_COLUMN_NAME,
+            rc.DELETE_RULE,
+            rc.UPDATE_RULE
+        FROM information_schema.KEY_COLUMN_USAGE kcu
+        JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+            ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+            AND kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
+        WHERE kcu.TABLE_SCHEMA = '" . DB_NAME . "'
+        AND kcu.TABLE_NAME = 'receipts'
+        AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
     ");
     $foreignKeys = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
