@@ -491,6 +491,11 @@ require_once __DIR__ . '/../includes/header.php';
                         <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">add_card</span>
                         入金
                     </button>
+                    <button class="btn btn-material btn-sm btn-info"
+                            onclick='issuePreReceipt("<?php echo $viewType; ?>", <?php echo htmlspecialchars(json_encode($item), ENT_QUOTES, 'UTF-8'); ?>)'>
+                        <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt</span>
+                        領収書発行
+                    </button>
                 </td>
             </tr>
             <?php endforeach; ?>
@@ -1033,6 +1038,45 @@ document.getElementById('receiptModal').addEventListener('click', function(e) {
         closeReceiptModal();
     }
 });
+
+// 入金前領収書発行
+function issuePreReceipt(viewType, item) {
+    if (!confirm(`${item.user_name || item.company_name} の未払い分 ¥${parseInt(item.outstanding_amount).toLocaleString()} の領収書を発行しますか？\n\n※入金日は空欄で発行されます。配達現場で集金時に記入してください。`)) {
+        return;
+    }
+
+    const action = viewType === 'individual' ? 'issue_by_user' : 'issue_by_company';
+    const data = {
+        action: action,
+        user_id: item.user_id,
+        company_name: item.company_name,
+        description: 'お弁当代として'
+    };
+
+    fetch('../api/pre_receipts.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            alert(`領収書を発行しました。\n\n領収書番号: ${result.receipt_number}\n\n印刷画面を開きます。`);
+            // 領収書印刷ページを新しいウィンドウで開く
+            window.open(`receipt.php?id=${result.receipt_id}`, '_blank');
+            // ページをリロード
+            location.reload();
+        } else {
+            alert('領収書の発行に失敗しました: ' + result.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('領収書の発行中にエラーが発生しました');
+    });
+}
 </script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

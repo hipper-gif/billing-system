@@ -202,7 +202,7 @@ class ReceiptManager {
                     op.company_name,
                     op.payment_type
                 FROM receipts r
-                INNER JOIN order_payments op ON r.payment_id = op.id
+                LEFT JOIN order_payments op ON r.payment_id = op.id
                 WHERE r.id = :receipt_id
             ";
 
@@ -248,7 +248,7 @@ class ReceiptManager {
                     op.company_name,
                     op.payment_type
                 FROM receipts r
-                INNER JOIN order_payments op ON r.payment_id = op.id
+                LEFT JOIN order_payments op ON r.payment_id = op.id
                 WHERE r.receipt_number = :receipt_number
             ";
 
@@ -467,5 +467,93 @@ class ReceiptManager {
         }
 
         return $results;
+    }
+
+    /**
+     * 入金前の領収書を発行（配達現場での使用を想定）
+     * @param array $params 領収書発行パラメータ
+     * @return array 発行結果
+     */
+    public function issuePreReceipt($params) {
+        try {
+            $userId = $params['user_id'] ?? null;
+            $userName = $params['user_name'] ?? '';
+            $companyName = $params['company_name'] ?? '';
+            $amount = $params['amount'] ?? 0;
+            $description = $params['description'] ?? 'お弁当代として';
+            $issuerName = $params['issuer_name'] ?? '株式会社Smiley';
+            $createdBy = $params['created_by'] ?? 'system';
+
+            if (!$userId && !$userName) {
+                return ['success' => false, 'message' => '利用者情報が指定されていません'];
+            }
+
+            if ($amount <= 0) {
+                return ['success' => false, 'message' => '金額が不正です'];
+            }
+
+            // 宛名を決定（企業名がある場合は企業名、なければ個人名）
+            if (!empty($companyName)) {
+                $recipientName = $companyName . ' 御中';
+            } else {
+                $recipientName = $userName . ' 様';
+            }
+
+            // 領収書番号を生成
+            $receiptNumber = $this->generateReceiptNumber();
+
+            // 備考欄に発行者と「入金前発行」を記録
+            $notes = "発行者: {$issuerName}\n入金前発行（配達現場用）";
+
+            $conn = $this->db->getConnection();
+
+            // 領収書を登録（payment_idとissue_dateはNULL）
+            $insertSql = "
+                INSERT INTO receipts (
+                    receipt_number,
+                    invoice_id,
+                    payment_id,
+                    issue_date,
+                    recipient_name,
+                    amount,
+                    purpose,
+                    notes,
+                    status
+                ) VALUES (
+                    :receipt_number,
+                    NULL,
+                    NULL,
+                    NULL,
+                    :recipient_name,
+                    :amount,
+                    :purpose,
+                    :notes,
+                    'issued'
+                )
+            ";
+
+            $insertStmt = $conn->prepare($insertSql);
+            $insertStmt->execute([
+                ':receipt_number' => $receiptNumber,
+                ':recipient_name' => $recipientName,
+                ':amount' => $amount,
+                ':purpose' => $description,
+                ':notes' => $notes
+            ]);
+
+            return [
+                'success' => true,
+                'message' => '入金前領収書を発行しました',
+                'receipt_id' => $conn->lastInsertId(),
+                'receipt_number' => $receiptNumber
+            ];
+
+        } catch (Exception $e) {
+            error_log("Pre-receipt issue error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => defined('DEBUG_MODE') && DEBUG_MODE ? '領収書の発行に失敗しました: ' . $e->getMessage() : '領収書の発行に失敗しました。'
+            ];
+        }
     }
 }

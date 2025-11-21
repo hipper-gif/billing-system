@@ -248,13 +248,23 @@ $hasLogo = file_exists($logoPath);
         <div class="details-section">
             <div class="detail-row">
                 <div class="detail-label">入金日</div>
-                <div class="detail-value"><?php echo htmlspecialchars($receipt['payment_date']); ?></div>
+                <div class="detail-value">
+                    <?php
+                    if (!empty($receipt['payment_date'])) {
+                        echo htmlspecialchars($receipt['payment_date']);
+                    } else {
+                        echo '<span style="border-bottom: 1px solid #000; display: inline-block; min-width: 200px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>';
+                    }
+                    ?>
+                </div>
             </div>
+            <?php if (!empty($receipt['payment_method_display'])): ?>
             <div class="detail-row">
                 <div class="detail-label">支払方法</div>
                 <div class="detail-value"><?php echo htmlspecialchars($receipt['payment_method_display']); ?></div>
             </div>
-            <?php if ($receipt['user_code']): ?>
+            <?php endif; ?>
+            <?php if (!empty($receipt['user_code'])): ?>
             <div class="detail-row">
                 <div class="detail-label">利用者コード</div>
                 <div class="detail-value"><?php echo htmlspecialchars($receipt['user_code']); ?></div>
@@ -265,7 +275,7 @@ $hasLogo = file_exists($logoPath);
         <div class="issuer-section">
             <div class="issuer-info">
                 <div class="issue-date">
-                    発行日: <?php echo htmlspecialchars($receipt['issue_date']); ?>
+                    発行日: <?php echo !empty($receipt['issue_date']) ? htmlspecialchars($receipt['issue_date']) : '&nbsp;&nbsp;&nbsp;&nbsp;年&nbsp;&nbsp;&nbsp;&nbsp;月&nbsp;&nbsp;&nbsp;&nbsp;日'; ?>
                 </div>
                 <div class="issuer-name">
                     <?php echo htmlspecialchars($receipt['issuer_name']); ?>
