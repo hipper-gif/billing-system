@@ -24,34 +24,46 @@ try {
     $stmt = $conn->query("SHOW COLUMNS FROM receipts");
     $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Get foreign key information
-    $stmt = $conn->query("
-        SELECT
-            kcu.CONSTRAINT_NAME,
-            kcu.COLUMN_NAME,
-            kcu.REFERENCED_TABLE_NAME,
-            kcu.REFERENCED_COLUMN_NAME,
-            rc.DELETE_RULE,
-            rc.UPDATE_RULE
-        FROM information_schema.KEY_COLUMN_USAGE kcu
-        JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
-            ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
-            AND kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
-        WHERE kcu.TABLE_SCHEMA = '" . DB_NAME . "'
-        AND kcu.TABLE_NAME = 'receipts'
-        AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
-    ");
-    $foreignKeys = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // Get foreign key information (with error handling)
+    $foreignKeys = [];
+    try {
+        $stmt = $conn->query("
+            SELECT
+                kcu.CONSTRAINT_NAME,
+                kcu.COLUMN_NAME,
+                kcu.REFERENCED_TABLE_NAME,
+                kcu.REFERENCED_COLUMN_NAME,
+                rc.DELETE_RULE,
+                rc.UPDATE_RULE
+            FROM information_schema.KEY_COLUMN_USAGE kcu
+            JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+                ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+                AND kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
+            WHERE kcu.TABLE_SCHEMA = '" . DB_NAME . "'
+            AND kcu.TABLE_NAME = 'receipts'
+            AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
+        ");
+        $foreignKeys = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Foreign key query error: " . $e->getMessage());
+        // Continue without foreign key information
+    }
 
-    // Get sample data
-    $stmt = $conn->query("
-        SELECT *
-        FROM receipts
-        WHERE payment_id IS NULL OR issue_date IS NULL
-        ORDER BY id DESC
-        LIMIT 5
-    ");
-    $preReceipts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // Get sample data (with error handling)
+    $preReceipts = [];
+    try {
+        $stmt = $conn->query("
+            SELECT *
+            FROM receipts
+            WHERE payment_id IS NULL OR issue_date IS NULL
+            ORDER BY id DESC
+            LIMIT 5
+        ");
+        $preReceipts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Sample data query error: " . $e->getMessage());
+        // Continue without sample data
+    }
 
     // Check migration status
     $paymentIdNullable = false;
