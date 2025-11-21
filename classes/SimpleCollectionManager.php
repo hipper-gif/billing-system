@@ -28,7 +28,7 @@ class SimpleCollectionManager {
                     COUNT(DISTINCT CASE WHEN opd.id IS NOT NULL THEN o.id END) as paid_count
                 FROM orders o
                 LEFT JOIN order_payment_details opd ON o.id = opd.order_id
-                WHERE o.order_date BETWEEN :start_date AND :end_date
+                WHERE o.delivery_date BETWEEN :start_date AND :end_date
             ";
 
             $stmt = $this->db->getConnection()->prepare($sql);
@@ -102,17 +102,17 @@ class SimpleCollectionManager {
             $sql = "
                 SELECT
                     o.id,
-                    o.order_date,
+                    o.delivery_date,
                     o.user_id,
                     o.user_name,
                     o.total_amount,
                     u.company_id,
                     c.company_name,
-                    DATEDIFF(CURDATE(), o.order_date) as days_since_order
+                    DATEDIFF(CURDATE(), o.delivery_date) as days_since_order
                 FROM orders o
                 LEFT JOIN users u ON o.user_id = u.id
                 LEFT JOIN companies c ON u.company_id = c.id
-                WHERE o.order_date BETWEEN :start_date AND :end_date
+                WHERE o.delivery_date BETWEEN :start_date AND :end_date
             ";
 
             $params = [
@@ -130,7 +130,7 @@ class SimpleCollectionManager {
                 $params[':search'] = '%' . $search . '%';
             }
 
-            $sql .= " ORDER BY o.order_date DESC LIMIT :limit";
+            $sql .= " ORDER BY o.delivery_date DESC LIMIT :limit";
             $params[':limit'] = $limit;
 
             $stmt = $this->db->getConnection()->prepare($sql);
@@ -158,8 +158,8 @@ class SimpleCollectionManager {
                 }
                 $row['amount'] = $row['total_amount'];
                 $row['invoice_number'] = 'ORD-' . str_pad($row['id'], 6, '0', STR_PAD_LEFT);
-                $row['invoice_date'] = $row['order_date'];
-                $row['due_date'] = date('Y-m-d', strtotime($row['order_date'] . ' +30 days'));
+                $row['invoice_date'] = $row['delivery_date'];
+                $row['due_date'] = date('Y-m-d', strtotime($row['delivery_date'] . ' +30 days'));
             }
 
             return $results;
@@ -192,8 +192,8 @@ class SimpleCollectionManager {
                     FROM order_payment_details
                     GROUP BY order_id
                 ) paid ON o.id = paid.order_id
-                WHERE o.order_date BETWEEN :start_date AND :end_date
-                AND DATEDIFF(CURDATE(), o.order_date) > 30
+                WHERE o.delivery_date BETWEEN :start_date AND :end_date
+                AND DATEDIFF(CURDATE(), o.delivery_date) > 30
                 AND (o.total_amount - COALESCE(paid.allocated_total, 0)) > 0
             ";
 
@@ -212,8 +212,8 @@ class SimpleCollectionManager {
                     FROM order_payment_details
                     GROUP BY order_id
                 ) paid ON o.id = paid.order_id
-                WHERE o.order_date BETWEEN :start_date AND :end_date
-                AND DATEDIFF(CURDATE(), o.order_date) BETWEEN 14 AND 30
+                WHERE o.delivery_date BETWEEN :start_date AND :end_date
+                AND DATEDIFF(CURDATE(), o.delivery_date) BETWEEN 14 AND 30
                 AND (o.total_amount - COALESCE(paid.allocated_total, 0)) > 0
             ";
 
@@ -250,12 +250,12 @@ class SimpleCollectionManager {
         try {
             $sql = "
                 SELECT
-                    DATE_FORMAT(o.order_date, '%Y-%m') as month,
+                    DATE_FORMAT(o.delivery_date, '%Y-%m') as month,
                     COALESCE(SUM(o.total_amount), 0) as monthly_amount,
                     COUNT(*) as order_count
                 FROM orders o
-                WHERE o.order_date >= DATE_SUB(CURDATE(), INTERVAL :months MONTH)
-                GROUP BY DATE_FORMAT(o.order_date, '%Y-%m')
+                WHERE o.delivery_date >= DATE_SUB(CURDATE(), INTERVAL :months MONTH)
+                GROUP BY DATE_FORMAT(o.delivery_date, '%Y-%m')
                 ORDER BY month ASC
             ";
 
@@ -309,7 +309,7 @@ class SimpleCollectionManager {
                 WHERE o.user_id = :user_id
                 GROUP BY o.id
                 HAVING outstanding > 0
-                ORDER BY o.order_date ASC
+                ORDER BY o.delivery_date ASC
             ";
             $stmt = $conn->prepare($ordersSql);
             $stmt->execute([':user_id' => $userId]);
@@ -423,7 +423,7 @@ class SimpleCollectionManager {
                 WHERE o.company_name = :company_name
                 GROUP BY o.id
                 HAVING outstanding > 0
-                ORDER BY o.order_date ASC
+                ORDER BY o.delivery_date ASC
             ";
             $stmt = $conn->prepare($ordersSql);
             $stmt->execute([':company_name' => $companyName]);
@@ -740,7 +740,7 @@ class SimpleCollectionManager {
                         WHERE o.user_id = :user_id
                         GROUP BY o.id
                         HAVING outstanding > 0
-                        ORDER BY o.order_date ASC
+                        ORDER BY o.delivery_date ASC
                     ";
                     $ordersStmt = $conn->prepare($ordersSql);
                     $ordersStmt->execute([
@@ -759,7 +759,7 @@ class SimpleCollectionManager {
                         WHERE o.company_name = :company_name
                         GROUP BY o.id
                         HAVING outstanding > 0
-                        ORDER BY o.order_date ASC
+                        ORDER BY o.delivery_date ASC
                     ";
                     $ordersStmt = $conn->prepare($ordersSql);
                     $ordersStmt->execute([

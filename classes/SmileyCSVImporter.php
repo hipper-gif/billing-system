@@ -744,7 +744,7 @@ class SmileyCSVImporter {
                 NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
             )
         ");
-        
+
         $stmt->execute([
             $data['delivery_date'],
             $data['user_id'],
