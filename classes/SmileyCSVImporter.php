@@ -741,12 +741,11 @@ class SmileyCSVImporter {
                 employee_type_code, employee_type_name, department_code, department_name,
                 import_batch_id, notes, delivery_time, cooperation_code, created_at
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
+                NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
             )
         ");
 
         $stmt->execute([
-            $data['delivery_date'],  // order_date = CSVの配達日（注文日）
             $data['delivery_date'],
             $data['user_id'],
             $data['user_code'],
