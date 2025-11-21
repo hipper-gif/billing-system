@@ -550,9 +550,22 @@ class ReceiptManager {
 
         } catch (Exception $e) {
             error_log("Pre-receipt issue error: " . $e->getMessage());
+
+            // 詳細なエラー情報を返す（PDOExceptionの場合はSQL状態も含める）
+            $errorMessage = $e->getMessage();
+            if ($e instanceof PDOException) {
+                $errorMessage .= " (SQLSTATE: " . $e->getCode() . ")";
+            }
+
             return [
                 'success' => false,
-                'message' => defined('DEBUG_MODE') && DEBUG_MODE ? '領収書の発行に失敗しました: ' . $e->getMessage() : '領収書の発行に失敗しました。'
+                'message' => '領収書の発行に失敗しました: ' . $errorMessage,
+                'error_detail' => [
+                    'message' => $e->getMessage(),
+                    'code' => $e->getCode(),
+                    'file' => basename($e->getFile()),
+                    'line' => $e->getLine()
+                ]
             ];
         }
     }

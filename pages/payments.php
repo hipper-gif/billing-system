@@ -1069,12 +1069,17 @@ function issuePreReceipt(viewType, item) {
             // ページをリロード
             location.reload();
         } else {
+            // 詳細なエラー情報をコンソールに出力
+            console.error('Receipt issue error:', result);
+            if (result.error_detail) {
+                console.error('Error detail:', result.error_detail);
+            }
             alert('領収書の発行に失敗しました: ' + result.message);
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('領収書の発行中にエラーが発生しました');
+        alert('領収書の発行中にエラーが発生しました: ' + error.message);
     });
 }
 </script>
