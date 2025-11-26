@@ -505,9 +505,12 @@ class ReceiptManager {
             // 備考欄に発行者と「入金前発行」を記録
             $notes = "発行者: {$issuerName}\n入金前発行（配達現場用）";
 
+            // 発行日は現在の日付を設定（印刷日）
+            $issueDate = date('Y-m-d');
+
             $conn = $this->db->getConnection();
 
-            // 領収書を登録（payment_idとissue_dateはNULL）
+            // 領収書を登録（payment_idはNULL、issue_dateは現在の日付）
             $insertSql = "
                 INSERT INTO receipts (
                     receipt_number,
@@ -523,7 +526,7 @@ class ReceiptManager {
                     :receipt_number,
                     NULL,
                     NULL,
-                    NULL,
+                    :issue_date,
                     :recipient_name,
                     :amount,
                     :purpose,
@@ -535,6 +538,7 @@ class ReceiptManager {
             $insertStmt = $conn->prepare($insertSql);
             $insertStmt->execute([
                 ':receipt_number' => $receiptNumber,
+                ':issue_date' => $issueDate,
                 ':recipient_name' => $recipientName,
                 ':amount' => $amount,
                 ':purpose' => $description,
