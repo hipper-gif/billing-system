@@ -424,7 +424,7 @@ class SmileyInvoicePDF {
                 return $defaultInfo;
             }
 
-            $settings = $db->fetchOne("SELECT * FROM system_settings WHERE id = 1");
+            $settings = $db->fetch("SELECT * FROM system_settings WHERE id = 1");
 
             if ($settings) {
                 return [
