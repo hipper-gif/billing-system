@@ -676,16 +676,18 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
                 });
 
                 console.log('Response status:', response.status);
-                
+                console.log('Response headers:', response.headers);
+
                 const text = await response.text();
-                console.log('Response text:', text);
-                
+                console.log('Response text (first 500 chars):', text.substring(0, 500));
+
                 let result;
                 try {
                     result = JSON.parse(text);
                 } catch (parseError) {
                     console.error('JSON Parse Error:', parseError);
-                    throw new Error(`サーバーエラー: JSONが不正です\n${text.substring(0, 200)}`);
+                    console.error('Full response text:', text);
+                    throw new Error(`サーバーエラー: JSONが不正です\n\nレスポンス内容:\n${text.substring(0, 500)}\n\nブラウザのコンソールで完全なレスポンスを確認してください。`);
                 }
 
                 if (result.success) {
