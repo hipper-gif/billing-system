@@ -1,0 +1,14 @@
+{
+    "name": "smiley/billing-system",
+    "description": "Smiley配食事業請求管理システム",
+    "type": "project",
+    "require": {
+        "php": ">=8.0",
+        "mpdf/mpdf": "^8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "Smiley\\": "classes/"
+        }
+    }
+}
