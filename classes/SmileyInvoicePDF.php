@@ -77,7 +77,9 @@ class SmileyInvoicePDF {
             'margin_bottom' => 20,
             'margin_header' => 10,
             'margin_footer' => 10,
-            'default_font' => 'dejavusans'
+            'default_font' => 'ipagp',  // 日本語対応フォント
+            'autoScriptToLang' => true,
+            'autoLangToFont' => true
         ]);
 
         $this->pdf->SetTitle('請求書');
@@ -115,10 +117,7 @@ class SmileyInvoicePDF {
         $billingCompany = htmlspecialchars($invoice['company_name'] ?? '');
         $billingDepartment = htmlspecialchars($invoice['department'] ?? '');
 
-        // 金額情報
-        $subtotal = number_format($invoice['subtotal'] ?? 0);
-        $taxRate = ($invoice['tax_rate'] ?? 10);
-        $taxAmount = number_format($invoice['tax_amount'] ?? 0);
+        // 金額情報（税込み価格）
         $totalAmount = number_format($invoice['total_amount'] ?? 0);
 
         // 請求書タイプ
@@ -247,8 +246,8 @@ class SmileyInvoicePDF {
                     {$logoHtml}
                 </td>
                 <td style=\"width: 70%; text-align: right; border: none;\">
-                    <div class=\"invoice-title\">請求書</div>
-                    <div class=\"invoice-number\">Invoice No: {$invoiceNumber}</div>
+                    <div class=\"invoice-title\">📄 請求書</div>
+                    <div class=\"invoice-number\">No: {$invoiceNumber}</div>
                 </td>
             </tr>
         </table>
@@ -258,14 +257,14 @@ class SmileyInvoicePDF {
     <table style=\"border: none; margin-bottom: 20px;\">
         <tr>
             <td style=\"width: 50%; vertical-align: top; border: none;\">
-                <div style=\"margin-bottom: 5px;\"><strong>【発行者】</strong></div>
+                <div style=\"margin-bottom: 5px;\"><strong>🏢 【発行者】</strong></div>
                 <div>{$this->companyInfo['company_name']}</div>
-                <div>{$this->companyInfo['address']}</div>
-                <div>TEL: {$this->companyInfo['phone']}</div>
-                <div>Email: {$this->companyInfo['email']}</div>
+                <div>📍 {$this->companyInfo['address']}</div>
+                <div>☎ {$this->companyInfo['phone']}</div>
+                <div>✉ {$this->companyInfo['email']}</div>
             </td>
             <td style=\"width: 50%; vertical-align: top; border: none;\">
-                <div style=\"margin-bottom: 5px;\"><strong>【請求先】</strong></div>
+                <div style=\"margin-bottom: 5px;\"><strong>📌 【請求先】</strong></div>
                 <div style=\"font-size: 12pt; font-weight: bold;\">{$billingCompany}</div>
                 " . (!empty($billingDepartment) ? "<div>{$billingDepartment}</div>" : "") . "
             </td>
@@ -276,10 +275,10 @@ class SmileyInvoicePDF {
     <div class=\"info-box\">
         <table style=\"border: none; margin: 0;\">
             <tr>
-                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">発行日:</span> {$issueDate}</td>
-                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">支払期限:</span> {$dueDate}</td>
-                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">請求期間:</span> {$periodStart} ～ {$periodEnd}</td>
-                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">請求タイプ:</span> {$invoiceType}</td>
+                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">📅 発行日:</span> {$issueDate}</td>
+                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">⏰ 支払期限:</span> {$dueDate}</td>
+                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">📆 請求期間:</span> {$periodStart} ～ {$periodEnd}</td>
+                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">📋 タイプ:</span> {$invoiceType}</td>
             </tr>
         </table>
     </div>
@@ -300,19 +299,11 @@ class SmileyInvoicePDF {
         </tbody>
     </table>
 
-    <!-- 合計セクション -->
+    <!-- 合計金額（税込） -->
     <div class=\"total-section\">
-        <div class=\"total-row\">
-            <span style=\"margin-right: 30px;\">小計:</span>
-            <span style=\"display: inline-block; width: 120px; text-align: right;\">¥{$subtotal}</span>
-        </div>
-        <div class=\"total-row\">
-            <span style=\"margin-right: 30px;\">消費税 ({$taxRate}%):</span>
-            <span style=\"display: inline-block; width: 120px; text-align: right;\">¥{$taxAmount}</span>
-        </div>
-        <div class=\"grand-total\">
-            <span style=\"margin-right: 30px;\">合計金額:</span>
-            <span style=\"display: inline-block; width: 120px; text-align: right;\">¥{$totalAmount}</span>
+        <div class=\"grand-total\" style=\"background-color: {$brandLightGray}; padding: 15px; border-radius: 5px;\">
+            <span style=\"margin-right: 30px; font-size: 16pt;\">■ ご請求金額（税込）:</span>
+            <span style=\"display: inline-block; width: 150px; text-align: right; font-size: 18pt;\">¥{$totalAmount}</span>
         </div>
     </div>
 
@@ -320,12 +311,12 @@ class SmileyInvoicePDF {
     {$notesHtml}
 
     <!-- お支払い情報 -->
-    <div style=\"margin-top: 20px; padding: 15px; background-color: #f9f9f9; border: 1px solid #ddd;\">
-        <div style=\"font-weight: bold; margin-bottom: 10px;\">お支払い方法</div>
+    <div style=\"margin-top: 20px; padding: 15px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px;\">
+        <div style=\"font-weight: bold; margin-bottom: 10px;\">💳 お支払い方法</div>
         <div style=\"font-size: 9pt;\">
-            お支払期限: {$dueDate}<br>
-            お支払い方法の詳細については、別途ご連絡いたします。<br>
-            ご不明な点がございましたら、上記連絡先までお問い合わせください。
+            ⏰ お支払期限: {$dueDate}<br>
+            💡 お支払い方法の詳細については、別途ご連絡いたします。<br>
+            ❓ ご不明な点がございましたら、上記連絡先までお問い合わせください。
         </div>
     </div>
 
