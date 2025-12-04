@@ -357,6 +357,14 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
 
         // ページ読み込み時の初期化
         document.addEventListener('DOMContentLoaded', function() {
+            // URLパラメータを取得
+            const urlParams = new URLSearchParams(window.location.search);
+            const preselectedType = urlParams.get('type');
+            const preselectedUserId = urlParams.get('user_id');
+            const preselectedUserIds = urlParams.get('user_ids');
+            const preselectedCompany = urlParams.get('company');
+            const preselectedCompanies = urlParams.get('companies');
+
             // Flatpickrの初期化
             const fpConfig = {
                 locale: 'ja',
@@ -370,6 +378,16 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
 
             // デフォルトで先月を設定
             setPeriodTemplate('last_month');
+
+            // URLパラメータに基づいて請求書タイプを設定
+            if (preselectedType) {
+                const typeRadio = document.querySelector(`input[name="invoice_type"][value="${preselectedType}"]`);
+                if (typeRadio) {
+                    typeRadio.checked = true;
+                    currentInvoiceType = preselectedType;
+                    updateInvoiceTypeSelection();
+                }
+            }
 
             // 請求書タイプカードのクリックイベント
             document.querySelectorAll('.invoice-type-card').forEach(card => {
@@ -577,6 +595,55 @@ $pageTitle = '請求書生成 - Smiley配食事業システム';
             });
 
             targetList.innerHTML = html;
+
+            // URLパラメータに基づいて対象を事前選択
+            const urlParams = new URLSearchParams(window.location.search);
+            const preselectedUserId = urlParams.get('user_id');
+            const preselectedUserIds = urlParams.get('user_ids');
+            const preselectedCompany = urlParams.get('company');
+            const preselectedCompanies = urlParams.get('companies');
+
+            if (currentInvoiceType === 'individual' && (preselectedUserId || preselectedUserIds)) {
+                // 個人請求の場合
+                let userIdsToSelect = [];
+                if (preselectedUserId) {
+                    userIdsToSelect = [preselectedUserId];
+                } else if (preselectedUserIds) {
+                    userIdsToSelect = preselectedUserIds.split(',');
+                }
+
+                userIdsToSelect.forEach(userId => {
+                    const targetElement = document.querySelector(`.target-item[data-id="${userId}"]`);
+                    if (targetElement) {
+                        const checkbox = targetElement.querySelector('input[type="checkbox"]');
+                        checkbox.checked = true;
+                        targetElement.classList.add('selected');
+                        selectedTargets.push(userId);
+                    }
+                });
+            } else if (currentInvoiceType === 'company_bulk' && (preselectedCompany || preselectedCompanies)) {
+                // 企業一括請求の場合
+                let companiesToSelect = [];
+                if (preselectedCompany) {
+                    companiesToSelect = [preselectedCompany];
+                } else if (preselectedCompanies) {
+                    companiesToSelect = preselectedCompanies.split(',');
+                }
+
+                // 企業名で照合
+                items.forEach(item => {
+                    if (companiesToSelect.includes(item.company_name)) {
+                        const targetElement = document.querySelector(`.target-item[data-id="${item.id}"]`);
+                        if (targetElement) {
+                            const checkbox = targetElement.querySelector('input[type="checkbox"]');
+                            checkbox.checked = true;
+                            targetElement.classList.add('selected');
+                            selectedTargets.push(item.id.toString());
+                        }
+                    }
+                });
+            }
+
             updateSelectionStats();
         }
 

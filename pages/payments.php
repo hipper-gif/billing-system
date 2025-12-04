@@ -454,9 +454,18 @@ require_once __DIR__ . '/../includes/header.php';
     </h3>
 
     <?php if (!empty($receivables)): ?>
+    <div class="d-flex justify-content-end mb-3">
+        <button type="button" class="btn btn-material btn-warning" onclick="openBulkInvoiceModal()" id="bulkInvoiceBtn" style="display: none;">
+            <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">description</span>
+            選択項目の請求書を一括発行
+        </button>
+    </div>
     <table>
         <thead>
             <tr>
+                <th style="width: 50px;">
+                    <input type="checkbox" id="selectAllReceivables" onchange="toggleSelectAllReceivables(this)">
+                </th>
                 <?php if ($viewType === 'individual'): ?>
                     <th>利用者名</th>
                     <th>企業名</th>
@@ -474,6 +483,15 @@ require_once __DIR__ . '/../includes/header.php';
         <tbody>
             <?php foreach ($receivables as $item): ?>
             <tr>
+                <td>
+                    <input type="checkbox"
+                           class="receivable-checkbox"
+                           data-type="<?php echo $viewType; ?>"
+                           data-id="<?php echo $viewType === 'individual' ? $item['user_id'] : $item['company_name']; ?>"
+                           data-name="<?php echo htmlspecialchars($viewType === 'individual' ? $item['user_name'] : $item['company_name']); ?>"
+                           data-company="<?php echo htmlspecialchars($item['company_name'] ?? ''); ?>"
+                           onchange="updateBulkInvoiceButton()">
+                </td>
                 <?php if ($viewType === 'individual'): ?>
                     <td><?php echo htmlspecialchars($item['user_name']); ?></td>
                     <td><?php echo htmlspecialchars($item['company_name'] ?? '-'); ?></td>
@@ -495,6 +513,11 @@ require_once __DIR__ . '/../includes/header.php';
                             onclick='issuePreReceipt("<?php echo $viewType; ?>", <?php echo htmlspecialchars(json_encode($item), ENT_QUOTES, 'UTF-8'); ?>)'>
                         <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">receipt</span>
                         領収書発行
+                    </button>
+                    <button class="btn btn-material btn-sm btn-warning"
+                            onclick='generateInvoice("<?php echo $viewType; ?>", <?php echo htmlspecialchars(json_encode($item), ENT_QUOTES, 'UTF-8'); ?>)'>
+                        <span class="material-icons" style="font-size: 1rem; vertical-align: middle;">description</span>
+                        請求書発行
                     </button>
                 </td>
             </tr>
@@ -1081,6 +1104,106 @@ function issuePreReceipt(viewType, item) {
         console.error('Error:', error);
         alert('領収書の発行中にエラーが発生しました: ' + error.message);
     });
+}
+
+// 請求書発行（個別）
+function generateInvoice(viewType, item) {
+    // 請求書発行画面に遷移
+    let url = 'invoice_generate.php?';
+
+    if (viewType === 'individual') {
+        url += `type=individual&user_id=${item.user_id}`;
+    } else {
+        url += `type=company_bulk&company=${encodeURIComponent(item.company_name)}`;
+    }
+
+    window.location.href = url;
+}
+
+// 売掛残高の全選択/解除
+function toggleSelectAllReceivables(checkbox) {
+    const checkboxes = document.querySelectorAll('.receivable-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = checkbox.checked;
+    });
+    updateBulkInvoiceButton();
+}
+
+// 一括請求書発行ボタンの表示/非表示
+function updateBulkInvoiceButton() {
+    const checkboxes = document.querySelectorAll('.receivable-checkbox:checked');
+    const bulkInvoiceBtn = document.getElementById('bulkInvoiceBtn');
+
+    if (checkboxes.length > 0) {
+        bulkInvoiceBtn.style.display = 'inline-flex';
+    } else {
+        bulkInvoiceBtn.style.display = 'none';
+    }
+}
+
+// 一括請求書発行モーダルを開く
+function openBulkInvoiceModal() {
+    const checkboxes = document.querySelectorAll('.receivable-checkbox:checked');
+
+    if (checkboxes.length === 0) {
+        alert('請求書を発行する項目を選択してください');
+        return;
+    }
+
+    // 選択された項目のタイプをチェック（個人と企業が混在していないか）
+    const types = new Set();
+    const items = [];
+
+    checkboxes.forEach(cb => {
+        const type = cb.dataset.type;
+        types.add(type);
+        items.push({
+            type: type,
+            id: cb.dataset.id,
+            name: cb.dataset.name,
+            company: cb.dataset.company
+        });
+    });
+
+    if (types.size > 1) {
+        alert('個人別と企業別を同時に選択することはできません。\n\nどちらか一方を選択してください。');
+        return;
+    }
+
+    const viewType = Array.from(types)[0];
+
+    if (viewType === 'individual') {
+        // 個人別の場合：企業ごとにグループ化するか確認
+        const companies = new Set();
+        items.forEach(item => companies.add(item.company));
+
+        if (companies.size > 1) {
+            if (!confirm(`${companies.size}社の利用者が選択されています。\n\n企業ごとに請求書を発行しますか？\n\nOK: 企業別に発行\nキャンセル: 個人別に発行`)) {
+                // 個人別に発行
+                const userIds = items.map(item => item.id).join(',');
+                window.location.href = `invoice_generate.php?type=individual&user_ids=${userIds}`;
+            } else {
+                // 企業別に発行（部署別請求として扱う）
+                window.location.href = `invoice_generate.php?type=department`;
+            }
+        } else {
+            // 同じ企業の利用者のみ
+            const userIds = items.map(item => item.id).join(',');
+            const company = Array.from(companies)[0];
+            if (confirm(`${items.length}名の請求書を発行します。\n\n企業: ${company}\n\n企業一括請求書として発行しますか？\n\nOK: 企業一括請求\nキャンセル: 個人別請求`)) {
+                window.location.href = `invoice_generate.php?type=company_bulk&company=${encodeURIComponent(company)}`;
+            } else {
+                const userIds = items.map(item => item.id).join(',');
+                window.location.href = `invoice_generate.php?type=individual&user_ids=${userIds}`;
+            }
+        }
+    } else {
+        // 企業別の場合
+        const companies = items.map(item => item.name).join(',');
+        if (confirm(`${items.length}社の請求書を発行します。\n\n企業:\n${items.map(item => '- ' + item.name).join('\n')}\n\n続行しますか？`)) {
+            window.location.href = `invoice_generate.php?type=company_bulk&companies=${encodeURIComponent(companies)}`;
+        }
+    }
 }
 </script>
 
