@@ -6,10 +6,43 @@
 
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
+ini_set('log_errors', 1);
 
-require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../classes/SecurityHelper.php';
-require_once __DIR__ . '/../classes/SmileyInvoiceGenerator.php';
+// Fatal errorハンドラー - JSONレスポンスを保証
+register_shutdown_function(function() {
+    $error = error_get_last();
+    if ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=utf-8');
+            http_response_code(500);
+        }
+        echo json_encode([
+            'success' => false,
+            'error' => 'Fatal Error: ' . $error['message'],
+            'file' => basename($error['file']),
+            'line' => $error['line'],
+            'timestamp' => date('Y-m-d H:i:s')
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+});
+
+try {
+    require_once __DIR__ . '/../config/database.php';
+    require_once __DIR__ . '/../classes/SecurityHelper.php';
+    require_once __DIR__ . '/../classes/SmileyInvoiceGenerator.php';
+} catch (Throwable $e) {
+    header('Content-Type: application/json; charset=utf-8');
+    http_response_code(500);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Failed to load required files: ' . $e->getMessage(),
+        'file' => basename($e->getFile()),
+        'line' => $e->getLine(),
+        'timestamp' => date('Y-m-d H:i:s')
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
