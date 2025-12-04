@@ -301,15 +301,20 @@ function generateInvoices($input) {
             throw new Exception("{$param}は必須です");
         }
     }
-    
+
     // 日付形式検証
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $input['period_start']) || 
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $input['period_start']) ||
         !preg_match('/^\d{4}-\d{2}-\d{2}$/', $input['period_end'])) {
         throw new Exception('日付形式が正しくありません（YYYY-MM-DD形式で入力してください）');
     }
-    
+
     // SmileyInvoiceGeneratorインスタンス作成
-    $generator = new SmileyInvoiceGenerator();
+    try {
+        $generator = new SmileyInvoiceGenerator();
+    } catch (Exception $e) {
+        error_log("Failed to create SmileyInvoiceGenerator: " . $e->getMessage());
+        throw new Exception("請求書生成エンジンの初期化に失敗しました: " . $e->getMessage());
+    }
     
     // パラメータ構築
     $params = [

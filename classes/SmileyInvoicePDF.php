@@ -392,29 +392,41 @@ class SmileyInvoicePDF {
      * 会社情報取得
      */
     private function getCompanyInfo() {
-        // データベースから取得する場合
-        try {
-            $db = Database::getInstance();
-            $settings = $db->fetchOne("SELECT * FROM system_settings WHERE id = 1");
-
-            if ($settings) {
-                return [
-                    'company_name' => $settings['company_name'] ?? 'Smiley Kitchen',
-                    'address' => $settings['company_address'] ?? '〒000-0000 東京都○○区○○1-2-3',
-                    'phone' => $settings['company_phone'] ?? '03-0000-0000',
-                    'email' => $settings['company_email'] ?? 'info@smiley-kitchen.com'
-                ];
-            }
-        } catch (Exception $e) {
-            // エラー時はデフォルト値を返す
-        }
-
-        return [
+        // デフォルト値
+        $defaultInfo = [
             'company_name' => 'Smiley Kitchen',
             'address' => '〒000-0000 東京都○○区○○1-2-3',
             'phone' => '03-0000-0000',
             'email' => 'info@smiley-kitchen.com'
         ];
+
+        // データベースから取得を試みる
+        try {
+            if (!class_exists('Database')) {
+                return $defaultInfo;
+            }
+
+            $db = Database::getInstance();
+            if (!$db) {
+                return $defaultInfo;
+            }
+
+            $settings = $db->fetchOne("SELECT * FROM system_settings WHERE id = 1");
+
+            if ($settings) {
+                return [
+                    'company_name' => $settings['company_name'] ?? $defaultInfo['company_name'],
+                    'address' => $settings['company_address'] ?? $defaultInfo['address'],
+                    'phone' => $settings['company_phone'] ?? $defaultInfo['phone'],
+                    'email' => $settings['company_email'] ?? $defaultInfo['email']
+                ];
+            }
+        } catch (Exception $e) {
+            // エラー時はデフォルト値を返す
+            error_log("SmileyInvoicePDF: Failed to get company info from database: " . $e->getMessage());
+        }
+
+        return $defaultInfo;
     }
 
     /**
