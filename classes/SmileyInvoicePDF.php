@@ -10,14 +10,18 @@
  */
 
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../vendor/autoload.php';
 
-use Mpdf\Mpdf;
+// Composer autoloadを読み込み（存在する場合のみ）
+$autoloadPath = __DIR__ . '/../vendor/autoload.php';
+if (file_exists($autoloadPath)) {
+    require_once $autoloadPath;
+}
 
 class SmileyInvoicePDF {
     private $pdf;
     private $logoPath;
     private $companyInfo;
+    private $mpdfAvailable;
 
     // Smiley Kitchenブランドカラー
     const BRAND_GREEN = '#4CAF50';
@@ -29,6 +33,11 @@ class SmileyInvoicePDF {
     public function __construct() {
         $this->logoPath = __DIR__ . '/../assets/images/smiley-kitchen-logo.png';
         $this->companyInfo = $this->getCompanyInfo();
+        $this->mpdfAvailable = class_exists('Mpdf\Mpdf');
+
+        if (!$this->mpdfAvailable) {
+            error_log("Warning: mPDF not available. Install with: composer install");
+        }
     }
 
     /**
@@ -55,7 +64,11 @@ class SmileyInvoicePDF {
      * mPDF初期化
      */
     private function initializeMPDF() {
-        $this->pdf = new Mpdf([
+        if (!$this->mpdfAvailable) {
+            throw new Exception('PDF生成ライブラリ(mPDF)がインストールされていません。サーバーで "composer install" を実行してください。');
+        }
+
+        $this->pdf = new \Mpdf\Mpdf([
             'mode' => 'utf-8',
             'format' => 'A4',
             'margin_left' => 15,
