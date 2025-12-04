@@ -264,11 +264,11 @@ class SmileyInvoiceGenerator {
         $periodEnd = $data['period_end'];
         $dueDate = $data['due_date'];
         
-        // 金額計算
-        $subtotal = array_sum(array_column($orders, 'total_amount'));
-        $taxRate = 10.00;
-        $taxAmount = round($subtotal * 0.10);
-        $totalAmount = $subtotal + $taxAmount;
+        // 金額計算（税込み価格）
+        $totalAmount = array_sum(array_column($orders, 'total_amount'));
+        $subtotal = $totalAmount;  // 互換性のため同じ値を設定
+        $taxRate = 0.00;  // 税計算なし
+        $taxAmount = 0;   // 税額なし
         
         // 請求書番号生成
         $invoiceNumber = $this->generateInvoiceNumber();
@@ -327,23 +327,33 @@ class SmileyInvoiceGenerator {
         $invoiceId = $this->db->lastInsertId();
         
         // 明細データ挿入
-        try {
-            foreach ($orders as $order) {
+        $detailCount = 0;
+        foreach ($orders as $order) {
+            try {
                 $detailSql = "INSERT INTO invoice_details (
-                                invoice_id, order_id, order_date, 
-                                product_code, product_name, 
+                                invoice_id, order_id, order_date,
+                                product_code, product_name,
                                 quantity, unit_price, amount, created_at
                               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())";
-                
+
                 $this->db->execute($detailSql, [
-                    $invoiceId, $order['id'] ?? null, $order['delivery_date'],
-                    $order['product_code'] ?? null, $order['product_name'],
-                    $order['quantity'], $order['unit_price'], $order['total_amount']
+                    $invoiceId,
+                    $order['id'] ?? null,
+                    $order['delivery_date'] ?? $order['order_date'] ?? null,
+                    $order['product_code'] ?? '',
+                    $order['product_name'] ?? '商品名不明',
+                    $order['quantity'] ?? 0,
+                    $order['unit_price'] ?? 0,
+                    $order['total_amount'] ?? 0
                 ]);
+                $detailCount++;
+            } catch (Exception $e) {
+                error_log("Invoice detail insertion failed for order " . ($order['id'] ?? 'unknown') . ": " . $e->getMessage());
+                error_log("Order data: " . json_encode($order));
             }
-        } catch (Exception $e) {
-            error_log("Invoice details insertion failed: " . $e->getMessage());
         }
+
+        error_log("Invoice #{$invoiceId}: Inserted {$detailCount} of " . count($orders) . " order details");
         
         return $invoiceId;
     }
