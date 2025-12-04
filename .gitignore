@@ -30,3 +30,11 @@ Thumbs.db
 # デバッグファイル
 debug_*.php
 test_*.php
+
+# Composer
+/vendor/
+composer.lock
+
+# ストレージ（生成されたPDFなど）
+/storage/
+/uploads/
