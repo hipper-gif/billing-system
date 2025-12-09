@@ -195,7 +195,19 @@ class Database {
             throw $e;
         }
     }
-    
+
+    /**
+     * 単一カラムの値を取得
+     */
+    public function fetchColumn($sql, $params = []) {
+        try {
+            $stmt = $this->query($sql, $params);
+            return $stmt->fetchColumn();
+        } catch (Exception $e) {
+            throw $e;
+        }
+    }
+
     /**
      * INSERT/UPDATE/DELETE実行
      */
