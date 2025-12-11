@@ -16,12 +16,12 @@ require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../classes/QRCodeGenerator.php';
 require_once __DIR__ . '/../../classes/SecurityHelper.php';
 
-// 権限チェック（smiley_staffのみ）
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'smiley_staff') {
+// 営業スタッフ簡易認証チェック
+if (!isset($_SESSION['sales_staff_authenticated']) || $_SESSION['sales_staff_authenticated'] !== true) {
     http_response_code(403);
     echo json_encode([
         'success' => false,
-        'error' => 'この機能を使用する権限がありません'
+        'error' => 'この機能を使用する権限がありません。パスワードを入力してください。'
     ]);
     exit;
 }

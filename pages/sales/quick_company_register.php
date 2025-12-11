@@ -1,3 +1,9 @@
+<?php
+session_start();
+
+// 認証チェック
+$isAuthenticated = isset($_SESSION['sales_staff_authenticated']) && $_SESSION['sales_staff_authenticated'] === true;
+?>
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -162,12 +168,51 @@
 </head>
 <body>
     <div class="main-container">
-        <div class="card">
+        <!-- 認証カード（未認証時のみ表示） -->
+        <div class="card" id="authCard" style="display: <?php echo $isAuthenticated ? 'none' : 'block'; ?>">
+            <div class="card-header">
+                <h1>🔒 営業スタッフ認証</h1>
+                <p style="margin: 10px 0 0 0; font-size: 14px;">パスワードを入力してください</p>
+            </div>
+
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <strong>営業スタッフ専用</strong><br>
+                    企業登録を行うには、営業スタッフ用のパスワードが必要です
+                </div>
+
+                <form id="authForm">
+                    <div class="mb-3">
+                        <label for="staffPassword" class="form-label">営業スタッフパスワード *</label>
+                        <div style="position: relative;">
+                            <input type="password" class="form-control" id="staffPassword" name="password" required placeholder="パスワードを入力">
+                            <span class="material-icons password-toggle" onclick="toggleAuthPassword()" style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #757575;">visibility</span>
+                        </div>
+                        <small class="text-danger" id="authError"></small>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">
+                        <span class="material-icons" style="vertical-align: middle;">lock_open</span>
+                        認証する
+                    </button>
+                </form>
+
+                <div class="loading" id="authLoadingSpinner">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">認証中...</span>
+                    </div>
+                    <p class="mt-3">認証処理中...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 企業登録カード（認証後に表示） -->
+        <div class="card" id="registerCard" style="display: <?php echo $isAuthenticated ? 'block' : 'none'; ?>">
             <div class="card-header">
                 <h1>🚀 企業クイック登録</h1>
                 <p style="margin: 10px 0 0 0; font-size: 14px;">営業先でその場で登録</p>
             </div>
-            
+
             <div class="card-body">
                 <form id="companyRegisterForm">
                     <!-- 基本情報 -->
@@ -282,8 +327,69 @@
     
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    
+
     <script>
+        // パスワード表示/非表示切り替え（認証用）
+        function toggleAuthPassword() {
+            const field = document.getElementById('staffPassword');
+            const icon = field.nextElementSibling;
+
+            if (field.type === 'password') {
+                field.type = 'text';
+                icon.textContent = 'visibility_off';
+            } else {
+                field.type = 'password';
+                icon.textContent = 'visibility';
+            }
+        }
+
+        // 認証フォーム送信処理
+        document.getElementById('authForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            // エラーメッセージクリア
+            document.getElementById('authError').textContent = '';
+
+            // フォームデータ取得
+            const formData = new FormData(this);
+            const data = Object.fromEntries(formData.entries());
+
+            // ローディング表示
+            document.getElementById('authForm').style.display = 'none';
+            document.getElementById('authLoadingSpinner').style.display = 'block';
+
+            try {
+                // API呼び出し
+                const response = await fetch('../../api/sales/authenticate.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // 認証成功：企業登録カードを表示
+                    document.getElementById('authCard').style.display = 'none';
+                    document.getElementById('registerCard').style.display = 'block';
+                    document.getElementById('registerCard').scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    // 認証失敗
+                    document.getElementById('authError').textContent = result.error || '認証に失敗しました';
+                    document.getElementById('authForm').style.display = 'block';
+                    document.getElementById('authLoadingSpinner').style.display = 'none';
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                alert('通信エラーが発生しました');
+                document.getElementById('authForm').style.display = 'block';
+                document.getElementById('authLoadingSpinner').style.display = 'none';
+            }
+        });
+
         // フォーム送信処理
         document.getElementById('companyRegisterForm').addEventListener('submit', async function(e) {
             e.preventDefault();
