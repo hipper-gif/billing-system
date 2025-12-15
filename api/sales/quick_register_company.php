@@ -223,8 +223,8 @@ function insertCompany($db, $companyCode, $input) {
         'phone' => preg_replace('/[^0-9-]/', '', $input['phone']),
         'email' => $input['email'] ?? null,
         'contact_person' => SecurityHelper::sanitizeInput($input['contact_person']),
-        'payment_method' => $input['payment_method'] ?? 'company_bulk',
-        'billing_method' => $input['billing_method'] ?? 'company'
+        'payment_method' => null,  // 営業登録時は未設定（後で管理画面で設定）
+        'billing_method' => null   // 営業登録時は未設定（後で管理画面で設定）
     ];
     
     $db->query($sql, $params);

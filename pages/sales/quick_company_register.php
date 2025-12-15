@@ -248,27 +248,10 @@ $isAuthenticated = isset($_SESSION['sales_staff_authenticated']) && $_SESSION['s
                         </div>
                     </div>
                     
-                    <!-- 料金設定 -->
-                    <div class="form-section">
-                        <div class="form-section-title">
-                            <span class="material-icons">payments</span>
-                            料金設定
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="subsidyAmount" class="form-label">企業補助額（円/食）</label>
-                            <input type="number" class="form-control" id="subsidyAmount" name="subsidy_amount" min="0" value="0" placeholder="例: 300">
-                            <small class="text-muted">※ 補助がない場合は0のままにしてください</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="paymentMethod" class="form-label">支払方法</label>
-                            <select class="form-select" id="paymentMethod" name="payment_method">
-                                <option value="company_bulk">企業一括払い</option>
-                                <option value="individual">個人支払い</option>
-                                <option value="mixed">混合（企業補助+個人負担）</option>
-                            </select>
-                        </div>
+                    <!-- 注記 -->
+                    <div class="alert alert-success">
+                        <strong>📌 料金設定について</strong><br>
+                        料金設定（補助額・支払方法等）は、登録後に管理画面から設定できます
                     </div>
                     
                     <div class="alert alert-info">
