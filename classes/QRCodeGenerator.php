@@ -118,17 +118,24 @@ class QRCodeGenerator {
     
     /**
      * ベースURLを取得
-     * 
+     *
      * @return string ベースURL
      */
     private function getBaseUrl() {
+        // config/database.php で定義されたBASE_URLを使用
+        if (defined('BASE_URL')) {
+            return rtrim(BASE_URL, '/');
+        }
+
+        // フォールバック: 自動検出
         $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
         $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-        
-        // スクリプトのディレクトリパスを取得
+
+        // billing-systemディレクトリまでのパスを取得
         $scriptPath = $_SERVER['SCRIPT_NAME'] ?? '';
-        $basePath = dirname(dirname($scriptPath));
-        
+        // /api/sales/quick_register_company.php から 3階層上へ
+        $basePath = dirname(dirname(dirname($scriptPath)));
+
         return "{$protocol}://{$host}{$basePath}";
     }
     
