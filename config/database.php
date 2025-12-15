@@ -168,11 +168,9 @@ class Database {
             return $stmt;
         } catch (PDOException $e) {
             error_log("Query error: " . $e->getMessage() . " | SQL: " . $sql);
-            if (DEBUG_MODE) {
-                throw new Exception("クエリエラー: " . $e->getMessage() . " | SQL: " . $sql);
-            } else {
-                throw new Exception("データベース処理でエラーが発生しました。");
-            }
+            error_log("Query params: " . json_encode($params));
+            // 一時的にすべての環境で詳細エラーを表示（デバッグ用）
+            throw new Exception("クエリエラー: " . $e->getMessage() . " | SQL: " . $sql);
         }
     }
     
