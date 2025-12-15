@@ -434,8 +434,9 @@ $isAuthenticated = isset($_SESSION['sales_staff_authenticated']) && $_SESSION['s
                         errorMessage += '\n【デバッグ情報】\n' + result.debug;
                     }
 
-                    alert(errorMessage);
                     console.error('Registration error:', result);
+                    console.error('Error details:', JSON.stringify(result, null, 2));
+                    alert(errorMessage);
                     document.getElementById('companyRegisterForm').style.display = 'block';
                     document.getElementById('loadingSpinner').style.display = 'none';
                 }

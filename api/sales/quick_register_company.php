@@ -98,8 +98,10 @@ try {
     echo json_encode([
         'success' => false,
         'error' => '企業登録中にエラーが発生しました',
-        'debug' => DEBUG_MODE ? $e->getMessage() : null,
-        'trace' => DEBUG_MODE ? $e->getTraceAsString() : null
+        'debug' => $e->getMessage(),  // 常にエラーメッセージを表示（デバッグ用）
+        'trace' => DEBUG_MODE ? $e->getTraceAsString() : null,
+        'file' => $e->getFile(),
+        'line' => $e->getLine()
     ], JSON_UNESCAPED_UNICODE);
 }
 
