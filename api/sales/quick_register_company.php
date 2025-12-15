@@ -137,8 +137,8 @@ function validateInput($input) {
         }
     }
     
-    // 補助金額のバリデーション
-    if (isset($input['subsidy_amount'])) {
+    // 補助金額のバリデーション（空の場合はスキップ）
+    if (!empty($input['subsidy_amount'])) {
         if (!is_numeric($input['subsidy_amount']) || $input['subsidy_amount'] < 0) {
             $errors['subsidy_amount'] = '補助金額は0以上の数値を入力してください';
         }

@@ -257,7 +257,8 @@ $isAuthenticated = isset($_SESSION['sales_staff_authenticated']) && $_SESSION['s
                         
                         <div class="mb-3">
                             <label for="subsidyAmount" class="form-label">企業補助額（円/食）</label>
-                            <input type="number" class="form-control" id="subsidyAmount" name="subsidy_amount" min="0" value="300" placeholder="例: 300">
+                            <input type="number" class="form-control" id="subsidyAmount" name="subsidy_amount" min="0" value="0" placeholder="例: 300">
+                            <small class="text-muted">※ 補助がない場合は0のままにしてください</small>
                         </div>
                         
                         <div class="mb-3">
