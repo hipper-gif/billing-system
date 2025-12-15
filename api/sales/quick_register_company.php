@@ -192,12 +192,11 @@ function insertCompany($db, $companyCode, $input) {
         company_code,
         company_name,
         company_address,
-        contact_person,
         phone,
         email,
+        contact_person,
         payment_method,
         billing_method,
-        service_fee_rate,
         is_active,
         created_at,
         updated_at
@@ -205,12 +204,11 @@ function insertCompany($db, $companyCode, $input) {
         :company_code,
         :company_name,
         :company_address,
-        :contact_person,
         :phone,
         :email,
+        :contact_person,
         :payment_method,
         :billing_method,
-        :service_fee_rate,
         1,
         NOW(),
         NOW()
@@ -220,12 +218,11 @@ function insertCompany($db, $companyCode, $input) {
         'company_code' => $companyCode,
         'company_name' => SecurityHelper::sanitizeInput($input['company_name']),
         'company_address' => SecurityHelper::sanitizeInput($input['company_address']),
-        'contact_person' => SecurityHelper::sanitizeInput($input['contact_person']),
         'phone' => preg_replace('/[^0-9-]/', '', $input['phone']),
         'email' => $input['email'] ?? null,
+        'contact_person' => SecurityHelper::sanitizeInput($input['contact_person']),
         'payment_method' => $input['payment_method'] ?? 'company_bulk',
-        'billing_method' => $input['billing_method'] ?? 'company',
-        'service_fee_rate' => $input['subsidy_amount'] ?? 0
+        'billing_method' => $input['billing_method'] ?? 'company'
     ];
     
     $db->query($sql, $params);
