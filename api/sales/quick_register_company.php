@@ -89,16 +89,18 @@ try {
     if (isset($db)) {
         $db->rollback();
     }
-    
+
     // エラーログ記録
     error_log("企業登録エラー: " . $e->getMessage());
-    
+    error_log("スタックトレース: " . $e->getTraceAsString());
+
     http_response_code(500);
     echo json_encode([
         'success' => false,
         'error' => '企業登録中にエラーが発生しました',
-        'debug' => $e->getMessage() // 開発環境のみ
-    ]);
+        'debug' => DEBUG_MODE ? $e->getMessage() : null,
+        'trace' => DEBUG_MODE ? $e->getTraceAsString() : null
+    ], JSON_UNESCAPED_UNICODE);
 }
 
 /**
