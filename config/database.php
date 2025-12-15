@@ -63,6 +63,10 @@ if (ENVIRONMENT === 'test' || ENVIRONMENT === 'production') {
 define('SESSION_TIMEOUT', 3600);
 define('CSRF_TOKEN_EXPIRE', 3600);
 
+// 営業スタッフ用簡易認証キー
+// 本番環境では環境変数から取得することを推奨
+define('SALES_STAFF_PASSWORD', 'Smiley2525Sales');
+
 // ファイル設定
 define('UPLOAD_MAX_SIZE', 10 * 1024 * 1024);
 define('ALLOWED_FILE_TYPES', ['csv']);
