@@ -413,13 +413,29 @@ $isAuthenticated = isset($_SESSION['sales_staff_authenticated']) && $_SESSION['s
                 });
                 
                 const result = await response.json();
-                
+
                 if (result.success) {
                     // 成功時の処理
                     displayQRCode(result.data);
                 } else {
-                    // エラー表示
-                    alert('エラー: ' + (result.error || 'エラーが発生しました'));
+                    // エラー表示（詳細情報を含む）
+                    let errorMessage = result.error || 'エラーが発生しました';
+
+                    // バリデーションエラーがある場合
+                    if (result.errors) {
+                        errorMessage += '\n\n【詳細】\n';
+                        for (const [field, message] of Object.entries(result.errors)) {
+                            errorMessage += `- ${field}: ${message}\n`;
+                        }
+                    }
+
+                    // デバッグ情報がある場合
+                    if (result.debug) {
+                        errorMessage += '\n【デバッグ情報】\n' + result.debug;
+                    }
+
+                    alert(errorMessage);
+                    console.error('Registration error:', result);
                     document.getElementById('companyRegisterForm').style.display = 'block';
                     document.getElementById('loadingSpinner').style.display = 'none';
                 }
