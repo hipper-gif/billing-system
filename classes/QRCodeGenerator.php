@@ -105,12 +105,20 @@ class QRCodeGenerator {
         $image = imagecreatetruecolor(300, 300);
         $white = imagecolorallocate($image, 255, 255, 255);
         $black = imagecolorallocate($image, 0, 0, 0);
+        $gray = imagecolorallocate($image, 200, 200, 200);
         imagefill($image, 0, 0, $white);
-        
-        // テキストを追加
-        $text = "QR Code\n" . substr($url, 0, 30) . "...";
-        imagestring($image, 5, 50, 140, $text, $black);
-        
+
+        // 枠線を描画
+        imagerectangle($image, 10, 10, 290, 290, $gray);
+
+        // テキストを複数行で追加
+        imagestring($image, 5, 80, 120, "QR Code", $black);
+        imagestring($image, 3, 30, 150, "URL:", $gray);
+        imagestring($image, 2, 30, 170, substr($url, 0, 40), $gray);
+        if (strlen($url) > 40) {
+            imagestring($image, 2, 30, 185, substr($url, 40, 40), $gray);
+        }
+
         // PNG保存
         imagepng($image, $filepath);
         imagedestroy($image);

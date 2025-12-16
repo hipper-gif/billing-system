@@ -318,11 +318,12 @@ if (!$companyInfo) {
                     利用者コードを忘れないように、<br>
                     この画面をスクリーンショットで保存してください
                 </div>
-                
-                <button class="btn btn-primary w-100" onclick="goToOrderDashboard()">
-                    <span class="material-icons" style="vertical-align: middle;">restaurant_menu</span>
-                    今すぐ注文する
-                </button>
+
+                <div class="alert alert-info">
+                    <strong>✅ 登録完了</strong><br>
+                    登録が完了しました。利用者コードは大切に保管してください。<br>
+                    注文機能は準備中です。
+                </div>
             </div>
         </div>
     </div>
@@ -454,11 +455,6 @@ if (!$companyInfo) {
             
             document.getElementById('successCard').style.display = 'block';
             document.getElementById('successCard').scrollIntoView({ behavior: 'smooth' });
-        }
-        
-        // 注文画面へ遷移
-        function goToOrderDashboard() {
-            window.location.href = '/pages/order_dashboard.php';
         }
     </script>
 </body>
