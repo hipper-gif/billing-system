@@ -13,14 +13,14 @@ $authManager = new AuthManager();
 
 // ログインチェック
 if (!$authManager->isLoggedIn()) {
-    header('Location: /pages/login.php');
+    header('Location: login.php');
     exit;
 }
 
 // タイムアウトチェック
 if ($authManager->checkTimeout()) {
     $authManager->logout();
-    header('Location: /pages/login.php?timeout=1');
+    header('Location: login.php?timeout=1');
     exit;
 }
 
@@ -404,11 +404,11 @@ $user = $authManager->getCurrentUser();
         
         <!-- クイック機能 -->
         <div class="quick-actions">
-            <a href="/pages/create_order.php" class="quick-btn btn-order">
+            <a href="create_order.php" class="quick-btn btn-order">
                 <div class="material-icons">restaurant_menu</div>
                 <div class="quick-btn-label">今すぐ注文</div>
             </a>
-            <a href="/pages/order_history.php" class="quick-btn btn-history">
+            <a href="order_history.php" class="quick-btn btn-history">
                 <div class="material-icons">history</div>
                 <div class="quick-btn-label">注文履歴</div>
             </a>
@@ -436,7 +436,7 @@ $user = $authManager->getCurrentUser();
                     </div>
                     
                     <div class="text-center mt-3">
-                        <a href="/pages/order_history.php" class="btn btn-outline-primary">
+                        <a href="order_history.php" class="btn btn-outline-primary">
                             すべての履歴を見る
                         </a>
                     </div>
@@ -471,7 +471,7 @@ $user = $authManager->getCurrentUser();
         // 明日の注文を読み込み
         async function loadTomorrowOrder() {
             try {
-                const response = await fetch('/api/order_dashboard.php?action=today_order');
+                const response = await fetch('../api/order_dashboard.php?action=today_order');
                 const result = await response.json();
                 
                 document.getElementById('tomorrowOrderLoading').style.display = 'none';
@@ -503,7 +503,7 @@ $user = $authManager->getCurrentUser();
         // 今月の注文履歴を読み込み
         async function loadRecentHistory() {
             try {
-                const response = await fetch('/api/order_dashboard.php?action=recent_history');
+                const response = await fetch('../api/order_dashboard.php?action=recent_history');
                 const result = await response.json();
                 
                 document.getElementById('historyLoading').style.display = 'none';
@@ -551,7 +551,7 @@ $user = $authManager->getCurrentUser();
         
         // 注文画面へ
         function goToOrder() {
-            window.location.href = '/pages/create_order.php';
+            window.location.href = 'create_order.php';
         }
         
         // 注文キャンセル
@@ -571,15 +571,15 @@ $user = $authManager->getCurrentUser();
             }
             
             try {
-                const response = await fetch('/api/auth.php?action=logout');
+                const response = await fetch('../api/auth.php?action=logout');
                 const result = await response.json();
                 
                 if (result.success) {
-                    window.location.href = '/pages/login.php';
+                    window.location.href = 'login.php';
                 }
             } catch (error) {
                 console.error('Logout error:', error);
-                window.location.href = '/pages/login.php';
+                window.location.href = 'login.php';
             }
         }
     </script>
