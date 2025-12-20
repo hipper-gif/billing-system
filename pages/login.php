@@ -12,7 +12,7 @@ require_once __DIR__ . '/../classes/AuthManager.php';
 $authManager = new AuthManager();
 
 if ($authManager->isLoggedIn()) {
-    header('Location: /pages/order_dashboard.php');
+    header('Location: order_dashboard.php');
     exit;
 }
 ?>
@@ -332,7 +332,7 @@ if ($authManager->isLoggedIn()) {
                 
                 if (result.success) {
                     // ログイン成功 - 注文画面へリダイレクト
-                    window.location.href = '/pages/order_dashboard.php';
+                    window.location.href = 'order_dashboard.php';
                 } else {
                     // エラー表示
                     if (result.errors) {
