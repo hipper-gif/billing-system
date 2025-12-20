@@ -174,6 +174,7 @@ $user = $authManager->getCurrentUser();
             text-align: center;
             cursor: pointer;
             transition: all 0.3s;
+            position: relative;
         }
         
         .date-card:hover {
@@ -186,6 +187,38 @@ $user = $authManager->getCurrentUser();
             background: linear-gradient(135deg, var(--primary-green) 0%, #45a049 100%);
             color: white;
             border-color: var(--primary-green);
+        }
+        
+        .date-card.weekend {
+            background: #FFF8E1;
+            border-color: #FFB74D;
+        }
+        
+        .date-card.weekend:hover {
+            border-color: var(--warning-orange);
+            box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
+        }
+        
+        .date-card.weekend.selected {
+            background: linear-gradient(135deg, var(--warning-orange) 0%, #F57C00 100%);
+            color: white;
+            border-color: var(--warning-orange);
+        }
+        
+        .weekend-badge {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: var(--warning-orange);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        
+        .date-card.selected .weekend-badge {
+            background: rgba(255, 255, 255, 0.3);
         }
         
         .date-day {
@@ -605,11 +638,22 @@ $user = $authManager->getCurrentUser();
                 dateCard.className = 'date-card';
                 dateCard.onclick = () => selectDate(date.date);
                 
-                dateCard.innerHTML = `
+                // 週末の場合はクラスを追加
+                if (date.is_weekend) {
+                    dateCard.classList.add('weekend');
+                }
+                
+                let html = `
                     <div class="date-day">${date.formatted}</div>
                     <div class="date-number">${date.day_of_week}</div>
                 `;
                 
+                // 週末バッジを追加
+                if (date.is_weekend) {
+                    html = `<div class="weekend-badge">週末</div>` + html;
+                }
+                
+                dateCard.innerHTML = html;
                 dateGrid.appendChild(dateCard);
             });
             
