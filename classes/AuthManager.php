@@ -324,6 +324,33 @@ class AuthManager {
     }
     
     /**
+     * 管理者権限チェック
+     * 
+     * @return bool 管理者の場合true
+     */
+    public function isAdmin() {
+        if (!$this->isLoggedIn()) {
+            return false;
+        }
+        
+        $role = $_SESSION['role'] ?? 'user';
+        return in_array($role, ['smiley_staff', 'admin']);
+    }
+    
+    /**
+     * 管理者権限を要求
+     * 管理者でない場合はリダイレクト
+     * 
+     * @param string $redirectUrl リダイレクト先URL
+     */
+    public function requireAdmin($redirectUrl = '../login.php') {
+        if (!$this->isAdmin()) {
+            header('Location: ' . $redirectUrl);
+            exit;
+        }
+    }
+    
+    /**
      * セッションタイムアウトチェック
      * 
      * @param int $timeout タイムアウト時間（秒）デフォルト30分
