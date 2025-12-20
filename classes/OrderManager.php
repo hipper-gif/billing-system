@@ -40,19 +40,15 @@ class OrderManager {
         
         for ($i = $startDay; $i <= $days + $startDay; $i++) {
             $date = new DateTime("+{$i} days");
-            
-            // 土日を除外（オプション - 必要に応じて調整）
             $dayOfWeek = (int)$date->format('w');
-            if ($dayOfWeek === 0 || $dayOfWeek === 6) {
-                continue; // 日曜日(0)と土曜日(6)をスキップ
-            }
             
             $availableDates[] = [
                 'date' => $date->format('Y-m-d'),
                 'formatted' => $date->format('m月d日'),
                 'day_of_week' => $this->getDayOfWeekJp($dayOfWeek),
                 'is_today' => false,
-                'is_tomorrow' => ($i === 1)
+                'is_tomorrow' => ($i === 1),
+                'is_weekend' => ($dayOfWeek === 0 || $dayOfWeek === 6)
             ];
         }
         
