@@ -515,10 +515,10 @@ $user = $authManager->getCurrentUser();
         <div id="stepContent2" class="step-content" style="display: none;">
             <div class="card">
                 <div class="menu-tabs">
-                    <button class="menu-tab active" data-tab="daily" onclick="switchMenuTab('daily')">
+                    <button class="menu-tab active" data-tab="daily" onclick="switchMenuTab('daily', event)">
                         日替わり
                     </button>
-                    <button class="menu-tab" data-tab="standard" onclick="switchMenuTab('standard')">
+                    <button class="menu-tab" data-tab="standard" onclick="switchMenuTab('standard', event)">
                         定番メニュー
                     </button>
                 </div>
@@ -732,23 +732,23 @@ $user = $authManager->getCurrentUser();
         function createMenuCard(menu) {
             const card = document.createElement('div');
             card.className = 'menu-item';
-            card.onclick = () => selectMenu(menu);
-            
+            card.onclick = (e) => selectMenu(menu, e);
+
             let html = `
                 <div class="menu-name">${menu.product_name}</div>
                 <div class="menu-price">¥${Number(menu.unit_price).toLocaleString()}</div>
             `;
-            
+
             if (menu.special_note) {
                 html += `<div class="menu-note">${menu.special_note}</div>`;
             }
-            
+
             card.innerHTML = html;
             return card;
         }
         
         // メニューを選択
-        function selectMenu(menu) {
+        function selectMenu(menu, clickEvent) {
             selectedMenu = menu;
             console.log('Selected menu:', menu);
 
@@ -763,22 +763,26 @@ $user = $authManager->getCurrentUser();
             document.querySelectorAll('.menu-item').forEach(item => {
                 item.classList.remove('selected');
             });
-            event.target.closest('.menu-item').classList.add('selected');
+            if (clickEvent) {
+                clickEvent.target.closest('.menu-item').classList.add('selected');
+            }
 
             // 次へボタンを有効化
             document.getElementById('nextBtn').disabled = false;
         }
         
         // メニュータブ切り替え
-        function switchMenuTab(tab) {
+        function switchMenuTab(tab, clickEvent) {
             currentMenuTab = tab;
-            
+
             // タブボタンの状態更新
             document.querySelectorAll('.menu-tab').forEach(btn => {
                 btn.classList.remove('active');
+                if (btn.getAttribute('data-tab') === tab) {
+                    btn.classList.add('active');
+                }
             });
-            event.target.classList.add('active');
-            
+
             // メニュー表示切り替え
             document.getElementById('menuListDaily').style.display = (tab === 'daily') ? 'block' : 'none';
             document.getElementById('menuListStandard').style.display = (tab === 'standard') ? 'block' : 'none';
