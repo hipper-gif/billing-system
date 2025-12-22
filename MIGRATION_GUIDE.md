@@ -120,4 +120,59 @@ ALTER TABLE products DROP INDEX idx_supplier_id;
 
 ---
 
-最終更新: 2025-11-01
+## 注文管理機能のマイグレーション
+
+### 問題: 注文作成時のエラー
+
+注文作成時に以下のエラーが発生する場合：
+
+```
+注文の作成中にエラーが発生しました
+```
+
+これは`orders`テーブルに注文管理用のカラム（`subsidy_amount`, `user_payment_amount`, `order_status`など）が不足しているためです。
+
+### 解決方法
+
+MySQLクライアントから以下のマイグレーションを実行します：
+
+```bash
+mysql -u ユーザー名 -p データベース名 < sql/migration_add_order_management_columns.sql
+```
+
+または、phpMyAdminなどのGUIツールで以下のSQLを実行してください：
+
+```sql
+-- ordersテーブルに注文管理用のカラムを追加
+ALTER TABLE orders ADD COLUMN subsidy_amount DECIMAL(10, 2) DEFAULT 0 COMMENT '企業補助額' AFTER total_amount;
+ALTER TABLE orders ADD COLUMN user_payment_amount DECIMAL(10, 2) DEFAULT 0 COMMENT 'ユーザー支払い額' AFTER subsidy_amount;
+ALTER TABLE orders ADD COLUMN ordered_by_user_id INT COMMENT '注文者ID' AFTER user_payment_amount;
+ALTER TABLE orders ADD COLUMN order_type ENUM('self', 'proxy') DEFAULT 'self' COMMENT '注文タイプ' AFTER ordered_by_user_id;
+ALTER TABLE orders ADD COLUMN order_status ENUM('confirmed', 'cancelled', 'pending') DEFAULT 'confirmed' COMMENT '注文ステータス' AFTER order_type;
+ALTER TABLE orders ADD INDEX idx_order_status (order_status);
+ALTER TABLE orders ADD INDEX idx_ordered_by_user_id (ordered_by_user_id);
+```
+
+### マイグレーション内容
+
+以下のカラムが`orders`テーブルに追加されます：
+
+| カラム名 | 型 | 説明 |
+|---------|-------|------|
+| `subsidy_amount` | DECIMAL(10,2) | 企業補助額 |
+| `user_payment_amount` | DECIMAL(10,2) | ユーザー支払い額 |
+| `ordered_by_user_id` | INT | 注文者ID（代理注文用） |
+| `order_type` | ENUM | 注文タイプ（self/proxy） |
+| `order_status` | ENUM | 注文ステータス（confirmed/cancelled/pending） |
+
+### マイグレーション後の確認
+
+```sql
+DESCRIBE orders;
+```
+
+上記のカラムが存在することを確認してください。
+
+---
+
+最終更新: 2025-12-22
