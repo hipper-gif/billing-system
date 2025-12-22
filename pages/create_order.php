@@ -680,10 +680,14 @@ $user = $authManager->getCurrentUser();
             try {
                 const response = await fetch(`../api/orders_management.php?action=menus&date=${date}`);
                 const result = await response.json();
-                
+
+                console.log('Menu API response:', result);
+
                 if (result.success) {
                     menusDaily = result.data.daily || [];
                     menusStandard = result.data.standard || [];
+                    console.log('Daily menus:', menusDaily);
+                    console.log('Standard menus:', menusStandard);
                     renderMenus();
                 }
             } catch (error) {
@@ -746,13 +750,21 @@ $user = $authManager->getCurrentUser();
         // メニューを選択
         function selectMenu(menu) {
             selectedMenu = menu;
-            
+            console.log('Selected menu:', menu);
+
+            // バリデーション
+            if (!menu || !menu.id) {
+                console.error('Invalid menu object:', menu);
+                alert('メニュー情報が正しくありません');
+                return;
+            }
+
             // ビジュアル更新
             document.querySelectorAll('.menu-item').forEach(item => {
                 item.classList.remove('selected');
             });
             event.target.closest('.menu-item').classList.add('selected');
-            
+
             // 次へボタンを有効化
             document.getElementById('nextBtn').disabled = false;
         }
@@ -872,19 +884,27 @@ $user = $authManager->getCurrentUser();
             if (!confirm('この内容で注文しますか？')) {
                 return;
             }
-            
+
+            // バリデーション
+            if (!selectedDate || !selectedMenu || !selectedMenu.id) {
+                alert('注文情報が不完全です。最初からやり直してください。');
+                return;
+            }
+
             const submitBtn = document.getElementById('submitBtn');
             submitBtn.disabled = true;
             submitBtn.textContent = '注文中...';
-            
+
             try {
                 const orderData = {
                     delivery_date: selectedDate,
-                    product_id: selectedMenu.id,
-                    quantity: quantity,
+                    product_id: parseInt(selectedMenu.id),
+                    quantity: parseInt(quantity),
                     notes: ''
                 };
-                
+
+                console.log('Submitting order:', orderData);
+
                 const response = await fetch('../api/orders_management.php?action=create_order', {
                     method: 'POST',
                     headers: {
@@ -892,9 +912,10 @@ $user = $authManager->getCurrentUser();
                     },
                     body: JSON.stringify(orderData)
                 });
-                
+
                 const result = await response.json();
-                
+                console.log('Order result:', result);
+
                 if (result.success) {
                     alert('注文を受け付けました！');
                     window.location.href = 'order_dashboard.php';
@@ -903,7 +924,7 @@ $user = $authManager->getCurrentUser();
                     submitBtn.disabled = false;
                     submitBtn.textContent = '注文を確定する';
                 }
-                
+
             } catch (error) {
                 console.error('Order submission error:', error);
                 alert('注文の送信に失敗しました');
