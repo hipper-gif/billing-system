@@ -28,7 +28,7 @@ if (!$authManager->isAdmin()) {
 }
 
 $db = Database::getInstance();
-$action = $_GET['action'] ?? '';
+$action = $_GET['action'] ?? 'list';
 
 try {
     switch ($action) {
