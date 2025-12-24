@@ -81,6 +81,9 @@ class OrderManager {
      * @return array メニュー配列
      */
     public function getMenusForDate($date) {
+        // 週替わりメニュー取得（優先）
+        $weeklyMenu = $this->getWeeklyMenuForDate($date);
+        
         // 日替わりメニュー取得
         $dailySql = "SELECT 
                         p.id,
@@ -117,11 +120,52 @@ class OrderManager {
         
         $standardMenus = $this->db->fetchAll($standardSql);
         
+        // 週替わりメニューがある場合は優先的に表示
+        if ($weeklyMenu) {
+            $dailyMenus = array_merge([$weeklyMenu], $dailyMenus);
+        }
+        
         return [
             'daily' => $dailyMenus,
             'standard' => $standardMenus,
-            'date' => $date
+            'date' => $date,
+            'has_weekly' => !empty($weeklyMenu)
         ];
+    }
+    
+    /**
+     * 指定日の週替わりメニューを取得
+     * 
+     * @param string $date 配達日（Y-m-d）
+     * @return array|null 週替わりメニュー
+     */
+    private function getWeeklyMenuForDate($date) {
+        // 指定日が含まれる週の月曜日を取得
+        $dateObj = new DateTime($date);
+        $dayOfWeek = $dateObj->format('w');
+        $daysToMonday = ($dayOfWeek == 0) ? -6 : -(($dayOfWeek - 1));
+        $monday = clone $dateObj;
+        $monday->modify("{$daysToMonday} days");
+        
+        $weekStartDate = $monday->format('Y-m-d');
+        
+        $sql = "SELECT 
+                    p.id,
+                    p.product_code,
+                    p.product_name,
+                    p.category_code,
+                    p.category_name,
+                    p.unit_price,
+                    wm.special_note,
+                    'weekly' as menu_type
+                FROM weekly_menus wm
+                INNER JOIN products p ON wm.product_id = p.id
+                WHERE wm.week_start_date = :week_start_date
+                  AND wm.is_available = 1
+                  AND p.is_active = 1
+                LIMIT 1";
+        
+        return $this->db->fetch($sql, ['week_start_date' => $weekStartDate]);
     }
     
     /**
@@ -231,11 +275,9 @@ class OrderManager {
             
         } catch (Exception $e) {
             error_log("Order creation error: " . $e->getMessage());
-            error_log("Stack trace: " . $e->getTraceAsString());
-            error_log("Order data: " . print_r($orderData, true));
             return [
                 'success' => false,
-                'error' => '注文の作成中にエラーが発生しました: ' . $e->getMessage()
+                'error' => '注文の作成中にエラーが発生しました'
             ];
         }
     }
