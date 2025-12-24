@@ -231,9 +231,11 @@ class OrderManager {
             
         } catch (Exception $e) {
             error_log("Order creation error: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
+            error_log("Order data: " . print_r($orderData, true));
             return [
                 'success' => false,
-                'error' => '注文の作成中にエラーが発生しました'
+                'error' => '注文の作成中にエラーが発生しました: ' . $e->getMessage()
             ];
         }
     }
