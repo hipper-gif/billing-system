@@ -134,13 +134,17 @@ ALTER TABLE products DROP INDEX idx_supplier_id;
 
 ### 解決方法
 
-MySQLクライアントから以下のマイグレーションを実行します：
+**2つのマイグレーションを実行する必要があります：**
+
+#### ステップ1: ordersテーブルのマイグレーション
+
+MySQLクライアントから以下を実行：
 
 ```bash
 mysql -u ユーザー名 -p データベース名 < sql/migration_add_order_management_columns.sql
 ```
 
-または、phpMyAdminなどのGUIツールで以下のSQLを実行してください：
+または、phpMyAdminで以下のSQLを実行：
 
 ```sql
 -- ordersテーブルに注文管理用のカラムを追加
@@ -153,9 +157,24 @@ ALTER TABLE orders ADD INDEX idx_order_status (order_status);
 ALTER TABLE orders ADD INDEX idx_ordered_by_user_id (ordered_by_user_id);
 ```
 
+#### ステップ2: companiesテーブルのマイグレーション
+
+MySQLクライアントから以下を実行：
+
+```bash
+mysql -u ユーザー名 -p データベース名 < sql/migration_add_companies_subsidy.sql
+```
+
+または、phpMyAdminで以下のSQLを実行：
+
+```sql
+-- companiesテーブルに企業補助額カラムを追加
+ALTER TABLE companies ADD COLUMN subsidy_amount DECIMAL(10, 2) DEFAULT 0 COMMENT '企業補助額（1食あたり）' AFTER company_name;
+```
+
 ### マイグレーション内容
 
-以下のカラムが`orders`テーブルに追加されます：
+#### ordersテーブルに追加されるカラム：
 
 | カラム名 | 型 | 説明 |
 |---------|-------|------|
@@ -165,13 +184,20 @@ ALTER TABLE orders ADD INDEX idx_ordered_by_user_id (ordered_by_user_id);
 | `order_type` | ENUM | 注文タイプ（self/proxy） |
 | `order_status` | ENUM | 注文ステータス（confirmed/cancelled/pending） |
 
+#### companiesテーブルに追加されるカラム：
+
+| カラム名 | 型 | 説明 |
+|---------|-------|------|
+| `subsidy_amount` | DECIMAL(10,2) | 企業補助額（1食あたり） |
+
 ### マイグレーション後の確認
 
 ```sql
 DESCRIBE orders;
+DESCRIBE companies;
 ```
 
-上記のカラムが存在することを確認してください。
+上記のカラムが両方のテーブルに存在することを確認してください。
 
 ---
 
