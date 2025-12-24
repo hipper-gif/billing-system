@@ -514,20 +514,12 @@ $user = $authManager->getCurrentUser();
         <!-- Step 2: メニュー選択 -->
         <div id="stepContent2" class="step-content" style="display: none;">
             <div class="card">
-                <div class="menu-tabs">
-                    <button class="menu-tab active" data-tab="daily" onclick="switchMenuTab('daily', event)">
-                        日替わり
-                    </button>
-                    <button class="menu-tab" data-tab="standard" onclick="switchMenuTab('standard', event)">
-                        定番メニュー
-                    </button>
-                </div>
+                <div class="card-header">メニューを選択してください</div>
                 <div id="menuLoading" class="loading">
                     <div class="spinner-border text-primary"></div>
                     <p class="mt-3">メニューを読み込み中...</p>
                 </div>
-                <div id="menuListDaily" class="menu-list" style="display: none;"></div>
-                <div id="menuListStandard" class="menu-list" style="display: none;"></div>
+                <div id="menuList" class="menu-list" style="display: none;"></div>
                 <div id="menuEmpty" class="empty-state" style="display: none;">
                     <div class="material-icons">restaurant</div>
                     <p>この日のメニューはまだ設定されていません</p>
@@ -603,9 +595,7 @@ $user = $authManager->getCurrentUser();
         let selectedMenu = null;
         let quantity = 1;
         let availableDates = [];
-        let menusDaily = [];
-        let menusStandard = [];
-        let currentMenuTab = 'daily';
+        let allMenus = [];
         
         // ページ読み込み時の処理
         document.addEventListener('DOMContentLoaded', function() {
@@ -684,10 +674,12 @@ $user = $authManager->getCurrentUser();
                 console.log('Menu API response:', result);
 
                 if (result.success) {
-                    menusDaily = result.data.daily || [];
-                    menusStandard = result.data.standard || [];
-                    console.log('Daily menus:', menusDaily);
-                    console.log('Standard menus:', menusStandard);
+                    // 日替わりと定番を統合
+                    const dailyMenus = result.data.daily || [];
+                    const standardMenus = result.data.standard || [];
+                    allMenus = [...dailyMenus, ...standardMenus];
+
+                    console.log('All menus:', allMenus);
                     renderMenus();
                 }
             } catch (error) {
@@ -698,32 +690,19 @@ $user = $authManager->getCurrentUser();
         
         // メニューを表示
         function renderMenus() {
-            // 日替わりメニュー
-            const dailyList = document.getElementById('menuListDaily');
-            dailyList.innerHTML = '';
-            
-            if (menusDaily.length > 0) {
-                menusDaily.forEach(menu => {
-                    dailyList.appendChild(createMenuCard(menu));
+            const menuList = document.getElementById('menuList');
+            menuList.innerHTML = '';
+
+            if (allMenus.length > 0) {
+                allMenus.forEach(menu => {
+                    menuList.appendChild(createMenuCard(menu));
                 });
-            }
-            
-            // 定番メニュー
-            const standardList = document.getElementById('menuListStandard');
-            standardList.innerHTML = '';
-            
-            if (menusStandard.length > 0) {
-                menusStandard.forEach(menu => {
-                    standardList.appendChild(createMenuCard(menu));
-                });
-            }
-            
-            // 表示切り替え
-            document.getElementById('menuLoading').style.display = 'none';
-            
-            if (menusDaily.length > 0 || menusStandard.length > 0) {
-                switchMenuTab('daily');
+
+                // 表示切り替え
+                document.getElementById('menuLoading').style.display = 'none';
+                document.getElementById('menuList').style.display = 'block';
             } else {
+                document.getElementById('menuLoading').style.display = 'none';
                 document.getElementById('menuEmpty').style.display = 'block';
             }
         }
@@ -769,23 +748,6 @@ $user = $authManager->getCurrentUser();
 
             // 次へボタンを有効化
             document.getElementById('nextBtn').disabled = false;
-        }
-        
-        // メニュータブ切り替え
-        function switchMenuTab(tab, clickEvent) {
-            currentMenuTab = tab;
-
-            // タブボタンの状態更新
-            document.querySelectorAll('.menu-tab').forEach(btn => {
-                btn.classList.remove('active');
-                if (btn.getAttribute('data-tab') === tab) {
-                    btn.classList.add('active');
-                }
-            });
-
-            // メニュー表示切り替え
-            document.getElementById('menuListDaily').style.display = (tab === 'daily') ? 'block' : 'none';
-            document.getElementById('menuListStandard').style.display = (tab === 'standard') ? 'block' : 'none';
         }
         
         // 数量変更
