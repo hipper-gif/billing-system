@@ -159,8 +159,9 @@ class SmileyInvoicePDF {
         $notesHtml = '';
         if (!empty($notes)) {
             $notesHtml = "
-            <div style=\"margin-top: 20px; padding: 10px; background-color: {$brandLightGray}; border-left: 4px solid {$brandOrange};\">
-                <strong>備考:</strong> {$notes}
+            <div style=\"margin-top: 25px; padding: 15px; background-color: {$brandLightGray}; border-left: 4px solid {$brandGreen};\">
+                <div style=\"font-weight: bold; font-size: 11pt; margin-bottom: 8px; color: {$brandGray};\">備考</div>
+                <div style=\"font-size: 10pt; line-height: 1.6;\">{$notes}</div>
             </div>";
         }
 
@@ -174,32 +175,43 @@ class SmileyInvoicePDF {
             font-family: 'DejaVu Sans', sans-serif;
             color: {$brandGray};
             font-size: 10pt;
+            line-height: 1.4;
         }
         .header {
-            margin-bottom: 20px;
-            border-bottom: 2px solid {$brandGreen};
-            padding-bottom: 10px;
+            margin-bottom: 25px;
+            border-bottom: 3px solid {$brandGreen};
+            padding-bottom: 15px;
         }
         .invoice-title {
-            font-size: 24pt;
+            font-size: 28pt;
             font-weight: bold;
             color: {$brandGreen};
+            letter-spacing: 2px;
         }
         .invoice-number {
-            font-size: 12pt;
+            font-size: 11pt;
+            color: {$brandGray};
+            margin-top: 8px;
+        }
+        .section-title {
+            font-size: 11pt;
             font-weight: bold;
             color: {$brandGray};
-            margin-top: 5px;
+            margin-bottom: 8px;
+            padding-bottom: 3px;
+            border-bottom: 1px solid #ddd;
         }
         .info-box {
             background-color: {$brandLightGray};
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
+            padding: 12px;
+            margin: 15px 0;
+            border-left: 4px solid {$brandGreen};
         }
         .info-label {
             font-weight: bold;
             color: {$brandGray};
+            display: inline-block;
+            min-width: 80px;
         }
         table {
             width: 100%;
@@ -209,31 +221,64 @@ class SmileyInvoicePDF {
         th {
             background-color: {$brandGreen};
             color: white;
-            padding: 10px;
+            padding: 12px 8px;
             text-align: left;
             font-weight: bold;
+            font-size: 10pt;
+        }
+        td {
+            padding: 10px 8px;
         }
         .total-section {
-            margin-top: 20px;
-            text-align: right;
+            margin-top: 25px;
         }
-        .total-row {
-            padding: 5px 0;
-        }
-        .grand-total {
-            font-size: 14pt;
-            font-weight: bold;
-            color: {$brandGreen};
-            border-top: 2px solid {$brandGreen};
-            padding-top: 10px;
+        .total-box {
+            background-color: {$brandLightGray};
+            border: 2px solid {$brandGreen};
+            padding: 20px;
             margin-top: 10px;
         }
+        .total-label {
+            font-size: 14pt;
+            font-weight: bold;
+            color: {$brandGray};
+            display: inline-block;
+            margin-right: 30px;
+        }
+        .total-amount {
+            font-size: 20pt;
+            font-weight: bold;
+            color: {$brandGreen};
+            display: inline-block;
+            min-width: 180px;
+            text-align: right;
+        }
+        .payment-box {
+            margin-top: 25px;
+            padding: 15px;
+            background-color: #fafafa;
+            border: 1px solid #ddd;
+        }
         .footer {
-            margin-top: 30px;
+            margin-top: 40px;
             padding-top: 15px;
-            border-top: 1px solid {$brandOrange};
+            border-top: 1px solid #ccc;
             font-size: 9pt;
-            color: #666;
+            color: #888;
+            text-align: center;
+        }
+        .company-info {
+            font-size: 9.5pt;
+            line-height: 1.6;
+        }
+        .billing-info {
+            font-size: 10.5pt;
+            line-height: 1.6;
+        }
+        .billing-company {
+            font-size: 13pt;
+            font-weight: bold;
+            margin-bottom: 5px;
         }
     </style>
 </head>
@@ -242,31 +287,35 @@ class SmileyInvoicePDF {
     <div class=\"header\">
         <table style=\"border: none; margin: 0;\">
             <tr>
-                <td style=\"width: 30%; border: none;\">
+                <td style=\"width: 40%; border: none; vertical-align: middle;\">
                     {$logoHtml}
                 </td>
-                <td style=\"width: 70%; text-align: right; border: none;\">
-                    <div class=\"invoice-title\">📄 請求書</div>
-                    <div class=\"invoice-number\">No: {$invoiceNumber}</div>
+                <td style=\"width: 60%; text-align: right; border: none; vertical-align: middle;\">
+                    <div class=\"invoice-title\">請求書</div>
+                    <div class=\"invoice-number\">請求書番号: {$invoiceNumber}</div>
                 </td>
             </tr>
         </table>
     </div>
 
     <!-- 発行者・請求先情報 -->
-    <table style=\"border: none; margin-bottom: 20px;\">
+    <table style=\"border: none; margin-bottom: 25px;\">
         <tr>
-            <td style=\"width: 50%; vertical-align: top; border: none;\">
-                <div style=\"margin-bottom: 5px;\"><strong>🏢 【発行者】</strong></div>
-                <div>{$this->companyInfo['company_name']}</div>
-                <div>📍 {$this->companyInfo['address']}</div>
-                <div>☎ {$this->companyInfo['phone']}</div>
-                <div>✉ {$this->companyInfo['email']}</div>
+            <td style=\"width: 50%; vertical-align: top; border: none; padding-right: 20px;\">
+                <div class=\"section-title\">発行者</div>
+                <div class=\"company-info\">
+                    <div style=\"font-weight: bold; margin-bottom: 5px;\">{$this->companyInfo['company_name']}</div>
+                    <div>{$this->companyInfo['address']}</div>
+                    <div>TEL: {$this->companyInfo['phone']}</div>
+                    <div>E-mail: {$this->companyInfo['email']}</div>
+                </div>
             </td>
-            <td style=\"width: 50%; vertical-align: top; border: none;\">
-                <div style=\"margin-bottom: 5px;\"><strong>📌 【請求先】</strong></div>
-                <div style=\"font-size: 12pt; font-weight: bold;\">{$billingCompany}</div>
-                " . (!empty($billingDepartment) ? "<div>{$billingDepartment}</div>" : "") . "
+            <td style=\"width: 50%; vertical-align: top; border: none; padding-left: 20px;\">
+                <div class=\"section-title\">請求先</div>
+                <div class=\"billing-info\">
+                    <div class=\"billing-company\">{$billingCompany} 御中</div>
+                    " . (!empty($billingDepartment) ? "<div>{$billingDepartment}</div>" : "") . "
+                </div>
             </td>
         </tr>
     </table>
@@ -275,23 +324,29 @@ class SmileyInvoicePDF {
     <div class=\"info-box\">
         <table style=\"border: none; margin: 0;\">
             <tr>
-                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">📅 発行日:</span> {$issueDate}</td>
-                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">⏰ 支払期限:</span> {$dueDate}</td>
-                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">📆 請求期間:</span> {$periodStart} ～ {$periodEnd}</td>
-                <td style=\"border: none; width: 25%;\"><span class=\"info-label\">📋 タイプ:</span> {$invoiceType}</td>
+                <td style=\"border: none; width: 33%;\">
+                    <span class=\"info-label\">発行日:</span> {$issueDate}
+                </td>
+                <td style=\"border: none; width: 34%;\">
+                    <span class=\"info-label\">お支払期限:</span> <strong>{$dueDate}</strong>
+                </td>
+                <td style=\"border: none; width: 33%;\">
+                    <span class=\"info-label\">請求期間:</span> {$periodStart} ～ {$periodEnd}
+                </td>
             </tr>
         </table>
     </div>
 
     <!-- 明細テーブル -->
+    <div class=\"section-title\" style=\"margin-top: 25px;\">ご請求明細</div>
     <table>
         <thead>
             <tr>
-                <th style=\"width: 15%; text-align: center;\">注文日</th>
+                <th style=\"width: 15%; text-align: center;\">配達日</th>
                 <th style=\"width: 40%;\">商品名</th>
                 <th style=\"width: 10%; text-align: center;\">数量</th>
-                <th style=\"width: 15%; text-align: right;\">単価</th>
-                <th style=\"width: 20%; text-align: right;\">金額</th>
+                <th style=\"width: 17%; text-align: right;\">単価</th>
+                <th style=\"width: 18%; text-align: right;\">金額</th>
             </tr>
         </thead>
         <tbody>
@@ -301,29 +356,44 @@ class SmileyInvoicePDF {
 
     <!-- 合計金額（税込） -->
     <div class=\"total-section\">
-        <div class=\"grand-total\" style=\"background-color: {$brandLightGray}; padding: 15px; border-radius: 5px;\">
-            <span style=\"margin-right: 30px; font-size: 16pt;\">■ ご請求金額（税込）:</span>
-            <span style=\"display: inline-block; width: 150px; text-align: right; font-size: 18pt;\">¥{$totalAmount}</span>
-        </div>
+        <table style=\"border: none; margin: 0;\">
+            <tr>
+                <td style=\"border: none; width: 60%;\"></td>
+                <td style=\"border: none; width: 40%;\">
+                    <div class=\"total-box\">
+                        <table style=\"border: none; margin: 0; width: 100%;\">
+                            <tr>
+                                <td style=\"border: none; text-align: left; padding: 5px 0;\">
+                                    <span class=\"total-label\">ご請求金額（税込）</span>
+                                </td>
+                                <td style=\"border: none; text-align: right; padding: 5px 0;\">
+                                    <span class=\"total-amount\">¥{$totalAmount}</span>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </td>
+            </tr>
+        </table>
     </div>
 
     <!-- 備考 -->
     {$notesHtml}
 
     <!-- お支払い情報 -->
-    <div style=\"margin-top: 20px; padding: 15px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px;\">
-        <div style=\"font-weight: bold; margin-bottom: 10px;\">💳 お支払い方法</div>
-        <div style=\"font-size: 9pt;\">
-            ⏰ お支払期限: {$dueDate}<br>
-            💡 お支払い方法の詳細については、別途ご連絡いたします。<br>
-            ❓ ご不明な点がございましたら、上記連絡先までお問い合わせください。
+    <div class=\"payment-box\">
+        <div style=\"font-weight: bold; font-size: 11pt; margin-bottom: 10px; color: {$brandGray};\">お支払いについて</div>
+        <div style=\"font-size: 9.5pt; line-height: 1.7;\">
+            ・お支払期限: {$dueDate}<br>
+            ・お支払い方法の詳細については、別途ご連絡いたします。<br>
+            ・ご不明な点がございましたら、上記連絡先までお気軽にお問い合わせください。
         </div>
     </div>
 
     <!-- フッター -->
     <div class=\"footer\">
-        <div style=\"text-align: center;\">
-            Smiley Kitchen - 美味しい配食サービス
+        <div>
+            {$this->companyInfo['company_name']} - 配食サービス
         </div>
     </div>
 </body>
