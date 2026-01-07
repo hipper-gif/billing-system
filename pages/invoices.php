@@ -662,6 +662,7 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
                 html += '<td><span class="badge status-badge status-' + status + '">' + getStatusLabel(status) + '</span></td>';
                 html += '<td class="text-center action-buttons">';
                 html += '<button type="button" class="btn btn-outline-primary btn-action me-1" onclick="showInvoiceDetail(' + invoice.id + ')" title="詳細"><i class="fas fa-eye"></i></button>';
+                html += '<a href="../api/invoices.php?action=pdf&invoice_id=' + invoice.id + '" target="_blank" class="btn btn-outline-success btn-action me-1" title="PDF"><i class="fas fa-file-pdf"></i></a>';
                 html += '<button type="button" class="btn btn-outline-warning btn-action me-1" onclick="showStatusUpdate(' + invoice.id + ', \'' + status + '\')" title="ステータス変更"><i class="fas fa-edit"></i></button>';
                 html += '<button type="button" class="btn btn-outline-danger btn-action" onclick="showDeleteConfirm(' + invoice.id + ', \'' + (invoice.invoice_number || '') + '\')" title="削除"><i class="fas fa-trash"></i></button>';
                 html += '</td>';
@@ -974,7 +975,7 @@ $pageTitle = '請求書一覧 - Smiley配食事業システム';
         // PDF ダウンロード
         document.getElementById('downloadPDF').addEventListener('click', function() {
             if (currentInvoiceId) {
-                alert('PDF機能は今後実装予定です。');
+                window.open('../api/invoices.php?action=pdf&invoice_id=' + currentInvoiceId, '_blank');
             }
         });
     </script>

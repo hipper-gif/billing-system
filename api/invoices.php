@@ -246,17 +246,17 @@ function getInvoiceDetail() {
     
     // 明細取得（invoice_detailsテーブルが存在する場合）
     try {
-        $detailSQL = "SELECT 
+        $detailSQL = "SELECT
                         id,
-                        delivery_date,
+                        order_date,
                         user_name,
                         product_name,
                         quantity,
                         unit_price,
-                        total_amount
+                        amount as total_amount
                       FROM invoice_details
                       WHERE invoice_id = ?
-                      ORDER BY delivery_date, user_name";
+                      ORDER BY order_date, user_name";
         
         $invoice['details'] = $db->fetchAll($detailSQL, [$invoiceId]);
     } catch (Exception $e) {
