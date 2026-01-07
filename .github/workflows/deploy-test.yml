@@ -32,24 +32,6 @@ jobs:
         # 必要なディレクトリを作成
         mkdir -p uploads temp logs cache
 
-        # uploads用の.htaccessを作成（セキュリティ対策）
-        cat > uploads/.htaccess << 'EOF'
-Require all denied
-EOF
-
-        # ルートの.htaccessファイルを作成
-        cat > .htaccess << 'EOF'
-Options -Indexes
-
-<Files ~ "^\.">
-    Require all denied
-</Files>
-
-<Files ~ "config\.php$">
-    Require all denied
-</Files>
-EOF
-        
         echo "✅ デプロイパッケージ作成完了"
         
     - name: Deploy to Test Server via FTP
