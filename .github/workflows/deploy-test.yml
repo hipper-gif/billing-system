@@ -34,9 +34,6 @@ jobs:
 
         # uploads用の.htaccessを作成（セキュリティ対策）
         cat > uploads/.htaccess << 'EOF'
-# Disable PHP execution in uploads directory
-php_flag engine off
-AddType text/plain .php .php3 .phtml .pht
 Require all denied
 EOF
 
@@ -51,11 +48,6 @@ Options -Indexes
 <Files ~ "config\.php$">
     Require all denied
 </Files>
-
-php_value upload_max_filesize 10M
-php_value post_max_size 10M
-php_value max_execution_time 300
-php_value memory_limit 256M
 EOF
         
         echo "✅ デプロイパッケージ作成完了"

@@ -1,4 +1,1 @@
-# Disable PHP execution in uploads directory
-php_flag engine off
-AddType text/plain .php .php3 .phtml .pht
 Require all denied
