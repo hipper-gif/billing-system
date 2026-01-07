@@ -112,7 +112,7 @@ class SmileyInvoiceGenerator {
         $invoices = [];
         
         if (empty($companyIds)) {
-            $sql = "SELECT DISTINCT company_name FROM orders WHERE delivery_date >= ? AND delivery_date <= ?";
+            $sql = "SELECT DISTINCT company_name FROM orders WHERE order_date >= ? AND order_date <= ?";
             $companies = $this->db->fetchAll($sql, [$periodStart, $periodEnd]);
             $companyNames = array_column($companies, 'company_name');
         } else {
@@ -149,8 +149,8 @@ class SmileyInvoiceGenerator {
         $invoices = [];
         
         if (empty($departmentIds)) {
-            $sql = "SELECT DISTINCT company_name, department_name FROM orders 
-                    WHERE delivery_date >= ? AND delivery_date <= ? AND department_name IS NOT NULL";
+            $sql = "SELECT DISTINCT company_name, department_name FROM orders
+                    WHERE order_date >= ? AND order_date <= ? AND department_name IS NOT NULL";
             $departments = $this->db->fetchAll($sql, [$periodStart, $periodEnd]);
         } else {
             $sql = "SELECT c.company_name, d.department_name 
@@ -188,8 +188,8 @@ class SmileyInvoiceGenerator {
         $invoices = [];
         
         if (empty($userIds)) {
-            $sql = "SELECT DISTINCT user_id, user_code, user_name FROM orders 
-                    WHERE delivery_date >= ? AND delivery_date <= ?";
+            $sql = "SELECT DISTINCT user_id, user_code, user_name FROM orders
+                    WHERE order_date >= ? AND order_date <= ?";
             $users = $this->db->fetchAll($sql, [$periodStart, $periodEnd]);
         } else {
             $sql = "SELECT id as user_id, user_code, user_name FROM users WHERE id IN (" . implode(',', array_map('intval', $userIds)) . ")";
@@ -224,7 +224,7 @@ class SmileyInvoiceGenerator {
     private function generateMixedInvoices($periodStart, $periodEnd, $dueDate) {
         $invoices = [];
         
-        $sql = "SELECT DISTINCT company_name FROM orders WHERE delivery_date >= ? AND delivery_date <= ?";
+        $sql = "SELECT DISTINCT company_name FROM orders WHERE order_date >= ? AND order_date <= ?";
         $companies = $this->db->fetchAll($sql, [$periodStart, $periodEnd]);
         
         foreach ($companies as $company) {
@@ -339,7 +339,7 @@ class SmileyInvoiceGenerator {
                 $this->db->execute($detailSql, [
                     $invoiceId,
                     $order['id'] ?? null,
-                    $order['delivery_date'] ?? $order['order_date'] ?? null,
+                    $order['order_date'] ?? null,
                     $order['product_code'] ?? '',
                     $order['product_name'] ?? '商品名不明',
                     $order['quantity'] ?? 0,
@@ -359,33 +359,33 @@ class SmileyInvoiceGenerator {
     }
     
     private function getOrdersByCompanyName($companyName, $periodStart, $periodEnd) {
-        $sql = "SELECT * FROM orders 
-                WHERE company_name = ? 
-                AND delivery_date >= ? 
-                AND delivery_date <= ?
-                ORDER BY delivery_date, user_name";
-        
+        $sql = "SELECT * FROM orders
+                WHERE company_name = ?
+                AND order_date >= ?
+                AND order_date <= ?
+                ORDER BY order_date, user_name";
+
         return $this->db->fetchAll($sql, [$companyName, $periodStart, $periodEnd]);
     }
     
     private function getOrdersByDepartmentName($companyName, $departmentName, $periodStart, $periodEnd) {
-        $sql = "SELECT * FROM orders 
-                WHERE company_name = ? 
+        $sql = "SELECT * FROM orders
+                WHERE company_name = ?
                 AND department_name = ?
-                AND delivery_date >= ? 
-                AND delivery_date <= ?
-                ORDER BY delivery_date, user_name";
-        
+                AND order_date >= ?
+                AND order_date <= ?
+                ORDER BY order_date, user_name";
+
         return $this->db->fetchAll($sql, [$companyName, $departmentName, $periodStart, $periodEnd]);
     }
     
     private function getOrdersByUserId($userId, $periodStart, $periodEnd) {
-        $sql = "SELECT * FROM orders 
-                WHERE user_id = ? 
-                AND delivery_date >= ? 
-                AND delivery_date <= ?
-                ORDER BY delivery_date";
-        
+        $sql = "SELECT * FROM orders
+                WHERE user_id = ?
+                AND order_date >= ?
+                AND order_date <= ?
+                ORDER BY order_date";
+
         return $this->db->fetchAll($sql, [$userId, $periodStart, $periodEnd]);
     }
     
