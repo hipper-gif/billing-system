@@ -352,9 +352,10 @@ class SmileyInvoiceGenerator {
                     continue;
                 }
 
+                // ★修正: order_date が '0000-00-00' の場合は period_start を使用
                 if ($orderDate === null || $orderDate === '' || $orderDate === '0000-00-00') {
-                    error_log("WARNING: Order #{$orderId} has invalid order_date: '{$orderDate}'. Skipping.");
-                    continue;
+                    error_log("WARNING: Order #{$orderId} has invalid order_date: '{$orderDate}'. Using period_start instead: {$periodStart}");
+                    $orderDate = $periodStart;
                 }
 
                 $detailSql = "INSERT INTO invoice_details (
