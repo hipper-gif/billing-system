@@ -325,11 +325,38 @@ class SmileyInvoiceGenerator {
         
         $this->db->execute($sql, $params);
         $invoiceId = $this->db->lastInsertId();
-        
+
         // 明細データ挿入
         $detailCount = 0;
-        foreach ($orders as $order) {
+        $totalOrders = count($orders);
+
+        error_log("======================================");
+        error_log("Starting invoice detail insertion for Invoice #{$invoiceId}");
+        error_log("Total orders to insert: {$totalOrders}");
+        error_log("First order sample: " . json_encode($orders[0] ?? []));
+        error_log("======================================");
+
+        foreach ($orders as $index => $order) {
             try {
+                // デバッグ: 各フィールドの値を確認
+                $orderId = $order['id'] ?? null;
+                $orderDate = $order['order_date'] ?? null;
+                $productCode = $order['product_code'] ?? '';
+                $productName = $order['product_name'] ?? '商品名不明';
+                $quantity = $order['quantity'] ?? 0;
+                $unitPrice = $order['unit_price'] ?? 0;
+                $amount = $order['total_amount'] ?? 0;
+
+                if ($orderId === null) {
+                    error_log("WARNING: Order #{$index} has NULL id! Skipping. Order data: " . json_encode($order));
+                    continue;
+                }
+
+                if ($orderDate === null || $orderDate === '' || $orderDate === '0000-00-00') {
+                    error_log("WARNING: Order #{$orderId} has invalid order_date: '{$orderDate}'. Skipping.");
+                    continue;
+                }
+
                 $detailSql = "INSERT INTO invoice_details (
                                 invoice_id, order_id, order_date,
                                 product_code, product_name,
@@ -338,22 +365,25 @@ class SmileyInvoiceGenerator {
 
                 $this->db->execute($detailSql, [
                     $invoiceId,
-                    $order['id'] ?? null,
-                    $order['order_date'] ?? null,
-                    $order['product_code'] ?? '',
-                    $order['product_name'] ?? '商品名不明',
-                    $order['quantity'] ?? 0,
-                    $order['unit_price'] ?? 0,
-                    $order['total_amount'] ?? 0
+                    $orderId,
+                    $orderDate,
+                    $productCode,
+                    $productName,
+                    $quantity,
+                    $unitPrice,
+                    $amount
                 ]);
                 $detailCount++;
             } catch (Exception $e) {
-                error_log("Invoice detail insertion failed for order " . ($order['id'] ?? 'unknown') . ": " . $e->getMessage());
-                error_log("Order data: " . json_encode($order));
+                error_log("ERROR: Invoice detail insertion failed for order " . ($order['id'] ?? 'unknown') . ": " . $e->getMessage());
+                error_log("ERROR: SQL Error Code: " . ($e->getCode() ?? 'N/A'));
+                error_log("ERROR: Full order data: " . json_encode($order));
             }
         }
 
-        error_log("Invoice #{$invoiceId}: Inserted {$detailCount} of " . count($orders) . " order details");
+        error_log("======================================");
+        error_log("Invoice #{$invoiceId}: Successfully inserted {$detailCount} of {$totalOrders} order details");
+        error_log("======================================");
         
         return $invoiceId;
     }
